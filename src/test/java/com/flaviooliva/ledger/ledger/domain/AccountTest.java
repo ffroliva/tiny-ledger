@@ -117,11 +117,14 @@ class AccountTest {
 
     @Test
     void balanceIsOnlyEverComputedFromEvents() {
-        Account account = openedWith(0);
-        List<LedgerEvent> history =
-                new ArrayList<>(Account.open(account.id(), new OpenAccount("alice", "ACC-001", GBP), T));
-        // rehydrating twice from the same history yields identical state
-        assertThat(Account.rehydrate(history).balance())
-                .isEqualTo(Account.rehydrate(history).balance());
+        // a freshly opened account has no movements, so its balance is zero
+        assertThat(openedWith(0).balance()).isEqualTo(new Money(GBP, 0));
+
+        // every subsequent balance is derived from the movement events alone
+        List<LedgerEvent> history = historyWith(5_000);
+        AccountId id = history.getFirst().accountId();
+        history.addAll(Account.rehydrate(history)
+                .deposit(new Deposit("alice", id, UUID.randomUUID(), new Money(GBP, 2_500), null), T));
+        assertThat(Account.rehydrate(history).balance()).isEqualTo(new Money(GBP, 7_500));
     }
 }
