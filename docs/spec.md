@@ -177,22 +177,20 @@ combination is: *module at the top level, layers inside each module.*
 
 ```
 com.flaviooliva.ledger
-├── shared/                              ← open module
-├── ledger/                              ← closed module
+├── shared/                              ← open module: Money, AccountId, Currency
+├── ledger/                              ← closed module — the write side
 │   ├── package-info.java                ← @ApplicationModule, allowedDependencies
 │   ├── domain/                          ← zero framework imports. Enforced by ArchUnit.
 │   │   ├── Account.java                 ← aggregate root
 │   │   ├── LedgerEvent.java             ← sealed interface + record variants
 │   │   └── policy/OverdraftPolicy.java
 │   ├── application/
-│   │   ├── port/in/                     ← inbound ports (use-case contracts)
+│   │   ├── port/in/                     ← inbound ports — commands only; queries live in `balance`
 │   │   │   ├── OpenAccountUseCase.java
-│   │   │   ├── RecordMovementUseCase.java
-│   │   │   └── QueryBalanceUseCase.java
+│   │   │   └── RecordMovementUseCase.java
 │   │   ├── port/out/                    ← outbound ports (capabilities the app needs)
 │   │   │   ├── EventStorePort.java
 │   │   │   ├── EventPublisherPort.java
-│   │   │   ├── BalanceCachePort.java
 │   │   │   ├── ClockPort.java
 │   │   │   └── IdGeneratorPort.java
 │   │   └── usecase/                     ← plain classes; orchestration only
@@ -203,8 +201,27 @@ com.flaviooliva.ledger
 │       └── out/
 │           ├── inmemory/InMemoryEventStore.java
 │           ├── postgres/PostgresEventStore.java
-│           ├── kafka/KafkaEventPublisher.java
+│           └── kafka/KafkaEventPublisher.java   ← EventPublisherPort in `full` mode — Kafka seam #1
+├── balance/                             ← closed module — the read side; the other half of CQRS
+│   ├── application/
+│   │   ├── port/in/                     ← queries only
+│   │   │   ├── QueryBalanceUseCase.java
+│   │   │   └── QueryHistoryUseCase.java
+│   │   ├── port/out/
+│   │   │   ├── BalanceProjectionPort.java   ← never touches the aggregate (§4.0)
+│   │   │   └── BalanceCachePort.java
+│   │   └── projection/BalanceProjector.java ← @ApplicationModuleListener on `ledger` events
+│   └── adapter/
+│       ├── in/web/BalanceController.java    ← read-side API, same generated OpenAPI interface
+│       └── out/
+│           ├── inmemory/… · postgres/…      ← projection store per run mode
 │           └── redis/RedisBalanceCache.java
+├── audit/                               ← closed module — consumes via Kafka, deliberately (§4.3)
+│   ├── application/                     ← QueryAuditTrailUseCase, AuditTrailStorePort
+│   └── adapter/
+│       ├── in/kafka/AuditEventConsumer.java ← Kafka seam #2 — the module→service extraction seam
+│       └── in/web/AuditController.java      ← auditor-facing API (`ledger:auditor`, §6.4)
+├── notification/                        ← closed module — in-process listener, log/webhook adapter
 └── config/                              ← composition root (§4.5)
 ```
 
