@@ -454,6 +454,12 @@ in-memory bucket.
 Exceeding returns `429` with `Retry-After` and a `RateLimitExceeded` problem detail. Limits are
 configuration, not constants.
 
+Two production details the naive version gets wrong. **Client IP is `getRemoteAddr()`, never a raw
+`X-Forwarded-For`** — the forwarded-header strategy is enabled only when a trusted proxy fronts the
+app and that proxy overwrites the header; an unconfigured deployment must not let clients spoof
+their way past the per-IP bucket. And **per-IP buckets live in a bounded, expiring store** (Caffeine
+in `standalone`, Redis TTL in `full`) so unauthenticated traffic cannot grow memory without bound.
+
 ### 6.2 Caching
 
 | Cache | Store | TTL | Invalidation |
@@ -525,7 +531,8 @@ can reference them. Ownership binds the JWT subject to the `accountUid`.
 
 ### 6.5 Error handling
 
-RFC 7807 `ProblemDetail` throughout, via Spring's built-in support.
+RFC 7807 `ProblemDetail` throughout, via Spring's built-in support
+(`spring.mvc.problemdetails.enabled=true`).
 
 | Condition | Status | `type` |
 |---|---|---|
