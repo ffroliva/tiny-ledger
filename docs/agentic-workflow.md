@@ -223,6 +223,21 @@ mypy, hatchling, PEP 735 dependency groups, ruff pinned exactly. Not because eac
 correct, but because a second house style in the same estate is a maintenance tax with no offsetting
 benefit. Consistency is a decision, and this is it.
 
+**Decision: hold the scope; move the deadline.** The submission window is self-imposed — nothing
+fixes it except the interview slot chosen after it. When the spec's scope collided with a two-day
+window, the instruction was explicit: the scope stands, the schedule bends. Recorded because the
+reflex under deadline pressure is to cut quietly, and a cut here would remove exactly the surface
+this submission exists to demonstrate. The brief-compliant path is already protected by the dual
+run mode; reducing scope would have hedged a hedge.
+
+**Decision: Starling Bank's public API is the reference model for the API surface.** Convention
+questions — resource naming, money representation, identifier style, error shape, idempotency
+mechanics — are settled by precedent rather than taste: adopt Starling's answer where it fits a
+ledger, adapt it where it doesn't, and record the divergence. A public banking API that survives
+third-party integration is a stronger authority than in-house preference, and it turns every API
+review argument into a citation. The adoption level is decided per convention in the `api-design`
+pass over spec §6–§7, not wholesale.
+
 ---
 
 ## 7. How to audit any of this
