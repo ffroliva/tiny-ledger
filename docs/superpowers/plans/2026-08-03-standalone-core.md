@@ -177,6 +177,7 @@ git commit -m "docs: Diátaxis scaffold and governance baseline (spec §14 step 
 
 **Files:**
 - Create: `pom.xml`, Maven wrapper (`mvn wrapper:wrapper -Dmaven=3.9.9` or copy from dr-jskill assets), `.editorconfig`, `.gitattributes` (from `.claude/skills/dr-jskill/assets/`)
+- Create: `.github/workflows/ci.yml` (spec §14 step 1 — CI from the skeleton onward)
 - Create: `src/main/java/com/flaviooliva/ledger/LedgerApplication.java`
 - Create: `package-info.java` for `shared` (open), `ledger`, `balance`, `audit`, `notification`
 - Test: `src/test/java/com/flaviooliva/ledger/architecture/ModulithTest.java`
@@ -310,13 +311,35 @@ class ModulithTest {
 }
 ```
 
-- [ ] **Step 4: Run** `./mvnw -q verify` — Expected: green (empty modules verify trivially; spotless may reformat first: `./mvnw spotless:apply`).
+- [ ] **Step 4: Write `.github/workflows/ci.yml`** — the §12.1 stages Plan 1 can support; later
+tasks and plans extend this file, never replace it:
 
-- [ ] **Step 5: Commit**
+```yaml
+name: ci
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: corretto, java-version: '25', cache: maven }
+      - name: "Stage 1 — lint & format"
+        run: ./mvnw -q spotless:check
+      - name: "Stages 2-3 — compile, unit, JaCoCo gates, architecture"
+        run: ./mvnw -q verify
+      # Stage 6 (docs governance) joins in Task 13; stages 7-12 join in Plans 2-4.
+      - name: "resolve-drift placeholder"
+        run: echo "python CLI drift job lands in Plan 4 (spec §12.1)"
+```
+
+- [ ] **Step 5: Run** `./mvnw -q verify` — Expected: green (empty modules verify trivially; spotless may reformat first: `./mvnw spotless:apply`).
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add pom.xml mvnw mvnw.cmd .mvn .editorconfig .gitattributes src CHANGELOG.md
-git commit -m "feat: Maven skeleton, module markers, Modulith verification (spec §14 step 1)"
+git add pom.xml mvnw mvnw.cmd .mvn .editorconfig .gitattributes .github src CHANGELOG.md
+git commit -m "feat: Maven skeleton, module markers, Modulith verification, CI (spec §14 step 1)"
 ```
 
 ---
@@ -1552,6 +1575,10 @@ each scenario's Given/When/Then asserts exactly its catalogue row (§9.3) — P6
 - Modify: `CHANGELOG.md`, `docs/INDEX.md`, `docs/governance-baseline.md` (prune items the scaffold now satisfies)
 
 - [ ] **Step 1:** Write README; run its curl block against a running app by hand — every command must work as pasted (§8.3's promise; the extracted-runner lands in Plan 4).
+- [ ] **Step 1b:** Extend `.github/workflows/ci.yml` with the now-supported stages: a
+`"Stage 6 — docs governance"` step running `python scripts/ci/check_docs_governance.py` after the
+verify step (stages 4–5, contract + BDD, already run inside `./mvnw verify` via the generator and
+Cucumber's JUnit engine — add a comment saying so).
 - [ ] **Step 2:** `python scripts/ci/check_docs_governance.py` — expected: fewer known items than baseline, 0 new; prune the baseline accordingly.
 - [ ] **Step 3:** `./mvnw -q verify` one final time.
 - [ ] **Step 4: Commit** — `git commit -am "docs: README quickstart, changelog, governance baseline pruned (plan 1 complete)"`
