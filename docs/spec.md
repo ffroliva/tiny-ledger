@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.1
+**Version:** 3.2
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -211,7 +211,7 @@ com.flaviooliva.ledger
 │       └── out/
 │           ├── inmemory/InMemoryEventStore.java
 │           ├── postgres/PostgresEventStore.java
-│           └── kafka/KafkaEventPublisher.java   ← EventPublisherPort in `full` mode — Kafka seam #1
+│           └── spring/SpringEventPublisher.java  ← EventPublisherPort, both modes; Kafka is `@Externalized`, no adapter (§4.3)
 ├── balance/                             ← closed module — the read side; the other half of CQRS
 │   ├── application/
 │   │   ├── port/in/                     ← queries only
@@ -230,7 +230,7 @@ com.flaviooliva.ledger
 ├── audit/                               ← closed module — consumes via Kafka, deliberately (§4.3)
 │   ├── application/                     ← RecordAuditEntryUseCase, QueryAuditTrailUseCase, AuditTrailStorePort
 │   └── adapter/
-│       ├── in/kafka/AuditEventConsumer.java ← Kafka seam #2 — the module→service extraction seam
+│       ├── in/kafka/AuditEventConsumer.java ← the Kafka consumer — the module→service extraction seam
 │       └── in/web/AuditController.java      ← auditor-facing API (`ledger:auditor`, §6.4)
 ├── notification/                        ← closed module — threshold/rejection rules, log-entry adapter (§3)
 ├── platform/                            ← not a module — security, rate limiting, observability (§3)
@@ -285,7 +285,8 @@ ports.** CQRS chooses *which* path; hexagonal governs the direction of every arr
 Neither wraps the other.
 
 The read side owning its own controller follows directly. `GET /api/v1/accounts/{accountUid}/balance` is served
-by an adapter inside `balance`, not by the `ledger` module reaching across a closed boundary.
+by an adapter inside `balance` — except the strong-read mapping, which §4.4 assigns to `ledger` and
+disambiguates with a request-mapping `params` condition. Neither module reaches across the boundary.
 
 ```mermaid
 flowchart TB
@@ -452,7 +453,9 @@ the aggregate and answers from the authoritative stream. `balance` never touches
 `ledger` never touches the projection — §4.0's rule stays intact for the read module; the exception
 lives where the authority lives. It is deliberately the expensive path (full replay, no cache):
 only the write side can promise read-your-writes, and pricing it honestly is what keeps the
-projection the default.
+projection the default. Routing is explicit, never ambiguous: `ledger`'s mapping carries Spring's
+`params = "consistency=strong"` condition, `balance`'s handles the parameterless default — one
+path, two disambiguated mappings, each inside its owning module.
 
 ### 4.5 Composition root — the mechanism behind the two run modes
 
@@ -471,7 +474,6 @@ annotation entering the application layer (§9.2 forbids them there).
 @Profile("standalone")
 class StandaloneAdapterConfig {
     @Bean EventStorePort eventStore()          { return new InMemoryEventStore(); }
-    @Bean EventPublisherPort publisher(ApplicationEventPublisher p) { return new SpringEventPublisher(p); }
     @Bean BalanceCachePort balanceCache()      { return new MapBalanceCache(); }
     @Bean ClockPort clock()                    { return Instant::now; }
     @Bean IdGeneratorPort ids()                { return UUID::randomUUID; }
@@ -479,10 +481,13 @@ class StandaloneAdapterConfig {
 
 @Configuration
 @Profile("full")
-class FullAdapterConfig { /* Postgres, Kafka, Redis equivalents */ }
+class FullAdapterConfig { /* Postgres and Redis equivalents; no Kafka publisher — §4.3 */ }
 
 @Configuration
 class UseCaseConfig {                                   // profile-independent
+    @Bean EventPublisherPort publisher(ApplicationEventPublisher p) {
+        return new SpringEventPublisher(p);             // single implementation, both modes (§4.3)
+    }
     @Bean RecordMovementUseCase recordMovement(
             EventStorePort store, EventPublisherPort publisher,
             ClockPort clock, IdGeneratorPort ids) {
@@ -760,6 +765,9 @@ they fit a ledger; §7.1 records each adoption, adaptation and refusal. Summary:
 | `GET` | `/api/v1/accounts/{accountUid}/events` | Raw event stream. `ledger:auditor` only. |
 | `GET` | `/api/v1/audit/entries` | The audit trail, filterable by account and time range. `ledger:auditor` only. |
 
+The two auditor operations exist in `full` mode only — `audit` consumes via Kafka (§4.3) and the
+role exists only where auth does (§6.4). `standalone` answers them `501`, documented in the README.
+
 Identifiers are UUIDs named `<entity>Uid` — `accountUid`, `depositUid`, `transactionUid` — never
 `id`, never a database key.
 
@@ -1009,8 +1017,9 @@ Steps drive the HTTP API, not internal classes — the specification must not de
 Every scenario below is a committed `.feature` file, tagged **`@standalone`** or **`@full`**.
 Cucumber runs the `@standalone` subset in-process on every push (§12.1 stage 5); pytest-bdd re-runs
 the **entire** catalogue against the composed stack (§9.6), where auth, Kafka and the shared
-limiter actually exist. The auth scenarios (N6–N10), the shared-limiter N9, Kafka's E6 and
-real-Postgres N2 are `@full` by necessity — a mode with no auth cannot assert a `403`.
+limiter actually exist. The auth scenarios (N6–N10), the shared-limiter N9, Kafka's E6, auditor P7,
+restart-persistence E7 and real-Postgres N2 are `@full` by necessity — a mode with no auth cannot
+assert a `403`, and a mode that loses state on restart cannot assert recovery.
 
 **Positive — `deposits.feature`, `withdrawals.feature`, `history.feature`**
 
@@ -1067,7 +1076,7 @@ only honest way to specify eventual consistency.
 
 **N2 is the scenario this whole architecture exists for.** It is the only one that fails on a design
 that stores the balance as a mutable field, and it is the reason for optimistic concurrency on
-`(stream_id, version)` rather than a read-then-write. It runs in the `containers` group against real
+`(stream_id, version)` rather than a read-then-write. It runs at stage 7 (Testcontainers, §12.1) against real
 Postgres, because an in-memory store can pass it for the wrong reason — which is exactly what the
 port contract test in §9.2b is there to rule out.
 
@@ -1094,9 +1103,12 @@ Validation testing covers the boundary: every field constraint, currency mismatc
 zero amounts, non-integer `minorUnits`, malformed JSON, malformed movement UIDs, oversized payload.
 
 ### 9.6 End-to-end
-`docker compose up`, then the **Python CLI (§11) drives real scenarios against the running stack** —
-open account, deposit, withdraw, verify balance, exhaust the rate limit, confirm the 429, replay an
-idempotent request, confirm no double credit. Run in CI on the composed stack.
+`docker compose up`, then two layers against the running stack. **pytest-bdd binds the same
+committed `.feature` files** (§9.3) with step definitions driving the HTTP API through the Python
+CLI's client — the entire catalogue, `@standalone` and `@full` alike, at full depth. Then
+`ledger-cli scenario run` smoke flows: open account, deposit, withdraw, verify balance, exhaust the
+rate limit, confirm the `429`, replay an idempotent request, confirm no double credit. Run in CI on
+the composed stack (§12.1 stage 9).
 
 ### 9.7 Load and performance — Gatling + JMH
 - **Gatling:** ramp to 500 concurrent users; assert p99 write latency < 150 ms, p99 cached read
@@ -1208,7 +1220,7 @@ after the load test.
 | 6 | **Documentation** | `test_docs_governance.py`: artefact presence, the seven ISO markers, no pre-release version strings, every `TODO(25010)` registered, no unlinked SoA gap row. Plus link check, generated-artefact freshness, and the §8.6 docs-travel-with-code prompt | **every push** |
 | 7 | Integration | Testcontainers: Postgres, Kafka, Redis, Keycloak | every push |
 | 8 | Python CLI | `pytest` matrix on **3.11, 3.12, 3.13**; `pyright` strict; `ruff` | on `ledger-cli/**` |
-| 9 | E2E | `docker compose up`, then `ledger-cli scenario run` (§9.6) — **including the README's extracted `curl` examples** (§8.3) | PR + main |
+| 9 | E2E | `docker compose up`, then pytest-bdd over the full catalogue + `ledger-cli scenario run` (§9.6) — **including the README's extracted `curl` examples** (§8.3) | PR + main |
 | 10 | Load | Gatling; p99 write <150 ms, p99 cached read <20 ms, errors <0.1% | main + nightly |
 | 11 | Security | `gitleaks`, `detect-secrets`, Trivy image scan, `dependency-check` | every push |
 | 12 | Publish | Multi-arch image, CycloneDX SBOM, generated module diagrams to `docs/generated/` | main |
@@ -1254,7 +1266,7 @@ Each step ends green and demonstrable.
 | 1 | Skeleton, pom, Modulith verification, CI | `mvn verify` green on an empty module graph |
 | 2 | `shared` + `ledger` domain, in-memory event store | Unit + architecture tests green — no endpoints yet; §5's rule holds |
 | 3 | OpenAPI contract + generated interfaces | Every §7 operation specified; controller drift breaks the build |
-| 4 | Cucumber feature suite + the §7 endpoints on the in-memory store | Every §2 requirement has a green scenario; `standalone` serves every §7 endpoint — counted by reference, not by number, so the count cannot drift |
+| 4 | Cucumber feature suite + the §7 endpoints on the in-memory store | Every §2 requirement has a green scenario; `standalone` serves every §7 endpoint except the two auditor operations (`full`-only: `audit` needs Kafka — step 7 — and the role needs auth — step 8). Membership by reference to §7, never by count |
 | 5 | Postgres event store + Flyway + outbox | Integration tests green on Testcontainers |
 | 6 | Projections + Redis cache + event-driven eviction | Use-case tests assert projection and cache state |
 | 7 | Kafka relay + `audit` module | Audit trail rebuilt from the stream |
@@ -1323,3 +1335,4 @@ council's escalations section is non-empty, it is the canonical list; it is empt
 | 1.0–2.0 | Jul 2026 | Event-Sourced Banking Ledger PoC V2 lineage (superseded) |
 | 3.0 | 2026-08-03 | Full rewrite as the dual-delivery contract |
 | 3.1 | 2026-08-03 | Starling alignment (§7.1) + council round 1: strong-read ownership (§4.4), publication legs (§4.3), ownership mechanism (§2.3/§2.4/§6.4), snapshots cut (§13), notification defined (§3), validation split (§6.5/N4/N5), error catalogue completed, scenario tags, governance markers |
+| 3.2 | 2026-08-03 | Council rounds 2–3 closure: publication residue cleared from §3.1/§4.5, cache swap unified behind the port, accounts projection + P0/N12, strong-read `params` routing, auditor operations `full`-only, §9.6 pytest-bdd contract, transaction decorator, governance baseline, N2 retry-to-terminal, global idempotency lookup, keyset-over-`Pageable` recorded |
