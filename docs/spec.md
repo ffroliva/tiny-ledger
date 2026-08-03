@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.2
+**Version:** 3.3
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -9,7 +9,8 @@
 
 ## 1. Purpose and dual delivery
 
-An event-sourced, double-entry-capable banking ledger, built as a modular monolith and delivered
+An event-sourced banking ledger — single-entry per account, double-entry transfers recorded as the
+next increment (§13) — built as a modular monolith and delivered
 production-ready: containerised, observable, secured, rate-limited, cached, and tested at every
 level from unit to load.
 
@@ -20,12 +21,14 @@ codebase**:
 
 | Mode | Command | What runs | Purpose |
 |---|---|---|---|
-| **`standalone`** (default) | `./mvnw spring-boot:run` | In-memory event store, in-memory cache, no auth, no broker. Binds `127.0.0.1` only; the startup banner prints `AUTH DISABLED (standalone)`. **JDK 25** is the only prerequisite. | Satisfies the take-home brief exactly: clone, one command, curl the APIs. |
+| **`standalone`** (default) | `./mvnw spring-boot:run` | In-memory event store, in-memory cache, no auth, no broker. Binds `127.0.0.1` only; the startup banner prints `AUTH DISABLED (standalone)`. **JDK 25** is the only prerequisite. | The brief's runtime in one command: clone, run, curl the APIs. The scope beyond the brief is a recorded, deliberate choice (`agentic-workflow.md` §6) — an accepted submission risk, not claimed compliance. |
 | **`full`** | `docker compose up` | PostgreSQL, Kafka, Redis, Keycloak, OTel Collector, Prometheus, Grafana, Tempo, Loki. | The production-shaped system. |
 
-Both modes run the **same domain code and the same API**. The difference is which adapter
-implementations are active — which is the point of the hexagonal boundaries in §4. The default mode
-is the submittable artefact; the full mode is the depth story for the follow-up conversation.
+Both modes run the **same domain code and the same core ledger API** — the two auditor operations
+are `full`-only (§7), a declared profile-gated exclusion from parity, not an adapter difference.
+Everything else differs only in which adapters are active — the point of the hexagonal boundaries
+in §4. The default mode is the submittable artefact; the full mode is the depth story for the
+follow-up conversation.
 
 **Fail-closed guard:** `standalone` being the default must never become a fail-open path. If
 full-mode configuration is present while the `standalone` profile is active — an OAuth2
@@ -221,8 +224,9 @@ com.flaviooliva.ledger
 │   │   ├── port/out/
 │   │   │   ├── BalanceProjectionPort.java   ← never touches the aggregate (§4.0)
 │   │   │   └── BalanceCachePort.java
-│   │   └── projection/BalanceProjector.java ← @ApplicationModuleListener on `ledger` events
+│   │   └── projection/BalanceProjector.java ← plain class; applies events via the ports
 │   └── adapter/
+│       ├── in/events/LedgerEventsListener.java  ← @ApplicationModuleListener — the inbound adapter driving the projector
 │       ├── in/web/BalanceController.java    ← read-side API, same generated OpenAPI interface
 │       └── out/
 │           ├── inmemory/… · postgres/…      ← projection store per run mode
@@ -238,7 +242,8 @@ com.flaviooliva.ledger
 ```
 
 **Ports model capabilities, not technologies.** `EventStorePort` exposes
-`append(streamId, expectedVersion, events)` and `read(streamId)` — nothing in that signature reveals
+`append(streamId, expectedVersion, events)`, `read(streamId)` and `findByMovementUid(movementUid)`
+— §6.3's global lookup is part of the port's contract — and nothing in those signatures reveals
 whether the implementation is a `ConcurrentHashMap` or Postgres, which is precisely what makes §1's
 two run modes possible.
 
@@ -315,11 +320,13 @@ infrastructure failure and should not acquire one.
 
 ### 4.1 Write path
 
-1. Command arrives, validated at the boundary.
-2. Movement UID checked **globally**, matching the global unique index (§4.2) — a replay is
+1. Command arrives, validated at the boundary (shape only, §4.6).
+2. Aggregate rehydrated by replaying its event stream; **ownership checked against the caller
+   principal before anything else is answered** — a foreign caller gets the §6.5 refusal, never an
+   idempotency oracle.
+3. Movement UID checked **globally** via `findByMovementUid` (§4.2's unique index) — a replay is
    answered from the existing event, never re-applied; a UID found on a *different* stream is an
    idempotency conflict (§6.3).
-3. Aggregate rehydrated by replaying its event stream.
 4. Command applied; the aggregate emits events or rejects.
 5. Events appended to the store **with an optimistic-concurrency check on stream version**;
    a conflict returns `409` and the caller retries.
@@ -372,12 +379,18 @@ wired through Kafka *deliberately*, as the worked example of the extraction path
 different scaling profile, compliance isolation, and no shared database — the four reasons an audit
 trail is the realistic first module to leave the monolith.
 
-**No hand-rolled outbox poller.** Spring Modulith's event externalisation does exactly this job:
+**No hand-rolled outbox poller.** Spring Modulith's event externalisation does exactly this job —
+declared programmatically in `config`, so the domain records stay annotation-free (§9.2):
 
 ```java
-@Externalized("ledger.events::#{#this.accountId()}")
-public record MoneyWithdrawn(AccountId accountId, Money amount, long version, Instant at)
-        implements LedgerEvent {}
+@Bean
+EventExternalizationConfiguration ledgerEventExternalization() {
+    return EventExternalizationConfiguration.externalizing()
+            .select(event -> event instanceof LedgerEvent)
+            .route(LedgerEvent.class,
+                   e -> RoutingTarget.forTarget("ledger.events").andKey(e.accountId().toString()))
+            .build();
+}
 ```
 
 The publication registry row and the event append commit in one transaction; the externaliser
@@ -406,6 +419,13 @@ row per event×listener, holding completion state; completed rows are removed vi
 `spring.modulith.events.completion-mode=delete`, and the incomplete ones are precisely what E7's
 restart-replay exercises. The Kafka copy is a time-boxed transport buffer. One truth, one outbox,
 one wire — each with its own lifecycle.
+
+**The registry's guarantees are configured, not assumed.**
+`republish-outstanding-events-on-restart=true` is set explicitly — E7 is a test of that property,
+which is off by default. And externalisation is asynchronous after commit, so cross-event *arrival*
+order is not guaranteed even on one partition: the audit consumer is therefore idempotent and
+order-restoring, keyed on `(stream_id, version)` — the same discipline E4/E5 demand of projections
+— and E6's no-gaps-no-duplicates is asserted on the *stored trail*, not on arrival order.
 
 **Where the Kafka code actually lives.** Under hexagonal rules a Kafka consumer is simply another
 *inbound adapter*, no different in kind from the REST controller — and there is one consumer class
@@ -498,8 +518,9 @@ class UseCaseConfig {                                   // profile-independent
 
 **This is the whole trick of §1.** `UseCaseConfig` never changes between modes; only the adapter
 configuration does. The take-home-compliant run and the full production stack execute *the same
-compiled domain and application code*. If a behaviour differs between modes, an adapter is at fault,
-and §9.2b is the test that catches it.
+compiled domain and application code*. If a *core-API* behaviour differs between modes, an adapter
+is at fault, and §9.2b is the test that catches it; the auditor pair's absence in `standalone` is
+the one declared, profile-gated exception (§7).
 
 Auditing the wiring is reading three small files. That is deliberate: dependency wiring scattered across
 sixty `@Component` annotations is a service locator with extra steps, and it is how framework
@@ -555,9 +576,9 @@ The contract precedes the code, in three artefacts, all under version control an
 
 **Rule:** no endpoint is implemented before its OpenAPI operation and its `.feature` scenario exist.
 
-**Requirement IDs:** the scenario IDs *are* the requirement IDs — `REQ-P1`…`REQ-E9` map 1:1 to
-§9.3's catalogue, and the `REQ-NNN` tags §8.2 harvests from tests use exactly these. No second
-numbering scheme exists to drift.
+**Requirement IDs:** the scenario IDs *are* the requirement IDs — `REQ-<scenario-id>` for every
+catalogue row (P0…P8, N1…N12, E1…E9), and the `REQ-NNN` tags §8.2 harvests from tests use exactly
+these. Membership is the catalogue itself, never a range that can drift.
 
 ---
 
@@ -574,6 +595,7 @@ in-memory bucket.
 | Write endpoints, per principal | 100 / minute, burst 20 |
 | Read endpoints, per principal | 1000 / minute |
 | Unauthenticated, per IP | 20 / minute |
+| Any traffic, per IP (backstop) | 300 / minute |
 
 Exceeding returns `429` with `Retry-After` and a `RateLimitExceeded` problem detail. Limits are
 configuration, not constants.
@@ -591,7 +613,9 @@ in `standalone`, Redis TTL in `full`) so unauthenticated traffic cannot grow mem
 | `balance` | Redis | 60 s | Evicted on `MoneyDeposited` / `MoneyWithdrawn` for that account |
 
 One cache, deliberately. Account metadata is immutable after opening (§2.3) — caching what cannot
-change needs no cache — and aggregate snapshots are cut entirely (§13).
+change needs no cache — and aggregate snapshots are cut entirely (§13). The TTL is part of the
+port's contract: `MapBalanceCache` expires entries too — a timestamp check on read, no background
+thread — and the §9.2b suite asserts expiry against both implementations.
 
 The cache sits behind `BalanceCachePort` — `MapBalanceCache` in `standalone`, Redis in `full` — the
 **same** swap mechanism as every other adapter (§4.5), deliberately not a second one via Spring's
@@ -613,8 +637,9 @@ store to drift from it, no header machinery, and no expiry window — an identit
 | Same UID, same payload | `200` with the original result — replayed, never re-applied |
 | Same UID, different payload | `409` `/errors/idempotency-conflict`; the original movement stands |
 
-Lookups are global, matching the index: reusing a UID against a *different account* is a `409`
-idempotency conflict, not a fresh movement. Racing duplicate `PUT`s need no special path — the
+Replays are answered only after ownership of the path account passes (§4.1) — idempotency is never
+an authorisation bypass. Lookups are global, matching the index: reusing a UID against a
+*different account* is a `409` idempotency conflict, not a fresh movement. Racing duplicate `PUT`s need no special path — the
 loser's unique-constraint violation triggers a re-read by UID, which then answers from the table
 above exactly as a sequential replay would.
 
@@ -635,8 +660,10 @@ Keycloak as OAuth2/OIDC provider; the app is a resource server validating JWTs.
 | `ledger:writer` | Record movements on owned accounts |
 | `ledger:auditor` | Read the audit trail across all accounts; no writes |
 
-Method-level `@PreAuthorize` on application services, not only on controllers — authorisation is a
-use-case concern. Ownership is checked against the JWT subject.
+Authorisation wraps the use case, not only the controller — an **authorisation decorator** applied
+in the composition root (§4.5), the same pattern as transactions, because `@PreAuthorize` on an
+application service would put a framework annotation exactly where §9.2 forbids one. Ownership is
+checked against the JWT subject, inside that wrapper, before the use case runs (§4.1).
 
 #### Test users
 
@@ -681,6 +708,7 @@ RFC 7807 `ProblemDetail` throughout, via Spring's built-in support
 | Rate limit exceeded | 429 | `/errors/rate-limit-exceeded` |
 | Unauthenticated | 401 | `/errors/unauthenticated` |
 | Forbidden — wrong role *or* wrong owner | 403 | `/errors/forbidden` |
+| Unknown account | 404 | `/errors/account-not-found` |
 | Event store unreachable | 503 | `/errors/event-store-unavailable`, with `Retry-After` |
 
 Problem responses carry a `traceId` correlating to the tracing backend. No stack traces, no internal
@@ -710,7 +738,7 @@ starts a fresh trace. The result is the classic failure: four disconnected trace
 | Boundary | Loses context because | Fix |
 |---|---|---|
 | `@ApplicationModuleListener` → new thread | Context is thread-local | `ContextPropagatingTaskDecorator` on the Modulith async executor |
-| Event publication registry → retry after restart | The original thread is long gone | Trace id persisted on the publication row; the retry emits a span **linked** to the original |
+| Event publication registry → retry after restart | The original thread is long gone | Trace context travels *inside the event envelope* (a `traceparent` attribute serialised with the event — the registry schema stays stock); the republished delivery emits a span **linked** to the original |
 | Producer → Kafka → consumer | Different process | W3C `traceparent` in Kafka headers; Spring Kafka propagates it both ways |
 
 **Fan-out uses span links, not parent-child.** One write produces `balance`, `notification` and
@@ -906,9 +934,10 @@ Every governed document under `docs/` carries seven literal markers, enforced by
 `Not applicable — [reason]` under a heading is acceptable. **Omitting the heading is not** — silence
 is indistinguishable from an oversight, which is the whole point of the check.
 
-Working papers, routers and registries (`docs/adr/`, `docs/generated/`, `docs/source/`, `INDEX.md`)
-are explicitly exempt: ADRs have their own canonical format and should not be forced into a shape
-built for operational documents.
+Working papers, routers and registries (`docs/adr/`, `docs/generated/`, `docs/source/`,
+`docs/superpowers/`, `INDEX.md`) are explicitly exempt: ADRs, specs-in-progress and implementation
+plans have their own canonical formats and should not be forced into a shape built for operational
+documents.
 
 ### 8.5 Lifecycle
 
@@ -938,8 +967,10 @@ Eight levels. Every level has a distinct question it answers; none is ceremony.
 
 ### 9.1 Unit — JUnit 5 + AssertJ
 Domain in isolation, zero Spring context. `Account` invariants, `Money` arithmetic and rounding,
-event application. Includes a concurrency test asserting the balance never goes negative under
-parallel withdrawals. **Target: 90% line, 85% branch on `domain` packages, enforced by JaCoCo.**
+event application. Concurrency correctness is deliberately *not* claimed here — the aggregate is
+single-threaded by design, and N2 lives at the event store's optimistic-concurrency boundary
+(§9.2b, stage 7), the component that actually enforces it. **Target: 90% line, 85% branch on
+`domain` packages, enforced by JaCoCo.**
 
 ### 9.2 Architecture — ArchUnit + Spring Modulith
 - `ApplicationModules.verify()` — no illegal cross-module access.
@@ -1025,7 +1056,7 @@ assert a `403`, and a mode that loses state on restart cannot assert recovery.
 
 | # | Scenario | Asserts |
 |---|---|---|
-| P0 | `alice` opens an account | `201` + `Location`; `AccountOpened` at version 1 carrying `owner=alice` and the account name; `GET` on the `Location` returns `name`, `currency`, `createdAt`, `owner` |
+| P0 | `alice` opens an account | `201` + `Location`; `AccountOpened` at version 1 carrying `owner=alice` and the account name; `GET` on the `Location` returns `name`, `currency`, `createdAt`, `owner` once the accounts projection converges — awaited (§9.3 method), a projection read like any other |
 | P1 | `alice` deposits 100.00 into `ACC-001` | `201`; balance 100.00; `MoneyDeposited` on the stream at version 2 |
 | P2 | `alice` withdraws 30.00 | `201`; balance 70.00; `MoneyWithdrawn` at version 3 |
 | P3 | `alice` withdraws her exact balance | `201`; balance 0.00. The boundary is allowed — only *exceeding* is refused |
@@ -1095,9 +1126,10 @@ enforcement.
 - Projection lag is reported as a gauge and drives the readiness probe (E9).
 
 ### 9.5 Use-case / validation testing
-One test per use case — commands (§2.4) and queries (§4.0) — asserting the *complete* observable outcome: response, emitted events,
-projection state, audit record, cache state. This is the level that catches "the API returned 201 but
-the projection never updated".
+One test per use case — commands (§2.4) and queries (§4.0) — asserting the *complete* observable
+outcome: response, emitted events, and — awaited with Awaitility, never assumed — projection and
+cache state. The audit record is asserted at §9.4 level, where Kafka exists. This is the level that
+catches "the API returned 201 but the projection never updated".
 
 Validation testing covers the boundary: every field constraint, currency mismatch, negative and
 zero amounts, non-integer `minorUnits`, malformed JSON, malformed movement UIDs, oversized payload.
@@ -1186,7 +1218,9 @@ ledger-cli scenario run rate-limit     # exhausts the bucket, asserts 429
 The CLI is the human boundary: `--amount` takes decimals and converts to minor units before the
 wire; `--account` takes the account *name* and resolves it to an `accountUid` (§7). The CLI also
 generates the movement UID per `deposit`/`withdraw` invocation — which makes its tenacity retries
-safe by construction, since a retried `PUT` carries the same UID (§6.3).
+safe by construction, since a retried `PUT` carries the same UID (§6.3). Name→uid resolution is
+scoped to the caller's own accounts (`GET /api/v1/accounts`), and names are advisory, not unique:
+on ambiguity the CLI errors and lists the candidate `accountUid`s rather than guessing.
 
 Pydantic models are **generated from `openapi.yaml`**, so the CLI cannot drift from the contract
 either.
@@ -1320,13 +1354,14 @@ Domain vocabulary is §2.1's ubiquitous language.
 
 ## Traceability
 
-Scenario IDs are the requirement IDs (`REQ-P1`…`REQ-E9`, §5); §12.1 maps every pipeline stage to
+Scenario IDs are the requirement IDs (`REQ-<scenario-id>`, §5); §12.1 maps every pipeline stage to
 the section it enforces; §10's matrices map ISO clauses to artefacts.
 
 ## Open issues / known gaps
 
-Tracked in the council review reports (`.superpowers/sdd/`) and §15's assumptions. When the
-council's escalations section is non-empty, it is the canonical list; it is empty at this version.
+Tracked in the council review reports (`.superpowers/sdd/`) and §15's assumptions. The council ran
+three rounds against this document; every confirmed finding is closed as of v3.3, and the report
+records the history. When an escalations section is non-empty, it is the canonical list.
 
 ## Revision history
 
@@ -1336,3 +1371,4 @@ council's escalations section is non-empty, it is the canonical list; it is empt
 | 3.0 | 2026-08-03 | Full rewrite as the dual-delivery contract |
 | 3.1 | 2026-08-03 | Starling alignment (§7.1) + council round 1: strong-read ownership (§4.4), publication legs (§4.3), ownership mechanism (§2.3/§2.4/§6.4), snapshots cut (§13), notification defined (§3), validation split (§6.5/N4/N5), error catalogue completed, scenario tags, governance markers |
 | 3.2 | 2026-08-03 | Council rounds 2–3 closure: publication residue cleared from §3.1/§4.5, cache swap unified behind the port, accounts projection + P0/N12, strong-read `params` routing, auditor operations `full`-only, §9.6 pytest-bdd contract, transaction decorator, governance baseline, N2 retry-to-terminal, global idempotency lookup, keyset-over-`Pageable` recorded |
+| 3.3 | 2026-08-03 | Codex final pass: authorise-before-idempotency ordering (§4.1/§6.3), Modulith guarantees configured not assumed (§4.3), framework annotations evicted from domain/application (programmatic externalisation, authz decorator, listener adapter), `findByMovementUid` on the port, brief framing made honest (§1), P0 convergence, 404 row, per-IP backstop, cache TTL contract, CLI name-ambiguity rule, single-entry wording |
