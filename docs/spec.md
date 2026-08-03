@@ -426,6 +426,18 @@ Projections are updated from events and served from Redis with Postgres as the f
 - `GET /balance` → Redis (`ledger:balance:{accountId}`), miss → replay/read projection → cache.
 - `GET /transactions` → Postgres projection, keyset-paginated. Not cached; histories grow.
 
+**Pagination is keyset, and Spring's types stay inside the adapter.** The wire cursor (§7) is an
+opaque encoding of `(transactionTime, transactionUid)`; the projection query is one index-backed
+`WHERE (transaction_time, transaction_uid) < (?, ?) ORDER BY … DESC LIMIT n+1`, the extra row being
+the `links.next` signal. `Pageable`/`Page` are deliberately absent: offset pagination is unstable
+under concurrent inserts, `OFFSET`-slow on growing feeds, and `Page` adds a count query per
+request — and they are framework types, which §9.2 keeps out of inbound ports.
+`QueryHistoryUseCase` takes a plain `{cursor, limit, timeRange}` value; if the Postgres adapter
+wants framework leverage it uses Spring Data's keyset scrolling (`ScrollPosition.keyset()` /
+`Window`) internally and translates. Spring Data `Specification` is skipped for the same reason
+`changesSince` was (§7.1): the feed has exactly two optional filter axes, which is one query with
+two predicates, not a composable-predicate framework.
+
 **Consistency:** the write path is strongly consistent (the aggregate is authoritative); read models
 are eventually consistent. Every projection response carries `asOf` and `streamVersion` so a client
 can detect staleness. This trade-off is documented, not hidden.
