@@ -1,0 +1,62 @@
+# Maven / Java
+/target/
+!.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+
+# IDEs
+*.iml
+.idea/
+.vscode/
+*.classpath
+*.project
+*.settings/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node/Vite frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.eslintcache
+
+# Testcontainers / Docker
+.testcontainers.properties
+**/.testcontainers/*
+.docker/
+*.pid
+
+# Coverage / reports
+coverage/
+jacoco.exec
+surefire-reports/
+failsafe-reports/
+
+# SBOM / scans (regenerate in CI)
+cyclonedx-*.xml
+cyclonedx-*.json
+dependency-check-report.*
+
+# Env files
+.env
+.env.*
+.env.local
+!.env.sample
+
+# Native builds
+**/*.exe
+*.dll
+*.so
+/target/*-exec
+
+# Misc
+*.orig
+*.rej
+
+# JDTLS per-project workspace (see .github/lsp.json)
+.jdtls-workspace/

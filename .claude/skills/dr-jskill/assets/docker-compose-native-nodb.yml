@@ -1,0 +1,19 @@
+services:
+  # Spring Boot Native Application (GraalVM)
+  spring-app-native:
+    build:
+      context: .
+      dockerfile: Dockerfile-native
+    environment:
+      SPRING_BOOT_PORT: ${SPRING_BOOT_PORT:-8080}
+    ports:
+      - "${SPRING_BOOT_PORT:-8080}:${SPRING_BOOT_PORT:-8080}"
+    # No app healthcheck: the native image runs on a distroless base with no shell,
+    # curl or wget to run an in-container probe. Probe /actuator/health from outside
+    # (or from your orchestrator's liveness/readiness checks) instead.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512m
+    restart: unless-stopped

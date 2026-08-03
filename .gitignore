@@ -1,0 +1,5 @@
+# Session-local working papers — not part of the deliverable
+HANDOFF.md
+
+# Local agent state
+.claude/settings.local.json

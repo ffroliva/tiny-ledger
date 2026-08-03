@@ -1,0 +1,58 @@
+// Dev Container configuration for Spring Boot + optional front-end + PostgreSQL.
+// See https://containers.dev/implementors/json_reference/
+{
+    "name": "Spring Boot Dev Environment",
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "app",
+    "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+
+    // JDK 25 + Node 24 features
+    "features": {
+        "ghcr.io/devcontainers/features/java:1": {
+            "version": "25",
+            "installMaven": "true"
+        },
+        "ghcr.io/devcontainers/features/node:1": {
+            "version": "24"
+        },
+        "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+    },
+
+    // VS Code extensions to install inside the container
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "redhat.java",
+                "vscjava.vscode-java-pack",
+                "pivotal.vscode-spring-boot",
+                "vmware.vscode-boot-dev-pack",
+                "redhat.vscode-yaml",
+                "ms-azuretools.vscode-docker",
+                "dbaeumer.vscode-eslint",
+                "esbenp.prettier-vscode"
+            ],
+            "settings": {
+                "java.compile.nullAnalysis.mode": "automatic",
+                "editor.formatOnSave": true,
+                "files.eol": "\n"
+            }
+        }
+    },
+
+    // Lifecycle hooks
+    "postCreateCommand": "./mvnw dependency:go-offline -q || true",
+    "postStartCommand": "echo '✅ Dev container ready — run ./mvnw spring-boot:run'",
+
+    // Forward default app + front-end dev ports. Worktree-specific ports from .env
+    // are picked up by Docker Compose and Spring Boot; editors can auto-forward
+    // those additional ports when they start listening.
+    "forwardPorts": [8080, 5173, 5432],
+    "portsAttributes": {
+        "8080": { "label": "Spring Boot", "onAutoForward": "notify" },
+        "5173": { "label": "Vite Dev Server", "onAutoForward": "silent" },
+        "5432": { "label": "PostgreSQL", "onAutoForward": "silent" }
+    },
+
+    // Run as non-root
+    "remoteUser": "vscode"
+}

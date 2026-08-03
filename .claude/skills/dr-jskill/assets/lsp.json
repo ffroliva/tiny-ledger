@@ -1,0 +1,16 @@
+{
+  "lspServers": {
+    "java": {
+      "command": "jdtls",
+      "args": [
+        "--jvm-arg=-Xmx4G",
+        "--jvm-arg=-Dlog.level=WARN",
+        "--jvm-arg=-XX:+UseStringDeduplication",
+        "-data", ".jdtls-workspace"
+      ],
+      "fileExtensions": {
+        ".java": "java"
+      }
+    }
+  }
+}

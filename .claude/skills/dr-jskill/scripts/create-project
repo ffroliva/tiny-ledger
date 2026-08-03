@@ -1,0 +1,17 @@
+#!/usr/bin/env node
+// Cross-platform launcher for dr-jskill project generation.
+// Delegates to create-project-latest.mjs (works on Linux, macOS, and Windows).
+// ES module — run directly with `node scripts/create-project …`.
+
+import { execFileSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const script = join(__dirname, 'create-project-latest.mjs');
+
+try {
+  execFileSync(process.execPath, [script, ...process.argv.slice(2)], { stdio: 'inherit' });
+} catch (e) {
+  process.exit(e.status || 1);
+}
