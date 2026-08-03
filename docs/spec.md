@@ -195,7 +195,7 @@ com.flaviooliva.ledger
 │   │   ├── LedgerEvent.java             ← sealed interface + record variants
 │   │   └── policy/OverdraftPolicy.java
 │   ├── application/
-│   │   ├── port/in/                     ← inbound ports — commands only; queries live in `balance`
+│   │   ├── port/in/                     ← inbound ports — commands, plus the §4.4 strong read; other queries live in `balance`
 │   │   │   ├── OpenAccountUseCase.java
 │   │   │   └── RecordMovementUseCase.java
 │   │   ├── port/out/                    ← outbound ports (capabilities the app needs)
