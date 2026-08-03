@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.0
+**Version:** 3.1
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -20,12 +20,17 @@ codebase**:
 
 | Mode | Command | What runs | Purpose |
 |---|---|---|---|
-| **`standalone`** (default) | `./mvnw spring-boot:run` | In-memory event store, in-memory cache, no auth, no broker. **JDK 25** is the only prerequisite. | Satisfies the take-home brief exactly: clone, one command, curl the APIs. |
-| **`full`** | `docker compose up` | PostgreSQL, Kafka, Redis, Keycloak, OTel Collector, Prometheus, Grafana. | The production-shaped system. |
+| **`standalone`** (default) | `./mvnw spring-boot:run` | In-memory event store, in-memory cache, no auth, no broker. Binds `127.0.0.1` only; the startup banner prints `AUTH DISABLED (standalone)`. **JDK 25** is the only prerequisite. | Satisfies the take-home brief exactly: clone, one command, curl the APIs. |
+| **`full`** | `docker compose up` | PostgreSQL, Kafka, Redis, Keycloak, OTel Collector, Prometheus, Grafana, Tempo, Loki. | The production-shaped system. |
 
 Both modes run the **same domain code and the same API**. The difference is which adapter
 implementations are active — which is the point of the hexagonal boundaries in §4. The default mode
 is the submittable artefact; the full mode is the depth story for the follow-up conversation.
+
+**Fail-closed guard:** `standalone` being the default must never become a fail-open path. If
+full-mode configuration is present while the `standalone` profile is active — an OAuth2
+`issuer-uri`, a JDBC datasource — startup **fails**, naming the conflict. Losing a profile flag in
+a real deployment degrades to a refusal, never to an unauthenticated ledger.
 
 **Design rule that follows from this:** no infrastructure concern may leak into the domain. If a
 domain class imports Kafka, Redis, JPA or Spring Security, the design has failed and the
@@ -63,8 +68,9 @@ and internally consistent.
 - **`.env` is the single local secret store — never read, never printed.** Only `.env.sample`, with
   placeholder values, is displayed or committed.
 - **A startup banner printing access URLs** once the app is ready.
-- Testing: Mockito + `@WebMvcTest` for unit, Testcontainers with **`@ServiceConnection`** for
-  integration, Given-When-Then with AssertJ.
+- Testing: Mockito for unit, `@WebMvcTest` at the web-slice level (§9.4 — not §9.1's
+  zero-Spring-context unit level), Testcontainers with **`@ServiceConnection`** for integration,
+  Given-When-Then with AssertJ.
 - Docker asset set: standard, AOT, native and CRaC variants; devcontainer; `.editorconfig`;
   `.gitattributes`.
 - **Ask before running git commands.** The human reviews before anything is committed.
@@ -114,7 +120,7 @@ Immutable Java `record`s, versioned by schema:
 
 | Event | Emitted when |
 |---|---|
-| `AccountOpened` | Account created with an initial currency. |
+| `AccountOpened` | Account created. Carries the initial `currency`, the **`owner`** (caller principal) and the account **`name`** — ownership and naming are facts of the stream, not sidecar state. |
 | `MoneyDeposited` | Funds credited. |
 | `MoneyWithdrawn` | Funds debited after invariant checks pass. |
 | `MovementRejected` | A command failed a business invariant. Recorded, not thrown away — rejections are audit-relevant. |
@@ -123,8 +129,11 @@ Events are the write model's source of truth. Nothing else is.
 
 ### 2.4 Commands
 
-`OpenAccount`, `Deposit`, `Withdraw`. `Deposit` and `Withdraw` carry a **client-generated movement
-UID** — at once the idempotency key and the movement's permanent identity; see §6.3.
+`OpenAccount`, `Deposit`, `Withdraw`. Every command carries the **caller principal** (the JWT
+subject; a fixed local principal in `standalone`) — authorisation is a use-case concern (§6.4), and
+a use case cannot check what it never receives. `Deposit` and `Withdraw` also carry a
+**client-generated movement UID** — at once the idempotency key and the movement's permanent
+identity (§6.3) — and an optional free-text `reference` that travels to the feed item (§7).
 
 ---
 
@@ -148,8 +157,9 @@ excluded from the module graph.
 | 1 | `ledger` | closed | **Write side.** The `Account` aggregate, commands, domain events, event store port, command use cases, write API. | `shared` |
 | 2 | `balance` | closed | **Read side.** Balance and history projections, their own query API. Subscribes to `ledger` events. | `shared`, `ledger::events` |
 | 3 | `audit` | closed | Compliance trail, retention, auditor-facing API. Subscribes to all events. | `shared`, `ledger::events` |
-| 4 | `notification` | closed | Outbound signalling on threshold and rejection events. Optional; present to prove a third subscriber costs nothing. | `shared`, `ledger::events` |
-| — | `platform` | not a module | Security, rate limiting, observability, composition root. `@Configuration` and filters only — no domain logic. | — |
+| 4 | `notification` | closed | Signals **large movements** (single movement ≥ a configurable threshold, default 10 000.00) and every `MovementRejected`, as structured log entries. Earns its place as a subscriber with business rules of its own — not a second proof of `balance`'s mechanism. | `shared`, `ledger::events` |
+| — | `platform` | not a module | Security, rate limiting, observability. Filters and technical `@Configuration` only — no domain logic. | — |
+| — | `config` | not a module | The composition root (§4.5) — the only place adapters are constructed. | — |
 
 **Why `account` is not a fifth module.** Account lifecycle and money movement look like separate
 capabilities, but the `Account` *is* the aggregate that owns the event stream — splitting them puts a
@@ -217,11 +227,12 @@ com.flaviooliva.ledger
 │           ├── inmemory/… · postgres/…      ← projection store per run mode
 │           └── redis/RedisBalanceCache.java
 ├── audit/                               ← closed module — consumes via Kafka, deliberately (§4.3)
-│   ├── application/                     ← QueryAuditTrailUseCase, AuditTrailStorePort
+│   ├── application/                     ← RecordAuditEntryUseCase, QueryAuditTrailUseCase, AuditTrailStorePort
 │   └── adapter/
 │       ├── in/kafka/AuditEventConsumer.java ← Kafka seam #2 — the module→service extraction seam
 │       └── in/web/AuditController.java      ← auditor-facing API (`ledger:auditor`, §6.4)
-├── notification/                        ← closed module — in-process listener, log/webhook adapter
+├── notification/                        ← closed module — threshold/rejection rules, log-entry adapter (§3)
+├── platform/                            ← not a module — security, rate limiting, observability (§3)
 └── config/                              ← composition root (§4.5)
 ```
 
@@ -263,7 +274,9 @@ CQRS instead appears in three places, all structural:
    transaction semantics, different failure modes.
 2. **Two families of outbound ports.** Writes go through `EventStorePort` and its optimistic
    concurrency check. Reads go through `BalanceProjectionPort` and never touch the aggregate — a query
-   that rehydrates an aggregate has silently abandoned CQRS.
+   that rehydrates an aggregate has silently abandoned CQRS. The single exception is deliberate and
+   write-side-owned: the `consistency=strong` escape hatch (§4.4) is served by `ledger` itself,
+   never by the read module.
 3. **Two modules.** `ledger` (write) and `balance` (read), coupled only by domain events (§3).
 
 So the layering is: **adapter → inbound port (command *or* query) → use case → domain and outbound
@@ -282,7 +295,7 @@ flowchart TB
   UC["Use-case services<br/>orchestration only, no I/O"] --> DOM
   UC --> OUT
   DOM["Domain<br/>Account aggregate, Money, LedgerEvent<br/>zero framework imports"]
-  OUT["Outbound ports<br/>EventStorePort, EventPublisherPort,<br/>BalanceCachePort, ClockPort, IdGeneratorPort"]
+  OUT["Outbound ports<br/>EventStorePort, EventPublisherPort,<br/>BalanceProjectionPort, BalanceCachePort,<br/>ClockPort, IdGeneratorPort"]
   OUT -.implemented by.-> ADP
   ADP["Outbound adapters<br/>InMemory │ Postgres · InMemory │ Kafka<br/>Map │ Redis · Fixed │ System clock"]
   ADP --> INFRA["Postgres · Kafka · Redis · Keycloak"]
@@ -303,7 +316,7 @@ infrastructure failure and should not acquire one.
 1. Command arrives, validated at the boundary.
 2. Movement UID checked against the stream — a replay is answered from the existing event, never
    re-applied (§6.3).
-3. Aggregate rehydrated by replaying its event stream (snapshot every 100 events).
+3. Aggregate rehydrated by replaying its event stream.
 4. Command applied; the aggregate emits events or rejects.
 5. Events appended to the store **with an optimistic-concurrency check on stream version**;
    a conflict returns `409` and the caller retries.
@@ -359,24 +372,46 @@ trail is the realistic first module to leave the monolith.
 **No hand-rolled outbox poller.** Spring Modulith's event externalisation does exactly this job:
 
 ```java
-@Externalized("ledger.movements::#{#this.accountId()}")
+@Externalized("ledger.events::#{#this.accountId()}")
 public record MoneyWithdrawn(AccountId accountId, Money amount, long version, Instant at)
         implements LedgerEvent {}
 ```
 
 The publication registry row and the event append commit in one transaction; the externaliser
 publishes afterwards and marks the publication complete. That *is* the transactional outbox, already
-written, already tested, keyed by `accountId` so a single account's events stay ordered on one
-partition. Writing a bespoke poller here would be re-implementing a supported framework feature —
-and getting the incomplete-publication retry subtly wrong.
+written, already tested. Writing a bespoke poller here would be re-implementing a supported
+framework feature — and getting the incomplete-publication retry subtly wrong.
+
+**Division of labour with `EventPublisherPort` — one mechanism per leg.** The port owns the
+*in-process* leg only: its single implementation wraps Spring's `ApplicationEventPublisher` in both
+run modes, which is what keeps framework types out of the use cases. The *Kafka* leg belongs to
+`@Externalized` entirely — there is no `KafkaEventPublisher` adapter to write, and a port with one
+implementation needs no §9.2b contract suite. Same event, two legs, one owner each.
+
+**Topic design — decide correctness, configure the rest.** Exactly two Kafka decisions are design,
+both fixed here: **one topic, `ledger.events`** — `audit` consumes every event type and needs their
+per-account order preserved; topic-per-event-type would destroy it — and **partition key =
+`accountId`**, because Kafka orders only within a partition and the key is what makes E5/E6
+physically possible. Everything else (partition count, retention hours, compression, batch sizes)
+is `spring.kafka.*` configuration with defaults fine for a PoC, revisited only against §9.7
+measurements. Kafka retention is deliberately short: the topic is transport, never the record
+(ADR-002).
+
+**Three copies of one event is staged delivery, not duplication.** The `ledger_event` row is the
+permanent truth (§4.2). The Modulith `event_publication` row is a transient *delivery ledger* — one
+row per event×listener, holding completion state; completed rows are removed via
+`spring.modulith.events.completion-mode=delete`, and the incomplete ones are precisely what E7's
+restart-replay exercises. The Kafka copy is a time-boxed transport buffer. One truth, one outbox,
+one wire — each with its own lifecycle.
 
 **Where the Kafka code actually lives.** Under hexagonal rules a Kafka consumer is simply another
-*inbound adapter*, no different in kind from the REST controller:
+*inbound adapter*, no different in kind from the REST controller — and there is one consumer class
+per consuming module, never a shared or generic one:
 
 ```
 audit/
 ├── application/port/in/RecordAuditEntryUseCase.java
-└── adapter/in/kafka/LedgerEventKafkaListener.java   ← @KafkaListener, maps to the use case
+└── adapter/in/kafka/AuditEventConsumer.java   ← @KafkaListener, maps to the use case
 ```
 
 The listener deserialises, maps the Kafka payload to a use-case input, and calls the port. It holds
@@ -392,8 +427,15 @@ Projections are updated from events and served from Redis with Postgres as the f
 
 **Consistency:** the write path is strongly consistent (the aggregate is authoritative); read models
 are eventually consistent. Every projection response carries `asOf` and `streamVersion` so a client
-can detect staleness, and `GET /balance?consistency=strong` bypasses the cache and reads through the
-aggregate. This trade-off is documented, not hidden.
+can detect staleness. This trade-off is documented, not hidden.
+
+**The strong read is a write-side endpoint — the one documented CQRS exception.**
+`GET /balance?consistency=strong` is served by the `ledger` module's own controller, which replays
+the aggregate and answers from the authoritative stream. `balance` never touches the aggregate and
+`ledger` never touches the projection — §4.0's rule stays intact for the read module; the exception
+lives where the authority lives. It is deliberately the expensive path (full replay, no cache):
+only the write side can promise read-your-writes, and pricing it honestly is what keeps the
+projection the default.
 
 ### 4.5 Composition root — the mechanism behind the two run modes
 
@@ -432,7 +474,7 @@ configuration does. The take-home-compliant run and the full production stack ex
 compiled domain and application code*. If a behaviour differs between modes, an adapter is at fault,
 and §9.2b is the test that catches it.
 
-Auditing the wiring is reading two files. That is deliberate: dependency wiring scattered across
+Auditing the wiring is reading three small files. That is deliberate: dependency wiring scattered across
 sixty `@Component` annotations is a service locator with extra steps, and it is how framework
 concerns leak inward without anyone noticing.
 
@@ -486,6 +528,10 @@ The contract precedes the code, in three artefacts, all under version control an
 
 **Rule:** no endpoint is implemented before its OpenAPI operation and its `.feature` scenario exist.
 
+**Requirement IDs:** the scenario IDs *are* the requirement IDs — `REQ-P1`…`REQ-E9` map 1:1 to
+§9.3's catalogue, and the `REQ-NNN` tags §8.2 harvests from tests use exactly these. No second
+numbering scheme exists to drift.
+
 ---
 
 ## 6. Cross-cutting requirements
@@ -516,8 +562,9 @@ in `standalone`, Redis TTL in `full`) so unauthenticated traffic cannot grow mem
 | Cache | Store | TTL | Invalidation |
 |---|---|---|---|
 | `balance` | Redis | 60 s | Evicted on `MoneyDeposited` / `MoneyWithdrawn` for that account |
-| `account-metadata` | Redis | 10 min | Evicted on account mutation |
-| Aggregate snapshots | Postgres | — | Written every 100 events |
+
+One cache, deliberately. Account metadata is immutable after opening (§2.3) — caching what cannot
+change needs no cache — and aggregate snapshots are cut entirely (§13).
 
 Cache is a Spring Cache abstraction (`@Cacheable` / `@CacheEvict`), so `standalone` swaps Redis for
 `ConcurrentMapCacheManager` with no code change. **Event-driven eviction, never write-through** —
@@ -577,8 +624,13 @@ ownership check against the JWT subject stops her reading `ACC-001`. A test suit
 `mallory` proves authentication and nothing about authorisation.
 
 `ACC-001`…`ACC-900` are account *names* (Starling's `AccountV2.name`), not identifiers — the API
-knows only `accountUid`s, pinned to deterministic UUIDs in the realm and seed fixtures so scenarios
-can reference them. Ownership binds the JWT subject to the `accountUid`.
+knows only `accountUid`s, pinned to deterministic UUIDs by `docker/keycloak/realm-tiny-ledger.json`
+plus a seed script the compose stack runs once, so scenarios can reference them.
+
+**The ownership mechanism, end to end:** `AccountOpened` records the `owner` (§2.3), so ownership
+is a fact of the event stream, not sidecar state; every command and query carries the caller
+principal (§2.4); the use case compares the two. `mallory`'s N7 is a test of that comparison, not
+of a role.
 
 ### 6.5 Error handling
 
@@ -588,14 +640,21 @@ RFC 7807 `ProblemDetail` throughout, via Spring's built-in support
 | Condition | Status | `type` |
 |---|---|---|
 | Insufficient funds | 422 | `/errors/insufficient-funds` |
-| Invalid amount / currency | 400 | `/errors/invalid-amount` |
+| Malformed shape — zero, negative or non-integer `minorUnits`, bad currency code | 400 | `/errors/invalid-amount` |
+| Currency mismatch with the account | 422 | `/errors/currency-mismatch` |
 | Concurrent modification | 409 | `/errors/version-conflict` |
 | Reused movement UID, different payload | 409 | `/errors/idempotency-conflict` |
 | Rate limit exceeded | 429 | `/errors/rate-limit-exceeded` |
-| Unauthorised | 403 | `/errors/forbidden` |
+| Unauthenticated | 401 | `/errors/unauthenticated` |
+| Forbidden — wrong role *or* wrong owner | 403 | `/errors/forbidden` |
+| Event store unreachable | 503 | `/errors/event-store-unavailable`, with `Retry-After` |
 
 Problem responses carry a `traceId` correlating to the tracing backend. No stack traces, no internal
 identifiers, no SQL fragments cross the boundary.
+
+Wrong-owner access returns `403`, not `404`. The account-existence oracle this admits is accepted
+because `accountUid`s are unguessable UUIDs — recorded here so the trade-off is a decision, not an
+accident.
 
 ### 6.6 Observability
 
@@ -644,7 +703,9 @@ traces is the same as no tracing.
 
 **Health:** liveness and readiness are separate. Readiness gates on event-store reachability **and
 projection lag under threshold**, so an instance whose read models have fallen behind stops taking
-traffic instead of serving stale balances.
+traffic instead of serving stale balances. **The numbers, so E2/E9 are implementable:** projection
+lag SLO is **p99 < 2 s** steady-state; the readiness threshold is **5 s**. Both are configuration,
+not constants — but they are the defaults the tests assert.
 
 **Observability is tested, not assumed** (§9.4): integration tests assert with an
 `InMemorySpanExporter` that a withdrawal produces the expected span tree, that `traceparent` survives
@@ -661,12 +722,14 @@ they fit a ledger; §7.1 records each adoption, adaptation and refusal. Summary:
 | Method | Path | Notes |
 |---|---|---|
 | `POST` | `/api/v1/accounts` | Open an account. `201` + `Location`. `accountUid` server-generated. |
-| `GET` | `/api/v1/accounts/{accountUid}` | Account metadata: `name`, `currency`, `createdAt`. |
+| `GET` | `/api/v1/accounts` | The caller's own accounts — the CLI's name→uid resolution (§11). |
+| `GET` | `/api/v1/accounts/{accountUid}` | Account metadata: `name`, `currency`, `createdAt`, `owner`. |
 | `PUT` | `/api/v1/accounts/{accountUid}/deposits/{depositUid}` | Client-generated UUID = idempotency (§6.3). |
 | `PUT` | `/api/v1/accounts/{accountUid}/withdrawals/{withdrawalUid}` | `422` on insufficient funds. |
 | `GET` | `/api/v1/accounts/{accountUid}/balance` | `?consistency=strong` bypasses cache. |
 | `GET` | `/api/v1/accounts/{accountUid}/transactions` | Cursor pagination, newest first. |
 | `GET` | `/api/v1/accounts/{accountUid}/events` | Raw event stream. `ledger:auditor` only. |
+| `GET` | `/api/v1/audit/entries` | The audit trail, filterable by account and time range. `ledger:auditor` only. |
 
 Identifiers are UUIDs named `<entity>Uid` — `accountUid`, `depositUid`, `transactionUid` — never
 `id`, never a database key.
@@ -687,6 +750,7 @@ A transaction:
   "transactionUid": "8b0c…", "accountUid": "f91e…",
   "type": "WITHDRAWAL", "direction": "OUT",
   "amount": { "currency": "GBP", "minorUnits": 2000 },
+  "balanceAfter": { "currency": "GBP", "minorUnits": 8000 },
   "status": "SETTLED",
   "transactionTime": "2026-08-03T17:12:09Z",
   "settlementTime": "2026-08-03T17:12:09Z",
@@ -833,7 +897,7 @@ act rather than the default.
 
 ## 9. Testing strategy
 
-Seven levels. Every level has a distinct question it answers; none is ceremony.
+Eight levels. Every level has a distinct question it answers; none is ceremony.
 
 ### 9.1 Unit — JUnit 5 + AssertJ
 Domain in isolation, zero Spring context. `Account` invariants, `Money` arithmetic and rounding,
@@ -885,7 +949,8 @@ class InMemoryEventStoreTest extends EventStoreContract { … }
 class PostgresEventStoreTest extends EventStoreContract { … }   // Testcontainers
 ```
 
-Same for `BalanceCachePort` (map vs Redis) and `EventPublisherPort` (Spring events vs Kafka). The
+Same for `BalanceCachePort` (map vs Redis) and `BalanceProjectionPort` (in-memory vs Postgres).
+`EventPublisherPort` no longer qualifies — it has exactly one implementation (§4.3). The
 repeated-movement-UID replay in `EventStoreContract` is what §6.3 leans on in both modes.
 
 This is the test that makes the dual delivery in §1 honest rather than a marketing claim. Without it,
@@ -901,10 +966,10 @@ Gherkin scenarios in business language, run against the real application. Exampl
 Feature: Withdrawals respect the available balance
 
   Scenario: A withdrawal larger than the balance is refused
-    Given an account "ACC-1" in GBP with a balance of 50.00
+    Given an account "ACC-001" in GBP with a balance of 50.00
     When a withdrawal of 100.00 is requested
     Then the request is refused with "insufficient-funds"
-    And the balance of "ACC-1" is still 50.00
+    And the balance of "ACC-001" is still 50.00
     And a "MovementRejected" event is recorded
 ```
 
@@ -912,8 +977,11 @@ Steps drive the HTTP API, not internal classes — the specification must not de
 
 #### Scenario catalogue
 
-Every scenario below is a committed `.feature` file, run by Cucumber in-process (§9.3) and by
-pytest-bdd against the composed stack (§9.6). The same Gherkin, two runners, two levels.
+Every scenario below is a committed `.feature` file, tagged **`@standalone`** or **`@full`**.
+Cucumber runs the `@standalone` subset in-process on every push (§12.1 stage 5); pytest-bdd re-runs
+the **entire** catalogue against the composed stack (§9.6), where auth, Kafka and the shared
+limiter actually exist. The auth scenarios (N6–N10), the shared-limiter N9, Kafka's E6 and
+real-Postgres N2 are `@full` by necessity — a mode with no auth cannot assert a `403`.
 
 **Positive — `deposits.feature`, `withdrawals.feature`, `history.feature`**
 
@@ -925,6 +993,8 @@ pytest-bdd against the composed stack (§9.6). The same Gherkin, two runners, tw
 | P4 | `alice` reads history | Newest first; each entry carries the correct `balanceAfter`; the sequence reconciles to the balance |
 | P5 | `bob` deposits into `ACC-002` while `alice` transacts | Streams are independent; neither balance is affected by the other |
 | P6 | `alice` retries the same deposit `PUT` (same `depositUid`) | `200` not `201`, body identical to the original; **balance credited once** |
+| P7 | `dave` reads the audit trail after `alice`'s deposit | `200`; the trail contains the corresponding entry — the auditor role gets a positive proof, not only refusals |
+| P8 | `alice` deposits 15 000.00 (≥ the large-movement threshold, §3) | A notification record (structured log entry) carrying the movement UID is produced; a 20.00 deposit produces none |
 
 **Negative — `insufficient-funds.feature`, `concurrency.feature`, `authorisation.feature`, `rate-limit.feature`**
 
@@ -934,7 +1004,7 @@ pytest-bdd against the composed stack (§9.6). The same Gherkin, two runners, tw
 | N2 | **Concurrent withdrawals, individually affordable, collectively over balance** — 10 parallel withdrawals of 20.00 against a balance of 100.00 | Exactly 5 succeed. **The balance never goes negative at any observed point.** The rest get `422` or `409`. Stream versions are contiguous with no gaps and no duplicates |
 | N3 | Two writers race on the same aggregate with the same `expectedVersion` | Exactly one wins; the loser gets `409` `version-conflict` and succeeds on retry |
 | N4 | Deposit of zero, negative, or non-integer `minorUnits` | `400` `invalid-amount`; nothing appended to the stream |
-| N5 | Movement in a currency the account does not hold | `400`; no partial application |
+| N5 | Movement in a currency the account does not hold | `422` `currency-mismatch`; `MovementRejected` recorded — currency fit is aggregate *state*, not request *shape* (§4.6) |
 | N6 | `carol` (reader) attempts a withdrawal | `403`; no event |
 | N7 | `mallory` reads `ACC-001` | `403`. Valid token, correct role, wrong owner |
 | N8 | `dave` (auditor) attempts a deposit | `403`; auditors observe, never mutate |
@@ -985,7 +1055,7 @@ enforcement.
 - Projection lag is reported as a gauge and drives the readiness probe (E9).
 
 ### 9.5 Use-case / validation testing
-One test per use case in §2.4 asserting the *complete* observable outcome: response, emitted events,
+One test per use case — commands (§2.4) and queries (§4.0) — asserting the *complete* observable outcome: response, emitted events,
 projection state, audit record, cache state. This is the level that catches "the API returned 201 but
 the projection never updated".
 
@@ -1022,6 +1092,13 @@ A.8.16 monitoring, A.8.24 cryptography, A.8.28 secure coding, A.5.14 information
 that a PoC cannot satisfy (physical security, supplier management, HR screening) are listed as **out
 of scope** rather than silently claimed.
 
+`iso-27001-controls.md` **is the Statement of Applicability (SoA)** — the term §12.1 stage 6 and
+§14 step 13 use — and a *gap row* is any control marked applicable but not yet evidenced; stage 6
+fails on a gap row with no linked issue. The governance test itself,
+`scripts/test_docs_governance.py`, comes from the **`iso-compliance`** skill, vendored at
+`.claude/skills/iso-compliance` under the same policy as `dr-jskill`: vendored, not referenced, so
+a skill changing underneath a compliance run cannot invalidate the evidence trail.
+
 ---
 
 ## 11. Python CLI
@@ -1042,7 +1119,7 @@ would produce a second convention to maintain for no gain. Conventions adopted v
 | Logging | **structlog**. `print()` is banned in `src/` by ruff `T20`; `console.print()` is the exception |
 | Config | **pydantic-settings** + **platformdirs** for config/cache locations |
 | Validation | **Pydantic v2** models generated from `openapi.yaml` |
-| Auth | OAuth2 client-credentials against Keycloak; token cached and refreshed |
+| Auth | OAuth2 client-credentials against Keycloak; token cached (owner-only file permissions via platformdirs) and refreshed; never logged |
 | Lint/format | **ruff**, exact-pinned (`ruff==0.16.1`), `line-length = 100`, `target-version = "py311"`, `select = ["E","F","W","I","B","UP","N","T20"]` |
 | Types | **pyright**, `strict` on `src/ledger_cli`, `pythonVersion = "3.11"` — not mypy |
 | Testing | **pytest** + **pytest-bdd** + **pytest-cov** + **respx**; **testcontainers** in the `containers` group |
@@ -1080,11 +1157,11 @@ either.
   AOT, native (GraalVM 25) and CRaC variants are carried alongside — startup time is a legitimate
   talking point for a payments service, and the assets already exist.
 - **`docker-compose.yml`:** app, Postgres, Kafka (KRaft, no ZooKeeper), Redis, Keycloak with a
-  pre-provisioned realm, OTel Collector, Prometheus, Grafana, Tempo. Healthchecks and dependency
+  pre-provisioned realm, OTel Collector, Prometheus, Grafana, Tempo, Loki. Healthchecks and dependency
   ordering so `docker compose up` reaches a working system unattended.
 - **Migrations:** Flyway, versioned, applied on startup.
-- **Config:** environment variables only; no secrets in images or compose files — `.env.example`
-  documents every variable.
+- **Config:** environment variables only; no secrets in images or compose files — `.env.sample`
+  (§1.5) documents every variable.
 ### 12.1 Pipeline (GitHub Actions)
 
 Ordered cheapest-and-most-informative first, so a broken build fails in under two minutes rather than
@@ -1096,7 +1173,7 @@ after the load test.
 | 2 | Compile + unit | JUnit, JaCoCo ≥90% line / 85% branch on `domain` | every push |
 | 3 | **Architecture** | `ApplicationModules.verify()` + ArchUnit (§9.2) | every push |
 | 4 | **Contract** | OpenAPI-generated interfaces compile; port contract suites (§9.2b) | every push |
-| 5 | BDD in-process | Cucumber, full scenario catalogue against `standalone` | every push |
+| 5 | BDD in-process | Cucumber, the `@standalone`-tagged subset (§9.3) — auth/Kafka scenarios are `@full` and run at stages 7 and 9 | every push |
 | 6 | **Documentation** | `test_docs_governance.py`: artefact presence, the seven ISO markers, no pre-release version strings, every `TODO(25010)` registered, no unlinked SoA gap row. Plus link check, generated-artefact freshness, and the §8.6 docs-travel-with-code prompt | **every push** |
 | 7 | Integration | Testcontainers: Postgres, Kafka, Redis, Keycloak | every push |
 | 8 | Python CLI | `pytest` matrix on **3.11, 3.12, 3.13**; `pyright` strict; `ruff` | on `ledger-cli/**` |
@@ -1131,6 +1208,8 @@ Stated so their absence reads as a decision:
 - Interest, fees, statements, reconciliation.
 - Horizontal scaling of the write path beyond a single instance per aggregate partition.
 - Real KYC/AML. `audit` records what happened; it does not judge it.
+- Aggregate snapshots. Replay is O(stream length) and PoC streams are short; a snapshot store is
+  the recorded upgrade path for when streams outgrow that — cut whole rather than half-specified.
 
 ---
 
@@ -1142,9 +1221,9 @@ Each step ends green and demonstrable.
 |---|---|---|
 | 0 | **Docs scaffold first** — `docs/` Diátaxis tree, INDEX, CHANGELOG, `test_docs_governance.py` wired into `verify` | The governance test runs and **fails**, listing every missing artefact. That failing list is the documentation backlog, generated rather than guessed |
 | 1 | Skeleton, pom, Modulith verification, CI | `mvn verify` green on an empty module graph |
-| 2 | `shared` + `ledger` domain, in-memory event store | Unit + architecture tests green; `standalone` serves all six endpoints |
-| 3 | OpenAPI contract + generated interfaces | Controller drift breaks the build |
-| 4 | Cucumber feature suite | Every §2 requirement has a green scenario |
+| 2 | `shared` + `ledger` domain, in-memory event store | Unit + architecture tests green — no endpoints yet; §5's rule holds |
+| 3 | OpenAPI contract + generated interfaces | Every §7 operation specified; controller drift breaks the build |
+| 4 | Cucumber feature suite + the §7 endpoints on the in-memory store | Every §2 requirement has a green scenario; `standalone` serves every §7 endpoint — counted by reference, not by number, so the count cannot drift |
 | 5 | Postgres event store + Flyway + outbox | Integration tests green on Testcontainers |
 | 6 | Projections + Redis cache + event-driven eviction | Use-case tests assert projection and cache state |
 | 7 | Kafka relay + `audit` module | Audit trail rebuilt from the stream |
@@ -1153,7 +1232,7 @@ Each step ends green and demonstrable.
 | 10 | Python CLI + e2e scenarios | `ledger-cli scenario run edge-cases` green against compose |
 | 11 | Gatling + JMH + thresholds | Pipeline fails on regression |
 | 12 | **JVM assessment with `jvm-pulse`** — once the system is stable under load | GC + JFR telemetry captured against the composed stack (`pulse attach --docker <container> --duration 30s`) during a Gatling run; `report.html` committed to `docs/profiling/`; a `compare` against the pre-tuning baseline; tuning conclusions recorded as an ADR. **Run last, deliberately** — profiling an unstable system measures the instability, not the system |
-| 13 | Compliance run with the `iso-compliance` skill | Governance test green; SoA dispositions all 34 A.8 controls; 25010 coverage table complete; dated acceptance record in the ISO hub |
+| 13 | Compliance run with the `iso-compliance` skill | Governance test green; every SoA-listed control dispositioned (§10); 25010 coverage table complete; dated acceptance record in the ISO hub |
 
 ---
 
@@ -1169,3 +1248,47 @@ Each step ends green and demonstrable.
 7. Amounts are `long` minor units end to end — domain, store and API (§7). Decimal conversion exists
    only at human boundaries (CLI input, display) and rejects excessive scale rather than rounding
    silently.
+
+---
+
+## Table of contents
+
+Not applicable — fifteen numbered sections with stable anchors are the contract's map; an inline
+ToC would be a second copy that drifts. (§8.4 permits an explicit disposition; omitting the heading
+is what it forbids.)
+
+## Scope & purpose
+
+This document is the implementation contract for the tiny-ledger deliverable: §1 the dual delivery,
+§2–§7 the system, §8–§12 the quality machinery, §13–§15 the boundaries. Its readers are the
+implementing agents and the reviewing humans; nothing overrides it except a recorded ADR.
+
+## Glossary & acronyms
+
+| Term | Meaning |
+|---|---|
+| CQRS | Command Query Responsibility Segregation — the write/read split (§4.0) |
+| SLO | Service Level Objective — the projection-lag numbers (§6.6) |
+| SoA | Statement of Applicability — `docs/compliance/iso-27001-controls.md` (§10) |
+| OTLP | OpenTelemetry Protocol — the single telemetry wire format (§6.6) |
+| Feed item | Starling's name for a transaction as the API presents it (§7) |
+
+Domain vocabulary is §2.1's ubiquitous language.
+
+## Traceability
+
+Scenario IDs are the requirement IDs (`REQ-P1`…`REQ-E9`, §5); §12.1 maps every pipeline stage to
+the section it enforces; §10's matrices map ISO clauses to artefacts.
+
+## Open issues / known gaps
+
+Tracked in the council review reports (`.superpowers/sdd/`) and §15's assumptions. When the
+council's escalations section is non-empty, it is the canonical list; it is empty at this version.
+
+## Revision history
+
+| Version | Date | Change |
+|---|---|---|
+| 1.0–2.0 | Jul 2026 | Event-Sourced Banking Ledger PoC V2 lineage (superseded) |
+| 3.0 | 2026-08-03 | Full rewrite as the dual-delivery contract |
+| 3.1 | 2026-08-03 | Starling alignment (§7.1) + council round 1: strong-read ownership (§4.4), publication legs (§4.3), ownership mechanism (§2.3/§2.4/§6.4), snapshots cut (§13), notification defined (§3), validation split (§6.5/N4/N5), error catalogue completed, scenario tags, governance markers |
