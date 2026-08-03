@@ -314,8 +314,9 @@ infrastructure failure and should not acquire one.
 ### 4.1 Write path
 
 1. Command arrives, validated at the boundary.
-2. Movement UID checked against the stream — a replay is answered from the existing event, never
-   re-applied (§6.3).
+2. Movement UID checked **globally**, matching the global unique index (§4.2) — a replay is
+   answered from the existing event, never re-applied; a UID found on a *different* stream is an
+   idempotency conflict (§6.3).
 3. Aggregate rehydrated by replaying its event stream.
 4. Command applied; the aggregate emits events or rejects.
 5. Events appended to the store **with an optimistic-concurrency check on stream version**;
@@ -443,6 +444,11 @@ Wiring lives in exactly one place, `com.flaviooliva.ledger.config`, as Spring `@
 classes selected by profile. Nothing else in the codebase constructs an adapter, and no use-case or
 domain class carries a Spring stereotype annotation — use cases are plain classes instantiated by the
 composition root with constructor injection.
+
+Transaction demarcation is wiring too: `UseCaseConfig` wraps each command use case in a
+`TransactionalUseCaseDecorator` built on Spring's `TransactionTemplate`, so §4.3's promise — event
+append and publication-registry row committing together — holds without a single framework
+annotation entering the application layer (§9.2 forbids them there).
 
 ```java
 @Configuration
@@ -583,6 +589,11 @@ store to drift from it, no header machinery, and no expiry window — an identit
 | First write | `201` |
 | Same UID, same payload | `200` with the original result — replayed, never re-applied |
 | Same UID, different payload | `409` `/errors/idempotency-conflict`; the original movement stands |
+
+Lookups are global, matching the index: reusing a UID against a *different account* is a `409`
+idempotency conflict, not a fresh movement. Racing duplicate `PUT`s need no special path — the
+loser's unique-constraint violation triggers a re-read by UID, which then answers from the table
+above exactly as a sequential replay would.
 
 Rejections replay deterministically too: `MovementRejected` carries the UID, so retrying a refused
 withdrawal with the same UID returns the original `422`. A retry *after* topping up is a new attempt
@@ -1001,7 +1012,7 @@ real-Postgres N2 are `@full` by necessity — a mode with no auth cannot assert 
 | # | Scenario | Asserts |
 |---|---|---|
 | N1 | Single withdrawal exceeds balance | `422` `insufficient-funds`; **balance unchanged**; `MovementRejected` recorded with a reason |
-| N2 | **Concurrent withdrawals, individually affordable, collectively over balance** — 10 parallel withdrawals of 20.00 against a balance of 100.00 | Exactly 5 succeed. **The balance never goes negative at any observed point.** The rest get `422` or `409`. Stream versions are contiguous with no gaps and no duplicates |
+| N2 | **Concurrent withdrawals, individually affordable, collectively over balance** — 10 parallel withdrawals of 20.00 against a balance of 100.00, each request retrying `409`s until a terminal outcome | Exactly 5 end `201` and 5 end `422`. **The balance never goes negative at any observed point.** A bare `409` is not terminal — under optimistic concurrency, retries are part of the contract. Stream versions are contiguous with no gaps and no duplicates |
 | N3 | Two writers race on the same aggregate with the same `expectedVersion` | Exactly one wins; the loser gets `409` `version-conflict` and succeeds on retry |
 | N4 | Deposit of zero, negative, or non-integer `minorUnits` | `400` `invalid-amount`; nothing appended to the stream |
 | N5 | Movement in a currency the account does not hold | `422` `currency-mismatch`; `MovementRejected` recorded — currency fit is aggregate *state*, not request *shape* (§4.6) |
@@ -1219,7 +1230,7 @@ Each step ends green and demonstrable.
 
 | # | Step | Done when |
 |---|---|---|
-| 0 | **Docs scaffold first** — `docs/` Diátaxis tree, INDEX, CHANGELOG, `test_docs_governance.py` wired into `verify` | The governance test runs and **fails**, listing every missing artefact. That failing list is the documentation backlog, generated rather than guessed |
+| 0 | **Docs scaffold first** — `docs/` Diátaxis tree, INDEX, CHANGELOG, `test_docs_governance.py` wired into `verify` | The governance test runs and **fails**, listing every missing artefact. That failing list is registered as the **governance baseline** — the documentation backlog, generated rather than guessed. Stage 6 (§12.1) fails on *regressions against the baseline*, never on the baseline itself — so step 1's `mvn verify` is green while the backlog burns down, and step 13 requires the baseline empty |
 | 1 | Skeleton, pom, Modulith verification, CI | `mvn verify` green on an empty module graph |
 | 2 | `shared` + `ledger` domain, in-memory event store | Unit + architecture tests green — no endpoints yet; §5's rule holds |
 | 3 | OpenAPI contract + generated interfaces | Every §7 operation specified; controller drift breaks the build |
