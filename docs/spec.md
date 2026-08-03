@@ -1116,6 +1116,10 @@ Real Postgres, Kafka, Redis and Keycloak in containers. Event-store concurrency 
 externalisation, projection updates, cache eviction on events, JWT validation, rate-limit
 enforcement.
 
+Integration tests are named **`*IT`** and run by **Failsafe** at the `verify` phase; `*Test` stays
+Surefire — fast, container-free, every push. The §12.1 stage split (2 vs 7) is thereby mirrored in
+the build itself, so nobody can accidentally put a Testcontainers suite on the unit path.
+
 **Observability assertions** (§6.6), using `InMemorySpanExporter` and a `SimpleMeterRegistry`:
 
 - A withdrawal produces the expected span tree with `ledger.account_id` and `ledger.stream_version`
