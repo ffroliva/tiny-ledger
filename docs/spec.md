@@ -1277,6 +1277,11 @@ citizen" true rather than aspirational.
 than the lockfile, and smoke-import it. Catches the unbounded-dependency break that a committed
 `uv.lock` hides until a user installs fresh.
 
+**No SonarQube/SonarCloud, deliberately.** Its ground is held by tools a reviewer can run offline
+in a fresh clone — spotless, JaCoCo's failing thresholds, ArchUnit, gitleaks/Trivy/dependency-check,
+ruff/pyright — and every quality gate in this pipeline reproducing locally is worth more to this
+artefact than a SaaS badge that needs an account and a token to verify.
+
 ---
 
 ## 13. Non-goals
