@@ -1,0 +1,16 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: corretto, java-version: '25', cache: maven }
+      - name: "Stage 1 — lint & format"
+        run: ./mvnw -q spotless:check
+      - name: "Stages 2-3 — compile, unit, JaCoCo gates, architecture"
+        run: ./mvnw -q verify
+      # Stage 6 (docs governance) joins in Task 13; stages 7-12 join in Plans 2-4.
+      - name: "resolve-drift placeholder"
+        run: echo "python CLI drift job lands in Plan 4 (spec §12.1)"
