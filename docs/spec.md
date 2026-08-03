@@ -216,7 +216,8 @@ com.flaviooliva.ledger
 │   ├── application/
 │   │   ├── port/in/                     ← queries only
 │   │   │   ├── QueryBalanceUseCase.java
-│   │   │   └── QueryHistoryUseCase.java
+│   │   │   ├── QueryHistoryUseCase.java
+│   │   │   └── QueryAccountsUseCase.java
 │   │   ├── port/out/
 │   │   │   ├── BalanceProjectionPort.java   ← never touches the aggregate (§4.0)
 │   │   │   └── BalanceCachePort.java
@@ -425,6 +426,9 @@ Projections are updated from events and served from Redis with Postgres as the f
 
 - `GET /balance` → Redis (`ledger:balance:{accountId}`), miss → replay/read projection → cache.
 - `GET /transactions` → Postgres projection, keyset-paginated. Not cached; histories grow.
+- `GET /accounts` and `GET /accounts/{accountUid}` → the **accounts projection**, owner-indexed,
+  maintained by `balance` from `AccountOpened` events — the store behind name→uid resolution (§11)
+  and list scoping (N12).
 
 **Pagination is keyset, and Spring's types stay inside the adapter.** The wire cursor (§7) is an
 opaque encoding of `(transactionTime, transactionUid)`; the projection query is one index-backed
@@ -584,9 +588,11 @@ in `standalone`, Redis TTL in `full`) so unauthenticated traffic cannot grow mem
 One cache, deliberately. Account metadata is immutable after opening (§2.3) — caching what cannot
 change needs no cache — and aggregate snapshots are cut entirely (§13).
 
-Cache is a Spring Cache abstraction (`@Cacheable` / `@CacheEvict`), so `standalone` swaps Redis for
-`ConcurrentMapCacheManager` with no code change. **Event-driven eviction, never write-through** —
-the cache must never be a second source of truth.
+The cache sits behind `BalanceCachePort` — `MapBalanceCache` in `standalone`, Redis in `full` — the
+**same** swap mechanism as every other adapter (§4.5), deliberately not a second one via Spring's
+`@Cacheable`: two swap conventions for one concern is the §4.3 dual-mechanism disease applied to
+caches. **Event-driven eviction, never write-through** — a listener calls the port on
+`MoneyDeposited`/`MoneyWithdrawn`; the cache must never be a second source of truth.
 
 ### 6.3 Idempotency
 
@@ -744,8 +750,8 @@ they fit a ledger; §7.1 records each adoption, adaptation and refusal. Summary:
 
 | Method | Path | Notes |
 |---|---|---|
-| `POST` | `/api/v1/accounts` | Open an account. `201` + `Location`. `accountUid` server-generated. |
-| `GET` | `/api/v1/accounts` | The caller's own accounts — the CLI's name→uid resolution (§11). |
+| `POST` | `/api/v1/accounts` | Open an account. `ledger:writer`. `201` + `Location`. `accountUid` server-generated. |
+| `GET` | `/api/v1/accounts` | The caller's own accounts, scoped to the JWT subject (N12). `ledger:reader`. The CLI's name→uid resolution (§11). |
 | `GET` | `/api/v1/accounts/{accountUid}` | Account metadata: `name`, `currency`, `createdAt`, `owner`. |
 | `PUT` | `/api/v1/accounts/{accountUid}/deposits/{depositUid}` | Client-generated UUID = idempotency (§6.3). |
 | `PUT` | `/api/v1/accounts/{accountUid}/withdrawals/{withdrawalUid}` | `422` on insufficient funds. |
@@ -1010,6 +1016,7 @@ real-Postgres N2 are `@full` by necessity — a mode with no auth cannot assert 
 
 | # | Scenario | Asserts |
 |---|---|---|
+| P0 | `alice` opens an account | `201` + `Location`; `AccountOpened` at version 1 carrying `owner=alice` and the account name; `GET` on the `Location` returns `name`, `currency`, `createdAt`, `owner` |
 | P1 | `alice` deposits 100.00 into `ACC-001` | `201`; balance 100.00; `MoneyDeposited` on the stream at version 2 |
 | P2 | `alice` withdraws 30.00 | `201`; balance 70.00; `MoneyWithdrawn` at version 3 |
 | P3 | `alice` withdraws her exact balance | `201`; balance 0.00. The boundary is allowed — only *exceeding* is refused |
@@ -1034,6 +1041,7 @@ real-Postgres N2 are `@full` by necessity — a mode with no auth cannot assert 
 | N9 | `alice` exceeds 100 writes in a minute | `429` with `Retry-After`; the accepted writes are all durably applied |
 | N10 | Unauthenticated request to any endpoint | `401`; no information about whether the account exists |
 | N11 | Reused `depositUid` with a different amount | `409` `idempotency-conflict`; the original movement stands untouched |
+| N12 | `mallory` lists accounts via `GET /api/v1/accounts` | `200`; the list contains `ACC-004` only — listing is scoped to the caller, and the existence of other accounts never leaks |
 
 **Eventual consistency — `eventual-consistency.feature`**
 
@@ -1094,7 +1102,7 @@ idempotent request, confirm no double credit. Run in CI on the composed stack.
 - **Gatling:** ramp to 500 concurrent users; assert p99 write latency < 150 ms, p99 cached read
   < 20 ms, error rate < 0.1%. Scenarios: steady state, burst, and hot-account contention (all
   traffic on one aggregate — the pathological case for optimistic concurrency).
-- **JMH:** microbenchmarks on event replay, snapshot restore and `Money` arithmetic.
+- **JMH:** microbenchmarks on event replay and `Money` arithmetic.
 - Thresholds are assertions. A regression fails the pipeline.
 
 ---
