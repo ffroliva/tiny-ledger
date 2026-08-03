@@ -1,0 +1,30 @@
+# Text normalization
+auto.crlf=false
+* text=auto eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.gif binary
+*.jar binary
+*.gz binary
+*.zip binary
+*.ico binary
+*.pdf binary
+
+# Improve diffs
+*.md diff=markdown
+*.adoc diff=asciidoc
+*.java diff=java
+*.kt diff=java
+*.sql diff=sql
+*.properties diff=java
+*.yml diff=yaml
+*.yaml diff=yaml
+*.xml diff=xml
+*.pom diff=xml
+
+# Keep scripts executable
+scripts/*.mjs text eol=lf
+scripts/create-project text eol=lf
+mvnw text eol=lf
