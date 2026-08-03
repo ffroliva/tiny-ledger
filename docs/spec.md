@@ -123,7 +123,8 @@ Events are the write model's source of truth. Nothing else is.
 
 ### 2.4 Commands
 
-`OpenAccount`, `Deposit`, `Withdraw`. Each carries an **idempotency key**; see §6.3.
+`OpenAccount`, `Deposit`, `Withdraw`. `Deposit` and `Withdraw` carry a **client-generated movement
+UID** — at once the idempotency key and the movement's permanent identity; see §6.3.
 
 ---
 
@@ -192,7 +193,6 @@ com.flaviooliva.ledger
 │   │   │   ├── EventStorePort.java
 │   │   │   ├── EventPublisherPort.java
 │   │   │   ├── BalanceCachePort.java
-│   │   │   ├── IdempotencyStorePort.java
 │   │   │   ├── ClockPort.java
 │   │   │   └── IdGeneratorPort.java
 │   │   └── usecase/                     ← plain classes; orchestration only
@@ -253,7 +253,7 @@ So the layering is: **adapter → inbound port (command *or* query) → use case
 ports.** CQRS chooses *which* path; hexagonal governs the direction of every arrow on both paths.
 Neither wraps the other.
 
-The read side owning its own controller follows directly. `GET /v1/accounts/{id}/balance` is served
+The read side owning its own controller follows directly. `GET /api/v1/accounts/{accountUid}/balance` is served
 by an adapter inside `balance`, not by the `ledger` module reaching across a closed boundary.
 
 ```mermaid
@@ -265,7 +265,7 @@ flowchart TB
   UC["Use-case services<br/>orchestration only, no I/O"] --> DOM
   UC --> OUT
   DOM["Domain<br/>Account aggregate, Money, LedgerEvent<br/>zero framework imports"]
-  OUT["Outbound ports<br/>EventStorePort, EventPublisherPort,<br/>BalanceCachePort, IdempotencyStorePort,<br/>ClockPort, IdGeneratorPort"]
+  OUT["Outbound ports<br/>EventStorePort, EventPublisherPort,<br/>BalanceCachePort, ClockPort, IdGeneratorPort"]
   OUT -.implemented by.-> ADP
   ADP["Outbound adapters<br/>InMemory │ Postgres · InMemory │ Kafka<br/>Map │ Redis · Fixed │ System clock"]
   ADP --> INFRA["Postgres · Kafka · Redis · Keycloak"]
@@ -284,7 +284,8 @@ infrastructure failure and should not acquire one.
 ### 4.1 Write path
 
 1. Command arrives, validated at the boundary.
-2. Idempotency key checked (§6.3).
+2. Movement UID checked against the stream — a replay is answered from the existing event, never
+   re-applied (§6.3).
 3. Aggregate rehydrated by replaying its event stream (snapshot every 100 events).
 4. Command applied; the aggregate emits events or rejects.
 5. Events appended to the store **with an optimistic-concurrency check on stream version**;
@@ -311,10 +312,10 @@ CREATE TABLE ledger_event (
     schema_version  INT         NOT NULL,
     payload         JSONB       NOT NULL,
     occurred_at     TIMESTAMPTZ NOT NULL,
-    idempotency_key TEXT,
+    movement_uid    UUID,
     PRIMARY KEY (stream_id, version)
 );
-CREATE UNIQUE INDEX ON ledger_event (idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX ON ledger_event (movement_uid) WHERE movement_uid IS NOT NULL;
 ```
 
 ### 4.3 Outbox
@@ -391,7 +392,6 @@ class StandaloneAdapterConfig {
     @Bean EventStorePort eventStore()          { return new InMemoryEventStore(); }
     @Bean EventPublisherPort publisher(ApplicationEventPublisher p) { return new SpringEventPublisher(p); }
     @Bean BalanceCachePort balanceCache()      { return new MapBalanceCache(); }
-    @Bean IdempotencyStorePort idempotency()   { return new InMemoryIdempotencyStore(); }
     @Bean ClockPort clock()                    { return Instant::now; }
     @Bean IdGeneratorPort ids()                { return UUID::randomUUID; }
 }
@@ -404,8 +404,8 @@ class FullAdapterConfig { /* Postgres, Kafka, Redis equivalents */ }
 class UseCaseConfig {                                   // profile-independent
     @Bean RecordMovementUseCase recordMovement(
             EventStorePort store, EventPublisherPort publisher,
-            IdempotencyStorePort idem, ClockPort clock, IdGeneratorPort ids) {
-        return new RecordMovementService(store, publisher, idem, clock, ids);
+            ClockPort clock, IdGeneratorPort ids) {
+        return new RecordMovementService(store, publisher, clock, ids);
     }
 }
 ```
@@ -468,9 +468,24 @@ the cache must never be a second source of truth.
 
 ### 6.3 Idempotency
 
-Every write accepts an `Idempotency-Key` header (required in `full` mode). The key is stored with a
-unique constraint alongside the event. A replay returns the original response with
-`Idempotency-Replayed: true` rather than double-crediting. Keys expire after 24 hours.
+Starling's mechanism, adopted whole: **the client generates the movement's UUID and `PUT`s to it** —
+the verb that is idempotent by contract, at a path that names the movement. The UID in the path is
+simultaneously the dedup key and the movement's permanent identity, stored on the event row under a
+unique index (§4.2). The event store itself enforces exactly-once; there is no separate idempotency
+store to drift from it, no header machinery, and no expiry window — an identity does not expire.
+
+| Case | Response |
+|---|---|
+| First write | `201` |
+| Same UID, same payload | `200` with the original result — replayed, never re-applied |
+| Same UID, different payload | `409` `/errors/idempotency-conflict`; the original movement stands |
+
+Rejections replay deterministically too: `MovementRejected` carries the UID, so retrying a refused
+withdrawal with the same UID returns the original `422`. A retry *after* topping up is a new attempt
+and therefore a new UID — exactly the semantics a ledger wants.
+
+Account opening stays `POST /api/v1/accounts` with a server-generated `accountUid`: opening is not a
+retried money movement, and Starling does not model account creation as client-idempotent either.
 
 ### 6.4 Security
 
@@ -504,6 +519,10 @@ is never deployed anywhere but a laptop and CI.
 ownership check against the JWT subject stops her reading `ACC-001`. A test suite without a
 `mallory` proves authentication and nothing about authorisation.
 
+`ACC-001`…`ACC-900` are account *names* (Starling's `AccountV2.name`), not identifiers — the API
+knows only `accountUid`s, pinned to deterministic UUIDs in the realm and seed fixtures so scenarios
+can reference them. Ownership binds the JWT subject to the `accountUid`.
+
 ### 6.5 Error handling
 
 RFC 7807 `ProblemDetail` throughout, via Spring's built-in support.
@@ -513,6 +532,7 @@ RFC 7807 `ProblemDetail` throughout, via Spring's built-in support.
 | Insufficient funds | 422 | `/errors/insufficient-funds` |
 | Invalid amount / currency | 400 | `/errors/invalid-amount` |
 | Concurrent modification | 409 | `/errors/version-conflict` |
+| Reused movement UID, different payload | 409 | `/errors/idempotency-conflict` |
 | Rate limit exceeded | 429 | `/errors/rate-limit-exceeded` |
 | Unauthorised | 403 | `/errors/forbidden` |
 
@@ -577,19 +597,87 @@ tag. Untested instrumentation rots into dashboards full of zeroes.
 
 ## 7. API
 
-Full contract in `docs/api/openapi.yaml`. Summary:
+Full contract in `docs/api/openapi.yaml`. The conventions are Starling Bank's public API wherever
+they fit a ledger; §7.1 records each adoption, adaptation and refusal. Summary:
 
 | Method | Path | Notes |
 |---|---|---|
-| `POST` | `/api/v1/accounts` | Open an account. `201` + `Location`. |
-| `POST` | `/api/v1/accounts/{id}/deposits` | `Idempotency-Key` honoured. |
-| `POST` | `/api/v1/accounts/{id}/withdrawals` | `422` on insufficient funds. |
-| `GET` | `/api/v1/accounts/{id}/balance` | `?consistency=strong` bypasses cache. |
-| `GET` | `/api/v1/accounts/{id}/transactions` | Keyset pagination, newest first. |
-| `GET` | `/api/v1/accounts/{id}/events` | Raw event stream. `ledger:auditor` only. |
+| `POST` | `/api/v1/accounts` | Open an account. `201` + `Location`. `accountUid` server-generated. |
+| `GET` | `/api/v1/accounts/{accountUid}` | Account metadata: `name`, `currency`, `createdAt`. |
+| `PUT` | `/api/v1/accounts/{accountUid}/deposits/{depositUid}` | Client-generated UUID = idempotency (§6.3). |
+| `PUT` | `/api/v1/accounts/{accountUid}/withdrawals/{withdrawalUid}` | `422` on insufficient funds. |
+| `GET` | `/api/v1/accounts/{accountUid}/balance` | `?consistency=strong` bypasses cache. |
+| `GET` | `/api/v1/accounts/{accountUid}/transactions` | Cursor pagination, newest first. |
+| `GET` | `/api/v1/accounts/{accountUid}/events` | Raw event stream. `ledger:auditor` only. |
 
-Money is serialised as a string decimal with explicit currency
-(`{"amount": "100.00", "currency": "GBP"}`) — never a float, in JSON or anywhere else.
+Identifiers are UUIDs named `<entity>Uid` — `accountUid`, `depositUid`, `transactionUid` — never
+`id`, never a database key.
+
+Money is one shape everywhere — requests, responses, balances:
+
+```json
+{ "currency": "GBP", "minorUnits": 10000 }
+```
+
+`minorUnits` is an `int64` of pence or cents: the domain `Money` (§2.1) serialised without
+translation. No float anywhere, and no decimal-string parsing ambiguity either.
+
+A transaction:
+
+```json
+{
+  "transactionUid": "8b0c…", "accountUid": "f91e…",
+  "type": "WITHDRAWAL", "direction": "OUT",
+  "amount": { "currency": "GBP", "minorUnits": 2000 },
+  "status": "SETTLED",
+  "transactionTime": "2026-08-03T17:12:09Z",
+  "settlementTime": "2026-08-03T17:12:09Z",
+  "reference": "rent"
+}
+```
+
+`direction` (`IN`/`OUT`) with an always-positive `amount`: the sign lives in semantics, not
+arithmetic — Starling's cleanest idea, and the public projection of a double-entry leg. `type` is
+the orthogonal axis saying what kind of movement it was. `status` is `SETTLED` on everything this
+ledger emits (appends settle atomically); the enum reserves `PENDING` and `REVERSED` so pending
+states never need a breaking change, and the two timestamps are equal today for the same reason.
+
+The balance resource returns the money object plus the staleness markers §9.3 E1 demands:
+
+```json
+{ "accountUid": "f91e…", "amount": { "currency": "GBP", "minorUnits": 8000 },
+  "asOf": "2026-08-03T17:12:10Z", "streamVersion": 3 }
+```
+
+Lists are wrapped in a named key — extensible without breaking clients — and paginated by cursor,
+with optional `minTransactionTimestamp` / `maxTransactionTimestamp` filters (Starling's parameter
+names, verbatim):
+
+```json
+{ "transactions": [ … ], "links": { "next": "…/transactions?cursor=…" } }
+```
+
+### 7.1 Starling alignment
+
+Reference: the Starling Bank public API (`developer.starlingbank.com`, OpenAPI, 68 paths). Recorded
+so that every convention argument resolves to a citation rather than a taste.
+
+| Starling convention | Verdict | Why |
+|---|---|---|
+| `<entity>Uid` UUID identifiers | **Adopt** | No `id`, no database leakage |
+| `{currency, minorUnits}` money | **Adopt** | Matches the domain `Money` exactly |
+| `PUT` + client-generated UID for money movement | **Adopt** | Idempotency without header machinery; deleted a port (§6.3) |
+| `direction` `IN`/`OUT` + unsigned amounts | **Adopt** | Sidesteps signed-amount bugs |
+| Path versioning | **Adopt** | As `/api/v1` — boring and correct |
+| Wrapped list responses | **Adopt** | `{"transactions": […]}` |
+| Cursor pagination with `links` | **Adopt** | Trimmed to `links.next` |
+| Timestamp-range feed filters | **Adopt** | Parameter names verbatim |
+| `status` lifecycle, dual timestamps | **Adapt** | Vocabulary kept; only `SETTLED` is produced today |
+| Balance object (`clearedBalance`, `effectiveBalance`, …) | **Adapt** | Appends settle atomically, so one truthful `amount`; the object shape leaves room for siblings |
+| Error shape `{"errors": [{"message"}]}` | **Diverge** | RFC 7807 (§6.5) — Starling's errors carry no machine-readable code; ours must |
+| `changesSince` sync endpoint | **Skip** | No sync consumer exists. YAGNI |
+| Categories / spaces sub-ledgers | **Skip** | Banking-app concept; needless path depth |
+| Request signing (`BearerAndSignature`) | **Skip** | Out of scope (§13) |
 
 ---
 
@@ -722,7 +810,7 @@ abstract class EventStoreContract {
     @Test void appendsAtExpectedVersion() { … }
     @Test void rejectsStaleExpectedVersion() { … }   // optimistic concurrency
     @Test void readsBackInAppendOrder() { … }
-    @Test void isIdempotentForARepeatedKey() { … }
+    @Test void isIdempotentForARepeatedMovementUid() { … }
     @Test void concurrentAppendsYieldExactlyOneWinner() { … }
 }
 
@@ -730,8 +818,8 @@ class InMemoryEventStoreTest extends EventStoreContract { … }
 class PostgresEventStoreTest extends EventStoreContract { … }   // Testcontainers
 ```
 
-Same for `BalanceCachePort` (map vs Redis), `EventPublisherPort` (Spring events vs Kafka) and
-`IdempotencyStorePort`.
+Same for `BalanceCachePort` (map vs Redis) and `EventPublisherPort` (Spring events vs Kafka). The
+repeated-movement-UID replay in `EventStoreContract` is what §6.3 leans on in both modes.
 
 This is the test that makes the dual delivery in §1 honest rather than a marketing claim. Without it,
 "the same code runs in both modes" is an assertion; with it, the in-memory store is held to the same
@@ -769,7 +857,7 @@ pytest-bdd against the composed stack (§9.6). The same Gherkin, two runners, tw
 | P3 | `alice` withdraws her exact balance | `201`; balance 0.00. The boundary is allowed — only *exceeding* is refused |
 | P4 | `alice` reads history | Newest first; each entry carries the correct `balanceAfter`; the sequence reconciles to the balance |
 | P5 | `bob` deposits into `ACC-002` while `alice` transacts | Streams are independent; neither balance is affected by the other |
-| P6 | `alice` replays a deposit with the same `Idempotency-Key` | `200` not `201`; `Idempotency-Replayed: true`; **balance credited once** |
+| P6 | `alice` retries the same deposit `PUT` (same `depositUid`) | `200` not `201`, body identical to the original; **balance credited once** |
 
 **Negative — `insufficient-funds.feature`, `concurrency.feature`, `authorisation.feature`, `rate-limit.feature`**
 
@@ -778,13 +866,14 @@ pytest-bdd against the composed stack (§9.6). The same Gherkin, two runners, tw
 | N1 | Single withdrawal exceeds balance | `422` `insufficient-funds`; **balance unchanged**; `MovementRejected` recorded with a reason |
 | N2 | **Concurrent withdrawals, individually affordable, collectively over balance** — 10 parallel withdrawals of 20.00 against a balance of 100.00 | Exactly 5 succeed. **The balance never goes negative at any observed point.** The rest get `422` or `409`. Stream versions are contiguous with no gaps and no duplicates |
 | N3 | Two writers race on the same aggregate with the same `expectedVersion` | Exactly one wins; the loser gets `409` `version-conflict` and succeeds on retry |
-| N4 | Deposit of `0.00`, a negative amount, or `10.001` | `400` `invalid-amount`; nothing appended to the stream |
+| N4 | Deposit of zero, negative, or non-integer `minorUnits` | `400` `invalid-amount`; nothing appended to the stream |
 | N5 | Movement in a currency the account does not hold | `400`; no partial application |
 | N6 | `carol` (reader) attempts a withdrawal | `403`; no event |
 | N7 | `mallory` reads `ACC-001` | `403`. Valid token, correct role, wrong owner |
 | N8 | `dave` (auditor) attempts a deposit | `403`; auditors observe, never mutate |
 | N9 | `alice` exceeds 100 writes in a minute | `429` with `Retry-After`; the accepted writes are all durably applied |
 | N10 | Unauthenticated request to any endpoint | `401`; no information about whether the account exists |
+| N11 | Reused `depositUid` with a different amount | `409` `idempotency-conflict`; the original movement stands untouched |
 
 **Eventual consistency — `eventual-consistency.feature`**
 
@@ -834,7 +923,7 @@ projection state, audit record, cache state. This is the level that catches "the
 the projection never updated".
 
 Validation testing covers the boundary: every field constraint, currency mismatch, negative and
-zero amounts, excessive scale, malformed JSON, missing idempotency key, oversized payload.
+zero amounts, non-integer `minorUnits`, malformed JSON, malformed movement UIDs, oversized payload.
 
 ### 9.6 End-to-end
 `docker compose up`, then the **Python CLI (§11) drives real scenarios against the running stack** —
@@ -906,6 +995,11 @@ ledger-cli history  --account ACC-001 --limit 20
 ledger-cli scenario run edge-cases     # drives §9.6 end-to-end
 ledger-cli scenario run rate-limit     # exhausts the bucket, asserts 429
 ```
+
+The CLI is the human boundary: `--amount` takes decimals and converts to minor units before the
+wire; `--account` takes the account *name* and resolves it to an `accountUid` (§7). The CLI also
+generates the movement UID per `deposit`/`withdraw` invocation — which makes its tenacity retries
+safe by construction, since a retried `PUT` carries the same UID (§6.3).
 
 Pydantic models are **generated from `openapi.yaml`**, so the CLI cannot drift from the contract
 either.
@@ -1001,8 +1095,10 @@ Each step ends green and demonstrable.
 1. Single currency per account; the currency is fixed at opening.
 2. No overdraft. Withdrawals beyond balance are refused and recorded as `MovementRejected`.
 3. Balance is eventually consistent on the read path unless `consistency=strong` is requested.
-4. Idempotency keys are client-generated UUIDs, valid for 24 hours.
+4. Movement UIDs are client-generated UUIDs and are the movement's permanent identity; they never
+   expire (§6.3).
 5. Timestamps are server-assigned UTC `Instant`s; client-supplied times are ignored.
 6. `standalone` mode loses all state on restart. This is intentional and documented in the README.
-7. Amounts are stored as `long` minor units; the API speaks decimal strings. Conversion is validated
-   at the boundary and rejects excessive scale rather than rounding silently.
+7. Amounts are `long` minor units end to end — domain, store and API (§7). Decimal conversion exists
+   only at human boundaries (CLI input, display) and rejects excessive scale rather than rounding
+   silently.
