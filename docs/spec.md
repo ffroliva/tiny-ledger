@@ -975,6 +975,9 @@ single-threaded by design, and N2 lives at the event store's optimistic-concurre
 ### 9.2 Architecture — ArchUnit + Spring Modulith
 - `ApplicationModules.verify()` — no illegal cross-module access.
 - Domain packages import no `org.springframework`, `jakarta.persistence`, `kafka` or `redis`.
+  One carve-out: `package-info.java` files, which carry the Spring Modulith boundary metadata §3
+  mandates (`@ApplicationModule`, `@NamedInterface("events")`) — a boundary declaration is not
+  domain logic, so the ArchUnit rule exempts classes named `package-info`.
 - Controllers never touch repositories directly.
 - No cyclic package dependencies.
 
@@ -1381,3 +1384,4 @@ records the history. When an escalations section is non-empty, it is the canonic
 | 3.1 | 2026-08-03 | Starling alignment (§7.1) + council round 1: strong-read ownership (§4.4), publication legs (§4.3), ownership mechanism (§2.3/§2.4/§6.4), snapshots cut (§13), notification defined (§3), validation split (§6.5/N4/N5), error catalogue completed, scenario tags, governance markers |
 | 3.2 | 2026-08-03 | Council rounds 2–3 closure: publication residue cleared from §3.1/§4.5, cache swap unified behind the port, accounts projection + P0/N12, strong-read `params` routing, auditor operations `full`-only, §9.6 pytest-bdd contract, transaction decorator, governance baseline, N2 retry-to-terminal, global idempotency lookup, keyset-over-`Pageable` recorded |
 | 3.3 | 2026-08-03 | Codex final pass: authorise-before-idempotency ordering (§4.1/§6.3), Modulith guarantees configured not assumed (§4.3), framework annotations evicted from domain/application (programmatic externalisation, authz decorator, listener adapter), `findByMovementUid` on the port, brief framing made honest (§1), P0 convergence, 404 row, per-IP backstop, cache TTL contract, CLI name-ambiguity rule, single-entry wording |
+| 3.4 | 2026-08-04 | Implementation-time reconciliation: §9.2 framework-free bullet gains the `package-info.java` carve-out — §3 requires Modulith named-interface declarations (`ledger::events`) on the very packages §9.2 fences, and the two met head-on when the ArchUnit rules landed; boundary metadata exempted, rule intent (no framework coupling in domain logic) unchanged |
