@@ -16,6 +16,9 @@ class HexagonalRulesTest {
     static final ArchRule domainIsFrameworkFree = noClasses()
             .that()
             .resideInAPackage("..domain..")
+            // spec §9.2 v3.4: package-info boundary metadata (@NamedInterface) is not domain logic.
+            .and()
+            .doNotHaveSimpleName("package-info")
             .should()
             .dependOnClassesThat()
             .resideInAnyPackage("org.springframework..", "jakarta.persistence..", "org.apache.kafka..", "io.lettuce..");
