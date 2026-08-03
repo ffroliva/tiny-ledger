@@ -436,6 +436,40 @@ Auditing the wiring is reading two files. That is deliberate: dependency wiring 
 sixty `@Component` annotations is a service locator with extra steps, and it is how framework
 concerns leak inward without anyone noticing.
 
+### 4.6 Data shapes and mapping between layers
+
+One rule, stated once: **each layer owns its own shape of the data, and every conversion is an
+explicit mapper owned by the adapter that needs it.** Nothing crosses a boundary in a foreign shape.
+
+| Shape | Lives in | Examples | Notes |
+|---|---|---|---|
+| Wire DTOs | generated from `openapi.yaml` (§5); referenced only by `adapter/in/web` | `DepositRequest`, `BalanceResponse` | Jackson 3; Bean Validation annotations generated from the OpenAPI constraints carry the §9.5 boundary checks |
+| Domain | `domain/` + `shared` | `Deposit` command, `MoneyDeposited` event, `Money` | Zero framework imports (§9.2); the only shape use cases and the aggregate ever see |
+| Persistence | inside `adapter/out/postgres` | event row (JSONB payload + `schema_version`), projection row | Payload (de)serialisation is versioned; readers tolerate unknown fields |
+| Cache | inside `adapter/out/redis` | serialised balance snapshot | Never a second source of truth (§6.2) |
+
+The mapping rules, enforced by dependency direction rather than convention:
+
+1. **The inbound web adapter** maps wire DTO → command and result → response DTO. Validation is
+   two-level, deliberately: Bean Validation on the DTO rejects malformed *shape* (`400`); the
+   aggregate rejects invalid *state* (`422`). The domain re-checking what the boundary checked is
+   not duplication — the domain cannot know who called it.
+2. **Each outbound adapter** owns its own mapping: the Postgres adapter owns event ↔ JSONB keyed by
+   `schema_version`, the projector maps event → projection row, the read adapter maps projection
+   row → response DTO.
+3. **Mappers are hand-written static functions in the adapter package** — records make each one a
+   constructor call. No MapStruct, no ModelMapper: a mapping framework is a dependency, a build
+   step and a reflection surface bought to avoid code the compiler already checks. When a record
+   gains a field, every mapper that ignores it fails compilation — that is the review we want,
+   free.
+4. **No shape escapes its owner.** A wire DTO below the controller, a persistence type above its
+   adapter, or a domain object serialised straight onto the wire are the same bug — a boundary
+   that stopped being one. ArchUnit rules (§9.2) fail the build on each.
+5. **Shared behaviour has exactly three sanctioned homes**: domain policy (`OverdraftPolicy`),
+   `shared`-kernel value semantics (`Money`), or `platform` technical aspects. A use-case service
+   is never a library for another use-case service — extracting a helper two services both call is
+   how a CRUD god-service starts.
+
 ---
 
 ## 5. Spec-driven design
@@ -819,6 +853,15 @@ Additional rules that follow from §3.1 and §4.5:
 - `adapter.out.*` packages do not depend on each other — adapters never call adapters.
 - `domain` does not import `java.time.Instant.now` or `java.util.UUID.randomUUID`; time and identity
   arrive through ports.
+
+And the rules that keep §4.6's shape boundaries and kill the CRUD god-service structurally:
+
+- No class in `application.usecase` implements more than one inbound port — one use case, one
+  service. A second port on a service is the first symptom of responsibilities clustering.
+- Generated wire DTOs are referenced only from `adapter.in.web`; persistence and cache types only
+  from within their own `adapter.out.*` package.
+- No use-case service depends on another use-case service; shared behaviour moves to a domain
+  policy, the `shared` kernel, or `platform` (§4.6 rule 5).
 
 A build that violates the architecture fails, so §1's design rule is mechanically enforced.
 
