@@ -182,6 +182,8 @@ Kept deliberately, because a process document that only records successes is mar
 | A prior session recorded a recruiter conversation as arriving "by email" when it was a phone call. Repeated across four files before anyone checked the mailbox. | Corrected. **Lesson: an agent's confident record of a source is not the source.** Verified against Gmail; the compensation figure is now explicitly marked as recollection, not a quoted document. |
 | The same session reported a GitHub application as "stalled 32 days". It had been rejected on day six, and a third application to the same company was missing from the tracker entirely. | Corrected. **Lesson: absence of a signal was read as absence of an event.** The rejection was sitting in the inbox the whole time. |
 | The minimalism skill argued hard against building this platform at all. | Overruled deliberately — §6. It was right about the brief and wrong about the goal. |
+| A Plan 2 implementation agent was still running when its session was closed. It kept working, finished all eleven assigned fixes, ran its own test suites — and then had no orchestrator left to report to. The work sat committed but unreviewed and unrecorded until the next session went looking for it. | **Lesson: an agent's output is only as durable as the process that collects it.** A replacement agent dispatched into the same repository detected the collision from file timestamps, refused to edit anything, and aborted — which is the behaviour you want, and it happened because the dispatch brief named the hazard. The recovery was to review the orphan's diff on its own merits, since its reasoning was gone and only its diff could be audited. |
+| That same orphaned wave wrote a dead-letter test that subscribed to `ledger.events.DLT` while Spring Kafka 4 publishes to `<topic>-dlt` by default. Its own test would have failed on a 60-second timeout. | Caught twice independently — by the orphan itself on a later run, and by a reviewer that decompiled `spring-kafka-4.1.0.jar` to confirm the constant. **Lesson: "the framework's default is X" is a claim about a jar, not a memory.** The destination is now named explicitly rather than inherited. |
 
 ---
 
@@ -240,13 +242,38 @@ pass over spec §6–§7, not wholesale.
 
 ---
 
-## 7. How to audit any of this
+## 7. Phase record — Plan 2 (full persistence)
+
+What the pipeline in §2 actually produced on the second plan, gates and all. Numbers are from the
+session ledger, not from recollection.
+
+| Stage | Outcome |
+|---|---|
+| Plan | 9 tasks, brainstormed then written before any code (§2 stages 1–4) |
+| Implementation | 9/9 by subagents, one task brief each, one commit per task after review acceptance |
+| Per-task reviews | 9 accepted. **Zero** required a fix loop; 8 minors deferred with written rulings rather than silently dropped |
+| Whole-branch review #1 (independent model) | READY WITH FIXES — 0 critical, 3 important. One fix wave, then a scoped re-review closed it clean |
+| Whole-branch review #2 (`/code-review`, high effort) | 15 findings, 13 confirmed. 11 fixed, 3 parked with rulings, 1 routed to this docs pass |
+| Whole-branch review #3 (re-review of that wave) | 10/11 addressed, 1 partially — the gap became a fourth wave of 4 fixes, each with a red→green proof |
+| Complexity gate | Ports with a single implementation audited against ADR 0001 and the ArchUnit fence before being judged earned rather than speculative |
+| Verification | `verify` green with **zero** containers started (the integration suite is `-Pit` only); `verify -Pit` green at 24 integration tests, 0 failures, 0 flakes |
+| Real-boot proof | Both modes booted for real and curled by hand: `full` against Compose with a live Kafka round-trip into the audit trail (~1s), `standalone` returning 501 on auditor operations behind its AUTH-DISABLED banner |
+
+**The honest part.** Three independent review passes over the same branch each found things the
+previous one missed, and the third found a defect *inside the second's own fix*. The lesson is not
+that the reviewers were bad — it is that "reviewed" is not a binary, and a single pass over money
+code is optimism. The cost was roughly four fix waves; the alternative was shipping a ledger where
+the two run modes disagreed about which transactions fall inside a filter.
+
+---
+
+## 8. How to audit any of this
 
 | Question | Where to look |
 |---|---|
 | What was actually asked for? | `docs/source/` — the original PDFs, committed unmodified |
 | What was decided, and why? | `docs/spec.md` and `docs/adr/` |
-| In what order was it built? | `docs/superpowers/plans/*/PLAN.md` and `.superpowers/sdd/progress.md` |
-| Was each step reviewed? | `.superpowers/sdd/review-*.diff` and `task-N-report.md` |
-| Does it do what it claims? | `mvn verify` — unit, architecture, BDD, integration, use-case; then `docker compose up` and `ledger-cli scenario run edge-cases` |
+| In what order was it built? | `docs/superpowers/plans/*.md`, and the commit history — one commit per task, each landing only after its review was accepted |
+| Was each step reviewed? | The per-task ledger, review packages and reviewer reports live under `.superpowers/sdd/<plan>/`, which is **session-local and gitignored** — deliberately, it is working state. What survives in the repo is §7 above, the commit messages, and this document |
+| Does it do what it claims? | `./mvnw verify` — unit, architecture, BDD, use-case (starts no containers); `./mvnw verify -Pit` — the 24 integration tests against real Postgres, Redis and Kafka; then `docker compose up` for the `full` stack |
 | What was left out on purpose? | `docs/spec.md` §13 non-goals and §15 assumptions |

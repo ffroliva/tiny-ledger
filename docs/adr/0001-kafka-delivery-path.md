@@ -1,6 +1,7 @@
 # ADR 0001 — How domain events reach Kafka
 
-**Status:** Accepted — option B, `@Externalized` via `spring-modulith-events-kafka`; the outbox goes
+**Status:** Accepted — option B via `spring-modulith-events-kafka`, routed programmatically rather than
+by `@Externalized` (see Decision); the outbox goes
 **Date:** 2026-08-04
 **Context:** spec §14 steps 5–7; Plan 2 Tasks 3, 6
 
@@ -105,6 +106,18 @@ anyway: a transaction is an infrastructure concern applied at the port boundary.
 **Only persisted listeners get a publication row.** The Kafka externalization is a transactional
 listener, so it is tracked; the in-process balance projection stays a plain synchronous listener
 and is not, which keeps `standalone` behaviour and read-your-writes identical.
+
+**Known limitation — publishing inside the transaction opens a small crash window.** Because the
+decorator above makes read, append and publish share one transaction, the synchronous in-process
+listeners run *before* that transaction commits. The balance projection is unaffected: it writes to
+the same database, so a rollback takes the projection write with it. `notification` is not, because
+`LogNotificationAdapter` writes to a log — a side channel no rollback can retract. If the process
+dies between the listener emitting a large-movement notification and the commit, or the commit itself
+fails, a notification exists for a movement that never happened. The window is narrow and the
+consequence is a spurious alert rather than a wrong balance, so it is accepted for now; the fix is to
+move the notification listener to an `AFTER_COMMIT` transaction phase, which is queued for Plan 3.
+Recorded here rather than silently, because "we notify about writes that did not happen" is exactly
+the kind of thing a reader of this ADR should not have to discover from the code.
 
 **Unchanged either way:** delivery is at-least-once, consumers stay idempotent (the projection is,
 keyed on `(accountId, streamVersion)`), and Kafka partitioning must be keyed by account id

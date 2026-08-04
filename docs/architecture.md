@@ -38,7 +38,7 @@ flowchart TB
         direction TB
         F1["PostgresEventStore<br/>system of record"]
         F2["RedisBalanceCache"]
-        F3["Kafka via @Externalized<br/>publication out of the deployable"]
+        F3["Kafka via EventExternalizationConfiguration<br/>publication out of the deployable"]
     end
 
     PORTS -->|"bound by StandaloneAdapterConfig"| standalone
@@ -85,9 +85,9 @@ flowchart LR
 
     WEB -->|commands| LD
     WEB -->|queries| BV
-    ES -->|"in-process<br/>@ApplicationModuleListener"| BP
+    ES -->|"in-process<br/>synchronous @EventListener"| BP
     ES -->|"in-process"| NOT
-    ES -->|"Kafka — @Externalized"| AUD
+    ES -->|"Kafka — programmatic externalisation"| AUD
 
     SH -.->|value types only| ledger
     SH -.-> balance

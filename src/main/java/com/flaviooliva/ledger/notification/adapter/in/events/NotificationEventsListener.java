@@ -10,9 +10,9 @@ import org.springframework.stereotype.Component;
  * The inbound edge of {@code notification}: turns published ledger events into notification
  * records via {@link NotificationRules}, then hands qualifying ones to {@link NotificationPort}.
  *
- * <p>Standalone caveat (spec v3.5, §4.3): plain {@code @EventListener}, not
- * {@code @ApplicationModuleListener} — see {@code balance.adapter.in.events.LedgerEventsListener}'s
- * javadoc for the full story of why the latter is registered but never fires in this profile.
+ * <p>Plain {@code @EventListener} in both run modes, not {@code @ApplicationModuleListener} (spec
+ * v3.8, §4.3) — see {@code balance.adapter.in.events.LedgerEventsListener}'s javadoc for the full
+ * story of why the latter is registered but never fires.
  */
 @Component
 public class NotificationEventsListener {

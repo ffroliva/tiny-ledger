@@ -17,9 +17,12 @@ import org.springframework.stereotype.Component;
  * Adding {@code spring-modulith-events-core} (its {@code @Async}/{@code @EnableAsync} support) breaks
  * startup outright — {@code EventPublicationAutoConfiguration} demands an {@code EventPublicationRegistry},
  * i.e. a database. Plain {@code @EventListener} delivers synchronously with zero new dependencies;
- * {@code LedgerEventsListenerTest} is the standing proof. Spec v3.5 governs this as the standalone
- * profile's mechanism: {@code @EventListener} here, and the annotation flips back to
- * {@code @ApplicationModuleListener} when the full profile wires the publication registry (§3.1).
+ * {@code LedgerEventsListenerTest} is the standing proof.
+ *
+ * <p>The full profile did <em>not</em> flip it back (spec v3.8): only the Kafka externalisation leg is
+ * a persisted listener, so this projection stays synchronous in both run modes and read-your-writes is
+ * identical in each — see ADR 0001, "Only persisted listeners get a publication row". Moving the
+ * projection off-thread is a Plan 3 question, not a difference between the modes.
  */
 @Component
 public class LedgerEventsListener {
