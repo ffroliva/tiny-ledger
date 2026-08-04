@@ -10,13 +10,19 @@ import com.ffroliva.tinyledger.ledger.application.port.in.OpenAccountUseCase;
 import com.ffroliva.tinyledger.ledger.application.port.in.RecordMovementUseCase;
 import com.ffroliva.tinyledger.shared.Money;
 import com.ffroliva.tinyledger.testsupport.AbstractIntegrationTest;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Currency;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.IntStream;
+import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -26,6 +32,8 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.apache.kafka.common.utils.Utils;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -47,6 +55,27 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    private static final String DLT_TOPIC = "ledger.events.DLT";
+
+    /** More than one, so a key-derived placement is distinguishable from the source partition index. */
+    private static final int DLT_PARTITIONS = 4;
+
+    @BeforeAll
+    static void provisionTheDeadLetterTopicWithSeveralPartitions() throws Exception {
+        try (Admin admin =
+                Admin.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers()))) {
+            // Ahead of every test here, so the recoverer's producer cannot first meet the DLT as the
+            // single-partition topic Kafka would auto-create and cache — that would leave a key-derived
+            // placement indistinguishable from reusing the source index.
+            if (!admin.listTopics().names().get().contains(DLT_TOPIC)) {
+                admin.createTopics(List.of(new NewTopic(DLT_TOPIC, DLT_PARTITIONS, (short) 1)))
+                        .all()
+                        .get();
+            }
+            assertThat(partitionCount(admin, DLT_TOPIC)).isEqualTo(DLT_PARTITIONS);
+        }
+    }
 
     @Test
     void ledgerEventsReachTheAuditTrailThroughKafka() {
@@ -121,6 +150,59 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
         await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(
                         trail.eventStream(opened.accountId().value(), null, 50).entries())
                 .isNotEmpty());
+    }
+
+    /**
+     * The recoverer resolves the destination as {@code TopicPartition(ledger.events.DLT, -1)}, and a
+     * negative partition becomes a null partition on the ProducerRecord — the producer then places the
+     * record by key. Pinning {@code record.partition()} instead would reuse the source index, which
+     * fails the publish outright whenever the DLT has fewer partitions than {@code ledger.events}, i.e.
+     * exactly when the compliance trail needs it.
+     *
+     * <p>A single-partition {@code ledger.events} cannot show that on its own — index 0 is in range
+     * everywhere. So the DLT carries several partitions and the key is chosen to hash somewhere other
+     * than 0: a pinned source index would land the record on 0 instead.
+     */
+    @Test
+    void aParkedRecordIsPlacedByKeyRatherThanOnTheSourcePartition() throws Exception {
+        String key = aKeyNotHashingToPartitionZero();
+        int placedByKey = partitionForKey(key);
+
+        try (Consumer<String, String> dlt = probe(DLT_TOPIC);
+                Producer<String, String> producer = producer()) {
+            dlt.poll(Duration.ofMillis(200)); // subscribe before anything is sent
+
+            // Explicitly partition 0 of ledger.events, so a pinned source index would be 0.
+            producer.send(new ProducerRecord<>("ledger.events", 0, key, "{}")).get();
+
+            Map<String, Integer> placement = new HashMap<>();
+            await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
+                dlt.poll(Duration.ofSeconds(1)).forEach(record -> placement.put(record.key(), record.partition()));
+                assertThat(placement).containsEntry(key, placedByKey);
+            });
+        }
+    }
+
+    private static String aKeyNotHashingToPartitionZero() {
+        return IntStream.range(0, 100)
+                .mapToObj(i -> "dlt-placement-" + i)
+                .filter(candidate -> partitionForKey(candidate) != 0)
+                .findFirst()
+                .orElseThrow();
+    }
+
+    /** What the producer's default partitioner does: murmur2 of the key, modulo the partition count. */
+    private static int partitionForKey(String key) {
+        return Utils.toPositive(Utils.murmur2(key.getBytes(StandardCharsets.UTF_8))) % DLT_PARTITIONS;
+    }
+
+    private static int partitionCount(Admin admin, String topic) throws Exception {
+        return admin.describeTopics(List.of(topic))
+                .allTopicNames()
+                .get()
+                .get(topic)
+                .partitions()
+                .size();
     }
 
     private static Producer<String, String> producer() {
