@@ -15,9 +15,9 @@
   <properties>
     <java.version>25</java.version>
     <spring-modulith.version>2.1.0</spring-modulith.version>
-    <archunit.version>1.3.0</archunit.version>
-    <cucumber.version>7.20.1</cucumber.version>
-    <openapi-generator.version>7.10.0</openapi-generator.version>
+    <archunit.version>1.5.0</archunit.version>
+    <cucumber.version>7.34.6</cucumber.version>
+    <openapi-generator.version>7.24.0</openapi-generator.version>
   </properties>
   <dependencyManagement>
     <dependencies>
