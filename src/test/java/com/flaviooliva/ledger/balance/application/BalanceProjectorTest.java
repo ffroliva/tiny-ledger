@@ -85,8 +85,38 @@ class BalanceProjectorTest {
                 "insufficient-funds"));
 
         // the feed shows settled movements only; the raw event stream is the auditor's view
-        assertThat(projection.balance(account).orElseThrow().amount()).isEqualTo(new Money(GBP, 10_000));
+        BalanceView view = projection.balance(account).orElseThrow();
+        assertThat(view.amount()).isEqualTo(new Money(GBP, 10_000));
+        assertThat(view.streamVersion()).isEqualTo(3L); // rejection still advances the staleness markers
+        assertThat(view.asOf()).isEqualTo(T0.plusSeconds(2));
         assertThat(projection.history(account, all()).transactions()).hasSize(1);
+    }
+
+    @Test
+    void withdrawalsDebitAndAppearAsOut() {
+        projector.on(opened(account, "alice"));
+        projector.on(deposit(account, 2, 10_000, 10_000, T0.plusSeconds(1)));
+
+        cache.put(account, new BalanceView(account, new Money(GBP, 10_000), T0.plusSeconds(1), 2));
+        assertThat(cache.get(account)).isPresent();
+
+        projector.on(withdraw(account, 3, 4_000, 6_000, T0.plusSeconds(2)));
+
+        assertThat(projection.balance(account).orElseThrow().amount()).isEqualTo(new Money(GBP, 6_000));
+
+        TransactionView withdrawal =
+                projection.history(account, all()).transactions().getFirst();
+        assertThat(withdrawal.direction()).isEqualTo(TransactionView.OUT);
+        assertThat(withdrawal.type()).isEqualTo(MovementType.WITHDRAWAL);
+
+        assertThat(cache.get(account)).isEmpty(); // §6.2 event-driven eviction
+    }
+
+    @Test
+    void historyRejectsInvalidCursor() {
+        assertThatThrownBy(() -> projection.history(account, new HistoryQuery("not valid base64!!", 10, null, null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("invalid history cursor");
     }
 
     @Test
@@ -162,6 +192,11 @@ class BalanceProjectorTest {
 
     private static MoneyDeposited deposit(AccountId id, long version, long amount, long balanceAfter, Instant at) {
         return new MoneyDeposited(
+                id, version, at, UUID.randomUUID(), new Money(GBP, amount), "ref", new Money(GBP, balanceAfter));
+    }
+
+    private static MoneyWithdrawn withdraw(AccountId id, long version, long amount, long balanceAfter, Instant at) {
+        return new MoneyWithdrawn(
                 id, version, at, UUID.randomUUID(), new Money(GBP, amount), "ref", new Money(GBP, balanceAfter));
     }
 }
