@@ -14,17 +14,15 @@ import org.testcontainers.utility.DockerImageName;
 @ActiveProfiles("full")
 public abstract class AbstractIntegrationTest {
 
-    public static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>(DockerImageName.parse("postgres:16-alpine"))
-                    .withDatabaseName("tiny_ledger")
-                    .withUsername("ledger")
-                    .withPassword("ledger");
+    public static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
+                    DockerImageName.parse("postgres:16-alpine"))
+            .withDatabaseName("tiny_ledger")
+            .withUsername("ledger")
+            .withPassword("ledger");
 
-    public static final RedisContainer REDIS =
-            new RedisContainer(DockerImageName.parse("redis:7-alpine"));
+    public static final RedisContainer REDIS = new RedisContainer(DockerImageName.parse("redis:7-alpine"));
 
-    public static final KafkaContainer KAFKA =
-            new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.0"));
+    public static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.0"));
 
     static {
         POSTGRES.start();

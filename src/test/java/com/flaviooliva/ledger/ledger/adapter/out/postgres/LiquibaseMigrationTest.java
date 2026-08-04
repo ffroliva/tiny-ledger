@@ -12,13 +12,21 @@ class LiquibaseMigrationTest extends AbstractIntegrationTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    void verifiesDatabaseTablesExistAfterLiquibaseMigration() {
-        Boolean eventsExists = jdbcTemplate.queryForObject(
-                "SELECT to_regclass('public.events') IS NOT NULL", Boolean.class);
-        Boolean outboxExists = jdbcTemplate.queryForObject(
-                "SELECT to_regclass('public.event_outbox') IS NOT NULL", Boolean.class);
+    void changelogCreatesTheTablesTheFullProfileNeeds() {
+        assertThat(exists("events")).isTrue();
+        assertThat(exists("balance_projections")).isTrue();
+        assertThat(exists("account_history")).isTrue();
+        assertThat(exists("audit_entries")).isTrue();
+    }
 
-        assertThat(eventsExists).isTrue();
-        assertThat(outboxExists).isTrue();
+    @Test
+    void modulithOwnsThePublicationTableAndWeNoLongerShipAnOutbox() {
+        // ADR 0001: the relay is Modulith's, created by its own schema initializer.
+        assertThat(exists("event_publication")).isTrue();
+        assertThat(exists("event_outbox")).isFalse();
+    }
+
+    private Boolean exists(String table) {
+        return jdbcTemplate.queryForObject("SELECT to_regclass('public." + table + "') IS NOT NULL", Boolean.class);
     }
 }
