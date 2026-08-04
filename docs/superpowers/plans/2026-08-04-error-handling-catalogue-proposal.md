@@ -102,11 +102,37 @@ field varies — which is also the direction the approved Open Banking item poin
 A domain exception hierarchy; `ErrorResponse` on the `shared` parent; per-module hierarchies; any i18n
 resolution machinery before there is a human reading the output.
 
+## Companion decision — root package rename to `com.flaviooliva.tinyledger`
+
+Decided by the user 2026-08-04, in the same discussion: the root package becomes
+`com.flaviooliva.tinyledger`, so the module package stops doubling the word
+(`com.flaviooliva.ledger.ledger` → `com.flaviooliva.tinyledger.ledger`). `tledger` was considered and
+rejected as less readable — the abbreviation saves four characters in a string that is autocompleted,
+at the cost of a prefix needing explanation forever.
+
+**Do it as its own commit, separate from any behaviour change.** It touches 110 of 110 Java files, so
+mixing it with real work makes the diff unreviewable and invalidates any outstanding review that cites
+`file:line`. Alone, "both pipelines green, zero behaviour delta" is a complete proof of it.
+
+Touchpoints beyond the Java files:
+
+- `pom.xml`: `<apiPackage>`, `<modelPackage>` (OpenAPI generator) and JaCoCo's
+  `<include>com.flaviooliva.ledger.*.domain*</include>` domain-coverage rule.
+- `docs/spec.md` §2 source tree, and the plan documents.
+- Nothing in `*.properties` — verified clean.
+
+**The trap:** several references are *string literals*, not symbols, so an IDE "rename package" will
+not finish the job — `HexagonalRulesTest`'s `@AnalyzeClasses(packages = "com.flaviooliva.ledger")`, the
+`generatedDtosStayInWebAdapters` rule's `"com.flaviooliva.ledger.api.generated.."`, and the JaCoCo
+include above. Missed, the architecture fence analyses nothing and still reports green. Run with
+`clean` so the generator re-emits into the new packages.
+
 ## Open questions for Plan 3 planning
 
 1. Does `ErrorCode` also absorb the 429 rate-limit and 501 standalone rows, or do those stay adapter
    concerns? (Leaning: absorb — they are catalogue rows in §6.5 like any other.)
 2. Should the `messageKey` default from the enum constant name (`ACCOUNT_NOT_FOUND` →
    `problem.account-not-found`) rather than being declared, to remove a second thing to keep in sync?
-3. `LedgerApplication` vs the `tiny-ledger` artifact: `TinyLedgerException` matches the project name,
-   not the bootstrap class. Rename the class for consistency, or accept the asymmetry?
+3. Does `LedgerApplication` become `TinyLedgerApplication` in the same naming pass? (Leaning: yes —
+   once the package is `tinyledger` and the supertype is `TinyLedgerException`, the bootstrap class is
+   the last holdout.)
