@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.3
+**Version:** 3.8
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -49,7 +49,7 @@ Versions are governed by **`dr-jskill`'s `versions.json`**, not chosen ad hoc.
 |---|---|---|
 | Java | **25** (LTS, Corretto) | Records, sealed interfaces, pattern matching and virtual threads are all load-bearing below |
 | Spring Boot | **4.1.0** (Spring Framework 7.0) | `ProblemDetail`, Modulith integration and `@ServiceConnection` come free |
-| Spring Modulith | Boot-4 line | Module verification, event publication registry, `@Externalized` (§4.3) |
+| Spring Modulith | Boot-4 line | Module verification, event publication registry, programmatic event externalisation (§4.3) |
 | PostgreSQL | **18** | Event store + projections |
 | Hibernate | **7.4** | Outbound persistence adapter only |
 | Testcontainers | **2.0.5** | Integration and e2e |
@@ -214,7 +214,7 @@ com.flaviooliva.ledger
 │       └── out/
 │           ├── inmemory/InMemoryEventStore.java
 │           ├── postgres/PostgresEventStore.java
-│           └── spring/SpringEventPublisher.java  ← EventPublisherPort, both modes; Kafka is `@Externalized`, no adapter (§4.3)
+│           └── spring/SpringEventPublisher.java  ← EventPublisherPort, both modes; Kafka is externalised by config, no adapter (§4.3)
 ├── balance/                             ← closed module — the read side; the other half of CQRS
 │   ├── application/
 │   │   ├── port/in/                     ← queries only
@@ -226,7 +226,7 @@ com.flaviooliva.ledger
 │   │   │   └── BalanceCachePort.java
 │   │   └── projection/BalanceProjector.java ← plain class; applies events via the ports
 │   └── adapter/
-│       ├── in/events/LedgerEventsListener.java  ← the inbound adapter driving the projector — @EventListener in standalone; @ApplicationModuleListener once the full-mode publication registry exists (§4.3)
+│       ├── in/events/LedgerEventsListener.java  ← the inbound adapter driving the projector — synchronous @EventListener in both run modes (§4.3)
 │       ├── in/web/BalanceController.java    ← read-side API, same generated OpenAPI interface
 │       └── out/
 │           ├── inmemory/… · postgres/…      ← projection store per run mode
@@ -366,19 +366,21 @@ one job:
 
 | Mechanism | Carries events | Guarantee | Used by |
 |---|---|---|---|
-| **Spring Modulith event publication registry** — `@ApplicationModuleListener` | *Within* the deployable | Transactional. The publication row commits with the event append; incomplete publications are retried on restart | `balance`, `notification` |
-| **Kafka**, via Modulith **`@Externalized`** | *Out of* the deployable | At-least-once, ordered per partition key | `audit` |
+| **Synchronous `@EventListener`** | *Within* the deployable | In-process, inside the publishing transaction. Read-your-writes; no registry row, so nothing to retry | `balance`, `notification` |
+| **Spring Modulith event publication registry**, routed to **Kafka** by `EventExternalizationConfiguration` | *Out of* the deployable | At-least-once, ordered per partition key. The publication row commits with the event append; incomplete publications are republished on restart | `audit` |
 
 Inside one deployable, Kafka between modules is a network hop, a serialisation round-trip and a loss
-of transactional coupling, bought in exchange for nothing. `@ApplicationModuleListener` already gives
-asynchronous, decoupled, retryable delivery with the module boundary enforced at build time.
+of transactional coupling, bought in exchange for nothing. A plain listener already gives decoupled
+delivery with the module boundary enforced at build time, and it costs no infrastructure at all.
 
-**Standalone caveat (v3.5).** The registry mechanism presupposes a persistence module and a
-transaction manager, neither of which exists in the standalone profile — there
+**In-process delivery is synchronous in both profiles (v3.8).** The registry mechanism presupposes a
+persistence module and a transaction manager, neither of which exists in standalone — there
 `@ApplicationModuleListener` (meta-annotated `@Async` + `@TransactionalEventListener`,
-`fallbackExecution=false`) is registered and then silently never invoked. In standalone the
-in-process leg is a plain `@EventListener` on the same listener adapters; the annotation flips to
-`@ApplicationModuleListener` when the full profile wires the publication registry (§3.1).
+`fallbackExecution=false`) is registered and then silently never invoked, which v3.5 recorded. Full
+mode did **not** flip it back: only the externalisation leg is a persisted listener, so the balance
+projection stays a plain synchronous `@EventListener` and read-your-writes is identical in both run
+modes (ADR 0001, "Only persisted listeners get a publication row"). Asynchronous projection is a
+Plan 3 question, not a mode difference.
 
 **So why is Kafka here at all?** Because it is the seam where a module becomes a service, and
 demonstrating that seam is the entire value proposition of a modular monolith. `audit` is therefore
@@ -408,7 +410,7 @@ framework feature — and getting the incomplete-publication retry subtly wrong.
 **Division of labour with `EventPublisherPort` — one mechanism per leg.** The port owns the
 *in-process* leg only: its single implementation wraps Spring's `ApplicationEventPublisher` in both
 run modes, which is what keeps framework types out of the use cases. The *Kafka* leg belongs to
-`@Externalized` entirely — there is no `KafkaEventPublisher` adapter to write, and a port with one
+the programmatic externalisation entirely — there is no `KafkaEventPublisher` adapter to write, and a port with one
 implementation needs no §9.2b contract suite. Same event, two legs, one owner each.
 
 **Topic design — decide correctness, configure the rest.** Exactly two Kafka decisions are design,
@@ -446,7 +448,7 @@ audit/
 
 The listener deserialises, maps the Kafka payload to a use-case input, and calls the port. It holds
 no business logic, so the same use case is driven by a unit test with no broker present. The producer
-side is `@Externalized` and therefore not code we own at all.
+side is Modulith's externalisation and therefore not code we own at all.
 
 ### 4.4 Read path
 
@@ -738,14 +740,15 @@ reviewable in the source.
 
 #### Trace context across async boundaries — the part that usually breaks
 
-A ledger write is `HTTP → command → event append → async projection → Kafka → audit consumer`. Three
-of those arrows cross a thread or process boundary, and on each one an unconfigured setup silently
+A ledger write is `HTTP → command → event append → synchronous projection → Kafka → audit consumer`.
+Two of those arrows cross a thread or process boundary — the projection does not, it runs on the
+publishing thread inside the same transaction (§4.3) — and on each one an unconfigured setup silently
 starts a fresh trace. The result is the classic failure: four disconnected traces and no way to answer
 *"which request caused this audit entry?"*
 
 | Boundary | Loses context because | Fix |
 |---|---|---|
-| `@ApplicationModuleListener` → new thread | Context is thread-local | `ContextPropagatingTaskDecorator` on the Modulith async executor |
+| `@ApplicationModuleListener` → new thread — *not today; applies only if the projection goes async in Plan 3* | Context is thread-local | `ContextPropagatingTaskDecorator` on the Modulith async executor |
 | Event publication registry → retry after restart | The original thread is long gone | Trace context travels *inside the event envelope* (a `traceparent` attribute serialised with the event — the registry schema stays stock); the republished delivery emits a span **linked** to the original |
 | Producer → Kafka → consumer | Different process | W3C `traceparent` in Kafka headers; Spring Kafka propagates it both ways |
 
@@ -1396,3 +1399,4 @@ records the history. When an escalations section is non-empty, it is the canonic
 | 3.5 | 2026-08-04 | Task 8 evidence-based reconciliation: standalone has no publication registry or transaction manager, so `@ApplicationModuleListener` cannot deliver there (absent from starter-core's classpath; with events-core the context fails to start wanting an `EventPublicationRegistry`; with api-only the listener registers and silently never fires — proven RED, `@EventListener` control GREEN). Standalone in-process delivery is plain `@EventListener` on the same listener adapters (§3.1, §4.3); the Modulith annotation returns when full mode wires the registry |
 | 3.6 | 2026-08-04 | Task 10 catalogue completion: §6.5 gains the 501 `/errors/not-available-in-standalone` row — §7 already mandated the standalone-501 behaviour for auditor operations; the error `type` the contract uses now has its catalogue entry so §6.5 stays the single authority |
 | 3.7 | 2026-08-04 | Migration tool selection update: user explicitly requested Liquibase changelogs for schema migrations instead of Flyway |
+| 3.8 | 2026-08-04 | Plan 2 close-out truth alignment (`/code-review` CR14): the spec still promised the mechanism ADR 0001 replaced. Kafka routing is a programmatic `EventExternalizationConfiguration` bean, not `@Externalized` on the events (§4.3, §2 tree, tech table, §4.3 division-of-labour, audit consumer note); the in-process legs (`balance`, `notification`) are plain synchronous `@EventListener` in **both** run modes and carry no publication row, so v3.5's "the annotation returns when full mode wires the registry" is retired rather than fulfilled; §9.7's trace-boundary count drops from three to two because the projection never leaves the publishing thread. No behaviour changed — the code was already this; only the spec was stale |
