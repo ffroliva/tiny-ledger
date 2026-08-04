@@ -7,7 +7,7 @@
 
 ## Why this document is part of the deliverable
 
-the client's coding-stage invitation says, verbatim:
+The coding-stage invitation that prompted this exercise says, verbatim:
 
 > *"Feel free to use AI tools (e.g., Copilot, Claude, Cursor) if they're part of your normal
 > workflow. We're mainly interested in how you think and approach problems, so just be ready to talk
@@ -191,7 +191,7 @@ The section that matters most in an interview, because it is where judgement is 
 
 **Decision: build the full platform, not the minimal solution.**
 
-The `ponytail` skill read the client's brief — *"no more than a few hours"*, *"keep it simple"*, in-memory,
+The `ponytail` skill read the brief — *"no more than a few hours"*, *"keep it simple"*, in-memory,
 explicitly no auth, no monitoring, no atomicity — and produced a spec for four endpoints, four
 domain types and six tests. Against the brief as written, that spec is correct, and I want it on
 record that the argument was made and made well.
