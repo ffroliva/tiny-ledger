@@ -135,13 +135,18 @@ public class LedgerController implements MovementsApi, AuditApi {
         return Optional.empty();
     }
 
-    /** Spec §6.3: {@code CREATED} is a 201, a replay is the original answer, a refusal is a 422. */
+    /**
+     * Spec §6.3: {@code CREATED} is a 201, a replay is the original answer, a refusal is a 422 — and replays
+     * deterministically as the same 422. No {@code default} arm: a new {@link Outcome} constant is meant to
+     * be a compile error here, not a silent 200 on a result with no {@code balanceAfter}.
+     */
     private static ResponseEntity<Transaction> respond(MovementResult result, MovementRequest request) {
-        if (result.outcome() == Outcome.REJECTED || result.outcome() == Outcome.REJECTED_REPLAYED) {
-            throw LedgerApiMapper.rejection(result);
-        }
-        HttpStatus status = result.outcome() == Outcome.CREATED ? HttpStatus.CREATED : HttpStatus.OK;
-        return ResponseEntity.status(status).body(LedgerApiMapper.toTransaction(result, request));
+        return switch (result.outcome()) {
+            case CREATED ->
+                ResponseEntity.status(HttpStatus.CREATED).body(LedgerApiMapper.toTransaction(result, request));
+            case REPLAYED -> ResponseEntity.ok(LedgerApiMapper.toTransaction(result, request));
+            case REJECTED, REJECTED_REPLAYED -> throw LedgerApiMapper.rejection(result);
+        };
     }
 
     private static RuntimeException notAvailableInStandalone() {

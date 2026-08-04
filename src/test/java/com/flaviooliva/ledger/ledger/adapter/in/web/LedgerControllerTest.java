@@ -1,5 +1,7 @@
 package com.flaviooliva.ledger.ledger.adapter.in.web;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -29,6 +31,7 @@ import com.flaviooliva.ledger.shared.Money;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
@@ -197,6 +200,43 @@ class LedgerControllerTest {
                 .andExpect(jsonPath("$.type").value("/errors/invalid-amount"));
 
         verifyNoInteractions(openAccount);
+    }
+
+    @Test // §6.5: pattern-valid but not an ISO 4217 code — the boundary's last line, Currency.getInstance
+    void unknownCurrencyCodeIsBadRequest() throws Exception {
+        mvc.perform(post("/api/v1/accounts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"ACC-001","currency":"ZZZ"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.type").value("/errors/invalid-amount"));
+
+        verifyNoInteractions(openAccount);
+    }
+
+    @Test // §6.5/§6.6: the correlating id, whenever a tracer has put one in the MDC
+    void problemBodiesCarryTheTraceIdWhenTracingIsPresent() throws Exception {
+        given(recordMovement.deposit(any())).willThrow(new IdempotencyConflictException(MOVEMENT));
+        MDC.put("traceId", "7c6f2e1a9b4d5c30");
+        try {
+            deposit()
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.traceId").value("7c6f2e1a9b4d5c30"));
+        } finally {
+            MDC.remove("traceId");
+        }
+    }
+
+    @Test // §6.5: no stack traces, no internal identifiers, no messages cross the boundary
+    void unexpectedFailureLeaksNothing() throws Exception {
+        given(recordMovement.deposit(any())).willThrow(new RuntimeException("boom with secrets"));
+
+        deposit()
+                .andExpect(status().isInternalServerError())
+                .andExpect(content().string(not(containsString("boom"))))
+                .andExpect(content().string(not(containsString("RuntimeException"))))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.status").value(500));
     }
 
     @Test // §4.4: the params-qualified mapping is the write side's own strong read

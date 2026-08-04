@@ -7,6 +7,8 @@ import com.flaviooliva.ledger.ledger.application.error.OwnershipException;
 import com.flaviooliva.ledger.shared.CurrencyMismatchException;
 import jakarta.validation.ConstraintViolationException;
 import java.net.URI;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -35,6 +37,8 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice
 public class ErrorHandlingAdvice {
+
+    private static final Logger log = LoggerFactory.getLogger(ErrorHandlingAdvice.class);
 
     /**
      * §6.5's one 400. {@code ConstraintViolationException} is the request-parameter case: the generated
@@ -89,8 +93,13 @@ public class ErrorHandlingAdvice {
     @ExceptionHandler(Exception.class)
     ResponseEntity<ProblemDetail> unexpected(Exception exception) {
         if (exception instanceof ErrorResponse declared) {
-            return respond(declared.getStatusCode(), traced(declared.getBody()));
+            // §6.5: the declared headers are part of the answer — 405's Allow, 503's Retry-After.
+            return ResponseEntity.status(declared.getStatusCode())
+                    .headers(declared.getHeaders())
+                    .body(traced(declared.getBody()));
         }
+        // The body says nothing, so the log has to: this is the only record a 500 ever leaves.
+        log.error("unhandled exception at the API boundary", exception);
         return respond(
                 HttpStatus.INTERNAL_SERVER_ERROR, traced(ProblemDetail.forStatus(HttpStatus.INTERNAL_SERVER_ERROR)));
     }
