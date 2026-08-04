@@ -30,6 +30,9 @@ public class AuditKafkaListener {
                 header(record, "event-type"),
                 Long.parseLong(header(record, "stream-version")),
                 Instant.parse(header(record, "occurred-at")),
+                // §7's recordedAt: when the audit module saw the event, which is here — the Kafka hop is
+                // exactly the gap between this and occurredAt.
+                Instant.now(),
                 record.value()));
     }
 
