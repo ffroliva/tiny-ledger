@@ -1,11 +1,8 @@
 package com.flaviooliva.ledger.ledger.adapter.in.web;
 
-import com.flaviooliva.ledger.api.generated.api.AuditApi;
 import com.flaviooliva.ledger.api.generated.api.MovementsApi;
 import com.flaviooliva.ledger.api.generated.model.Account;
-import com.flaviooliva.ledger.api.generated.model.AuditEntryList;
 import com.flaviooliva.ledger.api.generated.model.Balance;
-import com.flaviooliva.ledger.api.generated.model.EventList;
 import com.flaviooliva.ledger.api.generated.model.MovementRequest;
 import com.flaviooliva.ledger.api.generated.model.OpenAccountRequest;
 import com.flaviooliva.ledger.api.generated.model.Transaction;
@@ -21,8 +18,6 @@ import com.flaviooliva.ledger.ledger.application.port.in.Withdraw;
 import com.flaviooliva.ledger.shared.AccountId;
 import jakarta.validation.Valid;
 import java.net.URI;
-import java.time.OffsetDateTime;
-import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -31,7 +26,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.context.request.NativeWebRequest;
 
 /**
  * The write side's inbound adapter (spec §7).
@@ -40,16 +34,15 @@ import org.springframework.web.context.request.NativeWebRequest;
  * {@code AccountsApi} is deliberately <em>not</em> implemented: its operations span two modules
  * ({@code openAccount} here, {@code listAccounts}/{@code getAccount} in {@code balance}), and a controller
  * implementing a generated interface registers a mapping for <em>every</em> operation on it — including the
- * ones it did not override. {@code openAccount} is therefore mapped directly. {@code AuditApi} is
- * implemented but both operations are overridden to answer 501 (§7): the generated defaults answer 501 with
- * an empty body, which is not the §6.5 problem detail the catalogue promises.
+ * ones it did not override. {@code openAccount} is therefore mapped directly. {@code AuditApi} belongs to
+ * the {@code audit} module's own controller, which owns both auditor operations in both run modes.
  *
  * <p>The strong read is this module's one read endpoint (§4.4): the {@code params="consistency=strong"}
  * condition makes it strictly more specific than {@code balance}'s parameterless mapping on the same path,
  * so the two coexist without ambiguity and neither module touches the other's store.
  */
 @RestController
-public class LedgerController implements MovementsApi, AuditApi {
+public class LedgerController implements MovementsApi {
 
     private static final String CALLER = AuthorizationConfig.STANDALONE_PRINCIPAL;
 
@@ -110,31 +103,6 @@ public class LedgerController implements MovementsApi, AuditApi {
                 LedgerApiMapper.toBalance(strongBalance.strongBalance(CALLER, new AccountId(accountUid))));
     }
 
-    @Override // §7: auditor operations exist in the full profile only
-    public ResponseEntity<EventList> getEvents(UUID accountUid, String cursor, Integer limit) {
-        throw notAvailableInStandalone();
-    }
-
-    @Override // §7
-    public ResponseEntity<AuditEntryList> listAuditEntries(
-            UUID accountUid,
-            String cursor,
-            Integer limit,
-            OffsetDateTime minTransactionTimestamp,
-            OffsetDateTime maxTransactionTimestamp) {
-        throw notAvailableInStandalone();
-    }
-
-    /**
-     * Both generated interfaces declare their own {@code default getRequest()}, which Java refuses to inherit
-     * twice; every operation here is overridden, so the accessor only ever fed the generated example-response
-     * stubs and {@code Optional.empty()} is what both defaults returned anyway.
-     */
-    @Override
-    public Optional<NativeWebRequest> getRequest() {
-        return Optional.empty();
-    }
-
     /**
      * Spec §6.3: {@code CREATED} is a 201, a replay is the original answer, a refusal is a 422 — and replays
      * deterministically as the same 422. No {@code default} arm: a new {@link Outcome} constant is meant to
@@ -147,10 +115,5 @@ public class LedgerController implements MovementsApi, AuditApi {
             case REPLAYED -> ResponseEntity.ok(LedgerApiMapper.toTransaction(result, request));
             case REJECTED, REJECTED_REPLAYED -> throw LedgerApiMapper.rejection(result);
         };
-    }
-
-    private static RuntimeException notAvailableInStandalone() {
-        return LedgerApiMapper.problem(
-                HttpStatus.NOT_IMPLEMENTED, "/errors/not-available-in-standalone", "Not available in standalone");
     }
 }
