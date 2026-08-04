@@ -24,7 +24,7 @@ public class PostgresEventStoreIT extends EventStoreContract {
 
     @BeforeEach
     void setUp() {
-        jdbcTemplate.execute("TRUNCATE TABLE events, event_outbox RESTART IDENTITY CASCADE");
+        jdbcTemplate.execute("TRUNCATE TABLE events RESTART IDENTITY CASCADE");
     }
 
     @Override
