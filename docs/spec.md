@@ -1251,7 +1251,7 @@ either.
 - **`docker-compose.yml`:** app, Postgres, Kafka (KRaft, no ZooKeeper), Redis, Keycloak with a
   pre-provisioned realm, OTel Collector, Prometheus, Grafana, Tempo, Loki. Healthchecks and dependency
   ordering so `docker compose up` reaches a working system unattended.
-- **Migrations:** Flyway, versioned, applied on startup.
+- **Migrations:** Liquibase, versioned changelogs, applied on startup.
 - **Config:** environment variables only; no secrets in images or compose files — `.env.sample`
   (§1.5) documents every variable.
 ### 12.1 Pipeline (GitHub Actions)
@@ -1321,7 +1321,7 @@ Each step ends green and demonstrable.
 | 2 | `shared` + `ledger` domain, in-memory event store | Unit + architecture tests green — no endpoints yet; §5's rule holds |
 | 3 | OpenAPI contract + generated interfaces | Every §7 operation specified; controller drift breaks the build |
 | 4 | Cucumber feature suite + the §7 endpoints on the in-memory store | Every §2 requirement has a green scenario; `standalone` serves every §7 endpoint except the two auditor operations (`full`-only: `audit` needs Kafka — step 7 — and the role needs auth — step 8). Membership by reference to §7, never by count |
-| 5 | Postgres event store + Flyway + outbox | Integration tests green on Testcontainers |
+| 5 | Postgres event store + Liquibase + outbox | Integration tests green on Testcontainers |
 | 6 | Projections + Redis cache + event-driven eviction | Use-case tests assert projection and cache state |
 | 7 | Kafka relay + `audit` module | Audit trail rebuilt from the stream |
 | 8 | Keycloak + RBAC + rate limiting | Security and rate-limit integration tests green |
@@ -1395,3 +1395,4 @@ records the history. When an escalations section is non-empty, it is the canonic
 | 3.4 | 2026-08-04 | Implementation-time reconciliation: §9.2 framework-free bullet gains the `package-info.java` carve-out — §3 requires Modulith named-interface declarations (`ledger::events`) on the very packages §9.2 fences, and the two met head-on when the ArchUnit rules landed; boundary metadata exempted, rule intent (no framework coupling in domain logic) unchanged |
 | 3.5 | 2026-08-04 | Task 8 evidence-based reconciliation: standalone has no publication registry or transaction manager, so `@ApplicationModuleListener` cannot deliver there (absent from starter-core's classpath; with events-core the context fails to start wanting an `EventPublicationRegistry`; with api-only the listener registers and silently never fires — proven RED, `@EventListener` control GREEN). Standalone in-process delivery is plain `@EventListener` on the same listener adapters (§3.1, §4.3); the Modulith annotation returns when full mode wires the registry |
 | 3.6 | 2026-08-04 | Task 10 catalogue completion: §6.5 gains the 501 `/errors/not-available-in-standalone` row — §7 already mandated the standalone-501 behaviour for auditor operations; the error `type` the contract uses now has its catalogue entry so §6.5 stays the single authority |
+| 3.7 | 2026-08-04 | Migration tool selection update: user explicitly requested Liquibase changelogs for schema migrations instead of Flyway |
