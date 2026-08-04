@@ -1,8 +1,14 @@
 # Tiny Ledger
 
 An event-sourced banking ledger — accounts, deposits, withdrawals, balances — built as a Spring
-Modulith modular monolith. Full design contract: [`docs/spec.md`](docs/spec.md). Full documentation
-map: [`docs/INDEX.md`](docs/INDEX.md).
+Modulith modular monolith.
+
+**Start here:** [`docs/architecture.md`](docs/architecture.md) — three diagrams covering the two run
+modes, the module boundaries and the domain. Ten minutes, and you have the argument.
+
+Full design contract: [`docs/spec.md`](docs/spec.md). How it was built:
+[`docs/agentic-workflow.md`](docs/agentic-workflow.md). Documentation map:
+[`docs/INDEX.md`](docs/INDEX.md).
 
 ## Quickstart (standalone)
 
