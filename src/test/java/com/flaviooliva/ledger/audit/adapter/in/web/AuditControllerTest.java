@@ -78,8 +78,18 @@ class AuditControllerTest {
 
             mvc.perform(get("/api/v1/accounts/{a}/events", ACCOUNT))
                     .andExpect(status().isOk())
-                    .andExpect(
-                            jsonPath("$.links.next").value("/api/v1/accounts/" + ACCOUNT + "/events?cursor=" + CURSOR));
+                    .andExpect(jsonPath("$.links.next")
+                            .value("/api/v1/accounts/" + ACCOUNT + "/events?limit=50&cursor=" + CURSOR));
+        }
+
+        @Test // a next link that dropped the caller's limit would silently reset it to the default
+        void eventStreamNextPageUrlKeepsTheCallersLimit() throws Exception {
+            given(trail.eventStream(ACCOUNT, null, 25)).willReturn(page(CURSOR));
+
+            mvc.perform(get("/api/v1/accounts/{a}/events", ACCOUNT).param("limit", "25"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.links.next")
+                            .value("/api/v1/accounts/" + ACCOUNT + "/events?limit=25&cursor=" + CURSOR));
         }
 
         @Test // §7: the trail is filterable by account and time range; recordedAt is the Kafka hop
@@ -113,7 +123,20 @@ class AuditControllerTest {
             mvc.perform(get("/api/v1/audit/entries").param("accountUid", ACCOUNT.toString()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.links.next")
-                            .value("/api/v1/audit/entries?accountUid=" + ACCOUNT + "&cursor=" + CURSOR));
+                            .value("/api/v1/audit/entries?accountUid=" + ACCOUNT + "&limit=50&cursor=" + CURSOR));
+        }
+
+        @Test // a next link that dropped the caller's limit would page over a different result set
+        void auditTrailNextPageUrlKeepsTheCallersLimit() throws Exception {
+            given(trail.trail(new AuditTrailPort.TrailQuery(ACCOUNT, null, 25, null, null)))
+                    .willReturn(page(CURSOR));
+
+            mvc.perform(get("/api/v1/audit/entries")
+                            .param("accountUid", ACCOUNT.toString())
+                            .param("limit", "25"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.links.next")
+                            .value("/api/v1/audit/entries?accountUid=" + ACCOUNT + "&limit=25&cursor=" + CURSOR));
         }
 
         @Test // §6.5: the contract's limit bounds are enforced at the edge, before the trail is read

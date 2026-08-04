@@ -57,9 +57,11 @@ of failure modes, with every event traversing both. Whichever design wins, the o
 
 ## Decision
 
-**Option B.** Events are annotated `@Externalized`; `spring-modulith-events-kafka` plus the JDBC
-publication store own the relay. `OutboxEventPublisher`, `OutboxEventPublisherIT` and the
-`event_outbox` table are deleted — one relay, not two.
+**Option B.** Routing to Kafka is declared programmatically via an `EventExternalizationConfiguration`
+bean (`FullAdapterConfig`), not `@Externalized` on the events themselves — `domain` carries no
+framework annotations; `spring-modulith-events-kafka` plus the JDBC publication store own the relay.
+`OutboxEventPublisher`, `OutboxEventPublisherIT` and the `event_outbox` table are deleted — one relay,
+not two.
 
 Reasons, in the order they mattered:
 

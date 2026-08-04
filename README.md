@@ -47,15 +47,17 @@ there is no silent truncation to an int.
 
 ## Run modes
 
-The full design ships two run modes from one codebase (spec §1); only one is runnable in this
-build.
+The full design ships two run modes from one codebase (spec §1); both are runnable in this build.
 
 | Mode | Command | What runs | Status |
 |---|---|---|---|
 | **`standalone`** (default) | `./mvnw spring-boot:run` | In-memory event store, in-memory cache, no auth, no broker. Binds `127.0.0.1` only. | Implemented — this build. |
-| **`full`** | `docker compose up` | PostgreSQL, Kafka, Redis, Keycloak, OTel Collector, Prometheus, Grafana, Tempo, Loki. | Arrives in later plans (spec §14) — not runnable yet. |
+| **`full`** | `docker compose -f docker/docker-compose.yml up -d`, then `./mvnw spring-boot:run -Dspring-boot.run.profiles=full` | PostgreSQL, Redis, Kafka (KRaft, no ZooKeeper). Auth (Keycloak) and observability (OTel, Grafana, …) arrive in later plans (spec §14). | Implemented — this build. |
 
 Both modes run the same domain code and the same core ledger API; only the adapters differ.
+
+The `full`-profile adapters are exercised against real Postgres/Redis/Kafka via Testcontainers in
+the integration test suite: `./mvnw verify -Pit`.
 
 ## Auditor endpoints
 
