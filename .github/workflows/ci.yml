@@ -9,8 +9,14 @@ jobs:
         with: { distribution: corretto, java-version: '25', cache: maven }
       - name: "Stage 1 — lint & format"
         run: ./mvnw -q spotless:check
+      # Stages 4-5 (OpenAPI contract generation, @standalone Cucumber) run inside verify below —
+      # the generator and Cucumber's JUnit Platform engine are Maven-bound, not separate steps.
       - name: "Stages 2-3 — compile, unit, JaCoCo gates, architecture"
         run: ./mvnw -q verify
-      # Stage 6 (docs governance) joins in Task 13; stages 7-12 join in Plans 2-4.
+      - name: "Stage 6 — docs governance"
+        # SUBFAILED-line parsing assumes pytest's plain short-summary wording; only verified against
+        # the pytest version pinned in this repo, not proven stable across OS/pytest releases.
+        run: python scripts/ci/check_docs_governance.py
+      # stages 7-12 join in Plans 2-4.
       - name: "resolve-drift placeholder"
         run: echo "python CLI drift job lands in Plan 4 (spec §12.1)"

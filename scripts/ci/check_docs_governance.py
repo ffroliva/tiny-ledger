@@ -18,8 +18,16 @@ def failures(text: str) -> set[str]:
 
 
 def main() -> int:
+    if not BASELINE.is_file():
+        print(f"Gate error: baseline file {BASELINE} not found — nothing to compare against.")
+        return 2
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", str(TEST), "-q"], capture_output=True, text=True
+        # --color=no: SUBFAILED-line parsing matches on line-start; a FORCE_COLOR-ish env var
+        # (seen locally on this machine) makes pytest prefix each line with an ANSI escape and
+        # silently defeats the regex, so force it off rather than trust ambient terminal state.
+        [sys.executable, "-m", "pytest", str(TEST), "-q", "--color=no"],
+        capture_output=True,
+        text=True,
     )
     current = failures(proc.stdout + proc.stderr)
     registered = failures(BASELINE.read_text(encoding="utf-8"))
