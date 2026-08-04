@@ -39,7 +39,11 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
                 jdbcTemplate.update(
                         "INSERT INTO balance_projections (account_id, account_name, owner, currency, balance_minor_units, stream_version, as_of, created_at) "
                                 + "VALUES (?, ?, ?, ?, 0, ?, ?, ?) "
-                                + "ON CONFLICT (account_id) DO UPDATE SET stream_version = GREATEST(balance_projections.stream_version, EXCLUDED.stream_version), as_of = EXCLUDED.as_of",
+                                // Both markers are high-water marks: a replayed opening must drag
+                                // neither the version nor the staleness stamp backwards.
+                                + "ON CONFLICT (account_id) DO UPDATE SET "
+                                + "stream_version = GREATEST(balance_projections.stream_version, EXCLUDED.stream_version), "
+                                + "as_of = GREATEST(balance_projections.as_of, EXCLUDED.as_of)",
                         e.accountId().value(),
                         e.name(),
                         e.owner(),
@@ -115,7 +119,7 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
         // granularity throughout" contract) — otherwise a row sharing the boundary row's millisecond
         // but differing only in the microseconds falls through both cursor arms and is silently
         // dropped from the next page.
-        Timestamp truncated = Timestamp.from(time.truncatedTo(ChronoUnit.MILLIS));
+        Timestamp truncated = millis(time);
         jdbcTemplate.update(
                 "INSERT INTO account_history (transaction_uid, account_id, movement_type, direction, "
                         + "amount_currency, amount_minor_units, balance_after_currency, balance_after_minor_units, "
@@ -133,6 +137,11 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
                 truncated,
                 truncated,
                 reference);
+    }
+
+    /** The millisecond granularity the cursor encoding and the in-memory projection both assume. */
+    private static Timestamp millis(Instant instant) {
+        return Timestamp.from(instant.truncatedTo(ChronoUnit.MILLIS));
     }
 
     @Override
@@ -156,13 +165,16 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
         List<Object> params = new ArrayList<>();
         params.add(accountId.value());
 
+        // transaction_time is stored truncated to millis (insertHistory), so a bound carrying finer
+        // precision would sit past the very row it names and exclude it — and diverge from
+        // InMemoryBalanceProjection, which compares against the untruncated instant.
         if (query.minTransactionTimestamp() != null) {
             sql.append(" AND transaction_time >= ?");
-            params.add(Timestamp.from(query.minTransactionTimestamp()));
+            params.add(millis(query.minTransactionTimestamp()));
         }
         if (query.maxTransactionTimestamp() != null) {
             sql.append(" AND transaction_time <= ?");
-            params.add(Timestamp.from(query.maxTransactionTimestamp()));
+            params.add(millis(query.maxTransactionTimestamp()));
         }
         if (after != null) {
             sql.append(" AND (transaction_time < ? OR (transaction_time = ? AND transaction_uid < ?))");

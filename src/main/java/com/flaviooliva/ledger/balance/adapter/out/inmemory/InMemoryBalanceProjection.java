@@ -17,9 +17,18 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public class InMemoryBalanceProjection implements BalanceProjectionPort {
 
+    /**
+     * §9.2b: Postgres compares {@code uuid} bytewise and unsigned, and it is the reference for both
+     * run modes. {@link UUID#compareTo} reads the two halves as signed longs, so it puts {@code 80…}
+     * <em>below</em> {@code 7f…} — the opposite answer whenever the uid is the only tie-break left.
+     */
+    static final Comparator<UUID> POSTGRES_UUID_ORDER = Comparator.comparing(
+                    UUID::getMostSignificantBits, Long::compareUnsigned)
+            .thenComparing(UUID::getLeastSignificantBits, Long::compareUnsigned);
+
     private static final Comparator<TransactionView> NEWEST_FIRST = Comparator.comparingLong(
                     (TransactionView tx) -> tx.transactionTime().toEpochMilli())
-            .thenComparing(TransactionView::transactionUid)
+            .thenComparing(TransactionView::transactionUid, POSTGRES_UUID_ORDER)
             .reversed();
 
     private final Map<AccountId, Long> appliedVersion = new ConcurrentHashMap<>();
@@ -120,8 +129,9 @@ public class InMemoryBalanceProjection implements BalanceProjectionPort {
     public List<AccountView> accountsOwnedBy(String owner) {
         return accounts.values().stream()
                 .filter(a -> a.owner().equals(owner))
+                // Same tie-break as Postgres's "ORDER BY created_at, account_id" (§9.2b).
                 .sorted(Comparator.comparing(AccountView::createdAt)
-                        .thenComparing(a -> a.accountId().value()))
+                        .thenComparing(a -> a.accountId().value(), POSTGRES_UUID_ORDER))
                 .toList();
     }
 
@@ -157,7 +167,8 @@ public class InMemoryBalanceProjection implements BalanceProjectionPort {
         /** True when {@code tx} sits strictly after this position in newest-first order. */
         boolean precedes(TransactionView tx) {
             long at = tx.transactionTime().toEpochMilli();
-            return at < epochMilli || (at == epochMilli && tx.transactionUid().compareTo(transactionUid) < 0);
+            return at < epochMilli
+                    || (at == epochMilli && POSTGRES_UUID_ORDER.compare(tx.transactionUid(), transactionUid) < 0);
         }
     }
 }
