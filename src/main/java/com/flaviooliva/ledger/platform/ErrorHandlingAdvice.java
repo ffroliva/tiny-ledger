@@ -1,0 +1,115 @@
+package com.flaviooliva.ledger.platform;
+
+import com.flaviooliva.ledger.ledger.application.error.AccountNotFoundException;
+import com.flaviooliva.ledger.ledger.application.error.ConcurrencyConflictException;
+import com.flaviooliva.ledger.ledger.application.error.IdempotencyConflictException;
+import com.flaviooliva.ledger.ledger.application.error.OwnershipException;
+import com.flaviooliva.ledger.shared.CurrencyMismatchException;
+import jakarta.validation.ConstraintViolationException;
+import java.net.URI;
+import org.slf4j.MDC;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.ErrorResponse;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+
+/**
+ * Spec §6.5: the error catalogue, once, for every module — {@code platform} is composition glue rather than
+ * an application module (§3/§4.5, {@code spring.modulith.detection-strategy=explicitly-annotated}), which is
+ * what lets it name exception types from both {@code ledger} and {@code shared} the way {@code config} names
+ * services from both.
+ *
+ * <p>It outranks Boot's own {@code ProblemDetailsExceptionHandler} deliberately: that one is {@code @Order(0)}
+ * and would otherwise answer the validation failures with {@code about:blank}, which carries no
+ * machine-readable code (§7.1's one divergence from Starling).
+ */
+@Order(Ordered.HIGHEST_PRECEDENCE)
+@RestControllerAdvice
+public class ErrorHandlingAdvice {
+
+    /**
+     * §6.5's one 400. {@code ConstraintViolationException} is the request-parameter case: the generated
+     * interfaces are {@code @Validated}, so an implementing controller is method-validation proxied and its
+     * {@code @Min}/{@code @Max} parameter bounds fail through AOP rather than through Spring MVC's own
+     * {@code HandlerMethodValidationException} — both are listed so the answer does not depend on which.
+     */
+    @ExceptionHandler({
+        MethodArgumentNotValidException.class,
+        HttpMessageNotReadableException.class,
+        HandlerMethodValidationException.class,
+        MethodArgumentTypeMismatchException.class,
+        ConstraintViolationException.class,
+        IllegalArgumentException.class
+    })
+    ResponseEntity<ProblemDetail> malformed() {
+        return problem(HttpStatus.BAD_REQUEST, "/errors/invalid-amount", "Invalid amount");
+    }
+
+    @ExceptionHandler(CurrencyMismatchException.class)
+    ResponseEntity<ProblemDetail> currencyMismatch() {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "/errors/currency-mismatch", "Currency mismatch");
+    }
+
+    @ExceptionHandler(AccountNotFoundException.class)
+    ResponseEntity<ProblemDetail> accountNotFound() {
+        return problem(HttpStatus.NOT_FOUND, "/errors/account-not-found", "Account not found");
+    }
+
+    @ExceptionHandler(OwnershipException.class)
+    ResponseEntity<ProblemDetail> forbidden() {
+        return problem(HttpStatus.FORBIDDEN, "/errors/forbidden", "Forbidden");
+    }
+
+    @ExceptionHandler(IdempotencyConflictException.class)
+    ResponseEntity<ProblemDetail> idempotencyConflict() {
+        return problem(HttpStatus.CONFLICT, "/errors/idempotency-conflict", "Idempotency conflict");
+    }
+
+    @ExceptionHandler(ConcurrencyConflictException.class)
+    ResponseEntity<ProblemDetail> versionConflict() {
+        return problem(HttpStatus.CONFLICT, "/errors/version-conflict", "Version conflict");
+    }
+
+    /**
+     * Everything else. An exception that already carries its own answer keeps it — the 422 refusals and the
+     * 501 auditor pair the adapters raise as {@link org.springframework.web.ErrorResponseException}, and
+     * Spring's own 404/405/415, which this handler would otherwise flatten into 500s. Anything left is a
+     * genuine surprise, and nothing internal crosses the boundary with it: no message, no stack trace, no
+     * identifiers (§6.5).
+     */
+    @ExceptionHandler(Exception.class)
+    ResponseEntity<ProblemDetail> unexpected(Exception exception) {
+        if (exception instanceof ErrorResponse declared) {
+            return respond(declared.getStatusCode(), traced(declared.getBody()));
+        }
+        return respond(
+                HttpStatus.INTERNAL_SERVER_ERROR, traced(ProblemDetail.forStatus(HttpStatus.INTERNAL_SERVER_ERROR)));
+    }
+
+    private static ResponseEntity<ProblemDetail> problem(HttpStatus status, String type, String title) {
+        ProblemDetail body = ProblemDetail.forStatus(status);
+        body.setType(URI.create(type));
+        body.setTitle(title);
+        return respond(status, traced(body));
+    }
+
+    private static ResponseEntity<ProblemDetail> respond(HttpStatusCode status, ProblemDetail body) {
+        return ResponseEntity.status(status).body(body);
+    }
+
+    /** §6.5/§6.6: the correlating id, whenever a tracer has put one in the MDC. Plan 3 wires the tracer. */
+    private static ProblemDetail traced(ProblemDetail body) {
+        String traceId = MDC.get("traceId");
+        if (traceId != null) body.setProperty("traceId", traceId);
+        return body;
+    }
+}
