@@ -24,6 +24,9 @@ import org.springframework.transaction.annotation.Transactional;
  */
 public class PostgresBalanceProjection implements BalanceProjectionPort {
 
+    private static final String SELECT_ACCOUNT =
+            "SELECT account_id, account_name, owner, currency, created_at FROM balance_projections";
+
     private final JdbcTemplate jdbcTemplate;
 
     public PostgresBalanceProjection(JdbcTemplate jdbcTemplate) {
@@ -146,11 +149,13 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
 
     @Override
     public Optional<BalanceView> balance(AccountId accountId) {
-        List<BalanceView> results = jdbcTemplate.query(
-                "SELECT account_id, currency, balance_minor_units, as_of, stream_version FROM balance_projections WHERE account_id = ?",
-                balanceRowMapper(),
-                accountId.value());
-        return results.isEmpty() ? Optional.empty() : Optional.of(results.getFirst());
+        return jdbcTemplate
+                .query(
+                        "SELECT account_id, currency, balance_minor_units, as_of, stream_version FROM balance_projections WHERE account_id = ?",
+                        balanceRowMapper(),
+                        accountId.value())
+                .stream()
+                .findFirst();
     }
 
     @Override
@@ -165,9 +170,12 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
         List<Object> params = new ArrayList<>();
         params.add(accountId.value());
 
-        // transaction_time is stored truncated to millis (insertHistory), so a bound carrying finer
-        // precision would sit past the very row it names and exclude it — and diverge from
-        // InMemoryBalanceProjection, which compares against the untruncated instant.
+        // transaction_time is stored floored to millis (insertHistory). The min bound needs the same
+        // flooring: a bound carrying finer precision would sit past the boundary millisecond's rows and
+        // exclude them. The max bound does not — against whole-millisecond rows, t <= b and t <= floor(b)
+        // are the same predicate — but it is floored anyway to keep the pair symmetric, and so the max
+        // stays right if insertHistory ever stops flooring. InMemoryBalanceProjection floors both bounds
+        // and needs both: it stores unfloored instants and floors the row at compare time (§9.2b).
         if (query.minTransactionTimestamp() != null) {
             sql.append(" AND transaction_time >= ?");
             params.add(millis(query.minTransactionTimestamp()));
@@ -177,10 +185,8 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
             params.add(millis(query.maxTransactionTimestamp()));
         }
         if (after != null) {
-            sql.append(" AND (transaction_time < ? OR (transaction_time = ? AND transaction_uid < ?))");
-            Timestamp cursorTs = Timestamp.from(Instant.ofEpochMilli(after.epochMilli()));
-            params.add(cursorTs);
-            params.add(cursorTs);
+            sql.append(" AND (transaction_time, transaction_uid) < (?, ?)");
+            params.add(Timestamp.from(Instant.ofEpochMilli(after.epochMilli())));
             params.add(after.transactionUid());
         }
 
@@ -198,18 +204,15 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
     @Override
     public List<AccountView> accountsOwnedBy(String owner) {
         return jdbcTemplate.query(
-                "SELECT account_id, account_name, owner, currency, created_at FROM balance_projections WHERE owner = ? ORDER BY created_at, account_id",
-                accountRowMapper(),
-                owner);
+                SELECT_ACCOUNT + " WHERE owner = ? ORDER BY created_at, account_id", accountRowMapper(), owner);
     }
 
     @Override
     public Optional<AccountView> account(AccountId accountId) {
-        List<AccountView> results = jdbcTemplate.query(
-                "SELECT account_id, account_name, owner, currency, created_at FROM balance_projections WHERE account_id = ?",
-                accountRowMapper(),
-                accountId.value());
-        return results.isEmpty() ? Optional.empty() : Optional.of(results.getFirst());
+        return jdbcTemplate
+                .query(SELECT_ACCOUNT + " WHERE account_id = ?", accountRowMapper(), accountId.value())
+                .stream()
+                .findFirst();
     }
 
     private RowMapper<BalanceView> balanceRowMapper() {
