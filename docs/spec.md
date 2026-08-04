@@ -14,7 +14,7 @@ next increment (§13) — built as a modular monolith and delivered
 production-ready: containerised, observable, secured, rate-limited, cached, and tested at every
 level from unit to load.
 
-The origin is Teya's *"Build a tiny ledger"* take-home. That brief asks for three features in a few
+The origin is a *"Build a tiny ledger"* take-home exercise. That brief asks for three features in a few
 hours with in-memory storage and explicitly excludes auth, monitoring and atomic operations. This
 specification deliberately goes far beyond it, so the repository ships **two run modes from one
 codebase**:
