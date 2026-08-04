@@ -30,14 +30,8 @@ Feature: Deposits credit the account
       | 0          |
       | -100       |
 
-  # §6.5 names a third malformed shape — a non-integer minorUnits — and the ledger does not honour it:
-  # 100.5 is accepted with 201 and silently truncated to 100 minor units, because Jackson's
-  # ACCEPT_FLOAT_AS_INT is on by default. The row below is EXECUTABLE and excluded by tag, not by
-  # omission: the runner filters `@standalone and not @known-gap`, so it is skipped today and fails
-  # loudly the moment it is run. Closing the gap is one production property
-  # (spring.jackson.deserialization.accept-float-as-int=false); landing it means deleting @known-gap
-  # from this scenario, and nothing else.
-  @N4 @known-gap
+  # §6.5's invalid-amount row also covers a non-integer minorUnits shape.
+  @N4
   Scenario: A deposit whose minorUnits is a non-integer is malformed
     Given an account "ACC-001" in GBP
     When a deposit with a raw minorUnits value of 100.5 is requested into "ACC-001"
