@@ -32,6 +32,7 @@ public class OpenAccountService implements OpenAccountUseCase {
         List<LedgerEvent> events = Account.open(accountId, cmd, clock.now());
         store.append(accountId, 0, events);
         events.forEach(publisher::publish);
-        return new OpenedAccount(accountId, events.getLast().version());
+        return new OpenedAccount(
+                accountId, events.getLast().version(), events.getLast().occurredAt());
     }
 }
