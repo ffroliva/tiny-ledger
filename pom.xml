@@ -118,4 +118,33 @@
       </plugin>
     </plugins>
   </build>
+  <profiles>
+    <profile>
+      <!-- *IT.java suites need Docker (Testcontainers: Postgres, Redis, Kafka). Surefire's default
+           includes already skip them, so plain `./mvnw verify` stays the fast unit pipeline;
+           `./mvnw verify -Pit` adds failsafe to run them. -->
+      <id>it</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <configuration>
+              <includes>
+                <include>**/*IT.java</include>
+              </includes>
+            </configuration>
+            <executions>
+              <execution>
+                <goals>
+                  <goal>integration-test</goal>
+                  <goal>verify</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>
