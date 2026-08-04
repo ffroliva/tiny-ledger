@@ -65,8 +65,7 @@ public class AuditController implements AuditApi {
             // here would silently reset it to the default on every subsequent page.
             body.links(new PageLinks()
                     .next(UriComponentsBuilder.fromPath("/api/v1/accounts/" + accountUid + "/events")
-                            .queryParamIfPresent(
-                                    "limit", Optional.ofNullable(limit).map(AuditController::encoded))
+                            .queryParamIfPresent("limit", encodedIfPresent(limit))
                             .queryParam("cursor", encoded(page.nextCursor()))
                             .build(true)
                             .toUriString()));
@@ -91,17 +90,10 @@ public class AuditController implements AuditApi {
             // caller's limit here would silently page over a different result set.
             body.links(new PageLinks()
                     .next(UriComponentsBuilder.fromPath("/api/v1/audit/entries")
-                            .queryParamIfPresent(
-                                    "accountUid",
-                                    Optional.ofNullable(accountUid).map(AuditController::encoded))
-                            .queryParamIfPresent(
-                                    "minTransactionTimestamp",
-                                    Optional.ofNullable(minTransactionTimestamp).map(AuditController::encoded))
-                            .queryParamIfPresent(
-                                    "maxTransactionTimestamp",
-                                    Optional.ofNullable(maxTransactionTimestamp).map(AuditController::encoded))
-                            .queryParamIfPresent(
-                                    "limit", Optional.ofNullable(limit).map(AuditController::encoded))
+                            .queryParamIfPresent("accountUid", encodedIfPresent(accountUid))
+                            .queryParamIfPresent("minTransactionTimestamp", encodedIfPresent(minTransactionTimestamp))
+                            .queryParamIfPresent("maxTransactionTimestamp", encodedIfPresent(maxTransactionTimestamp))
+                            .queryParamIfPresent("limit", encodedIfPresent(limit))
                             .queryParam("cursor", encoded(page.nextCursor()))
                             .build(true)
                             .toUriString()));
@@ -119,6 +111,11 @@ public class AuditController implements AuditApi {
     private static String encoded(Object value) {
         return UriUtils.encodeQueryParam(value.toString(), StandardCharsets.UTF_8)
                 .replace("+", "%2B");
+    }
+
+    /** An absent optional param is one {@code queryParamIfPresent} leaves out of the link entirely. */
+    private static Optional<String> encodedIfPresent(Object value) {
+        return Optional.ofNullable(value).map(AuditController::encoded);
     }
 
     private AuditTrailPort available() {
