@@ -2,6 +2,7 @@
 | Document | Quadrant | Owner |
 |---|---|---|
 | ../README.md | Tutorial | Flávio Oliva |
+| architecture.md | Explanation | Flávio Oliva |
 | spec.md | Explanation | Flávio Oliva |
 | agentic-workflow.md | Explanation | Flávio Oliva |
 | api/openapi.yaml | Reference | Flávio Oliva |
