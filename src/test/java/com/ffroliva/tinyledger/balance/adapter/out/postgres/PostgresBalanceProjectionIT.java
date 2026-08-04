@@ -131,6 +131,25 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
         assertThat(page.transactions()).hasSize(1);
     }
 
+    // The mirror of the min bound: transaction_time is stored floored to the millisecond, so a max
+    // bound landing earlier inside that same millisecond still names the row. Keeping the stored value
+    // at full precision would push it past the bound here and diverge from the in-memory projection.
+    @Test
+    void historyMaxBoundIncludesTheRowItNames() {
+        AccountId id = AccountId.random();
+        Instant t0 = Instant.parse("2026-08-04T12:00:00Z");
+        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
+
+        Instant storedAt = t0.plusSeconds(60).plusNanos(700_000);
+        projection.apply(new MoneyDeposited(
+                id, 2, storedAt, UUID.randomUUID(), Money.of("GBP", 100), "tx", Money.of("GBP", 100)));
+
+        Instant earlierInTheSameMilli = t0.plusSeconds(60).plusNanos(200_000);
+        HistoryPage page = projection.history(id, new HistoryQuery(null, 10, null, earlierInTheSameMilli));
+
+        assertThat(page.transactions()).hasSize(1);
+    }
+
     @Test
     void historySupportsKeysetPagination() {
         AccountId id = AccountId.random();
