@@ -1,5 +1,12 @@
 # Governance baseline — 2026-08-03 (spec §14 step 0)
 The registered backlog. Stage 6 fails only on regressions against this list.
+
+**Known-inert (Task 13):** the vendored `.claude/skills/iso-compliance/scripts/test_docs_governance.py`
+computes `REPO_ROOT` one directory too shallow for this repo's vendoring depth, so its checks never
+actually scan this repo's real `docs/` tree — Stage 6 will report "17 known, 0 new" regardless of
+what changes in `docs/`. A green Stage 6 does not currently mean anything; fix is `REPO_ROOT` path
+depth in the vendored skill (out of scope here — see the compliance-run roadmap item).
+
 ## Failing checks at baseline
 SUBFAILED(artefact='CHANGELOG.md') .claude/skills/iso-compliance/scripts/test_docs_governance.py::DocsGovernance::test_iso_artefacts_exist
 SUBFAILED(artefact='docs/ISO-COMPLIANCE.md') .claude/skills/iso-compliance/scripts/test_docs_governance.py::DocsGovernance::test_iso_artefacts_exist
