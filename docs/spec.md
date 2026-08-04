@@ -226,7 +226,7 @@ com.flaviooliva.ledger
 │   │   │   └── BalanceCachePort.java
 │   │   └── projection/BalanceProjector.java ← plain class; applies events via the ports
 │   └── adapter/
-│       ├── in/events/LedgerEventsListener.java  ← @ApplicationModuleListener — the inbound adapter driving the projector
+│       ├── in/events/LedgerEventsListener.java  ← the inbound adapter driving the projector — @EventListener in standalone; @ApplicationModuleListener once the full-mode publication registry exists (§4.3)
 │       ├── in/web/BalanceController.java    ← read-side API, same generated OpenAPI interface
 │       └── out/
 │           ├── inmemory/… · postgres/…      ← projection store per run mode
@@ -372,6 +372,13 @@ one job:
 Inside one deployable, Kafka between modules is a network hop, a serialisation round-trip and a loss
 of transactional coupling, bought in exchange for nothing. `@ApplicationModuleListener` already gives
 asynchronous, decoupled, retryable delivery with the module boundary enforced at build time.
+
+**Standalone caveat (v3.5).** The registry mechanism presupposes a persistence module and a
+transaction manager, neither of which exists in the standalone profile — there
+`@ApplicationModuleListener` (meta-annotated `@Async` + `@TransactionalEventListener`,
+`fallbackExecution=false`) is registered and then silently never invoked. In standalone the
+in-process leg is a plain `@EventListener` on the same listener adapters; the annotation flips to
+`@ApplicationModuleListener` when the full profile wires the publication registry (§3.1).
 
 **So why is Kafka here at all?** Because it is the seam where a module becomes a service, and
 demonstrating that seam is the entire value proposition of a modular monolith. `audit` is therefore
@@ -1385,3 +1392,4 @@ records the history. When an escalations section is non-empty, it is the canonic
 | 3.2 | 2026-08-03 | Council rounds 2–3 closure: publication residue cleared from §3.1/§4.5, cache swap unified behind the port, accounts projection + P0/N12, strong-read `params` routing, auditor operations `full`-only, §9.6 pytest-bdd contract, transaction decorator, governance baseline, N2 retry-to-terminal, global idempotency lookup, keyset-over-`Pageable` recorded |
 | 3.3 | 2026-08-03 | Codex final pass: authorise-before-idempotency ordering (§4.1/§6.3), Modulith guarantees configured not assumed (§4.3), framework annotations evicted from domain/application (programmatic externalisation, authz decorator, listener adapter), `findByMovementUid` on the port, brief framing made honest (§1), P0 convergence, 404 row, per-IP backstop, cache TTL contract, CLI name-ambiguity rule, single-entry wording |
 | 3.4 | 2026-08-04 | Implementation-time reconciliation: §9.2 framework-free bullet gains the `package-info.java` carve-out — §3 requires Modulith named-interface declarations (`ledger::events`) on the very packages §9.2 fences, and the two met head-on when the ArchUnit rules landed; boundary metadata exempted, rule intent (no framework coupling in domain logic) unchanged |
+| 3.5 | 2026-08-04 | Task 8 evidence-based reconciliation: standalone has no publication registry or transaction manager, so `@ApplicationModuleListener` cannot deliver there (absent from starter-core's classpath; with events-core the context fails to start wanting an `EventPublicationRegistry`; with api-only the listener registers and silently never fires — proven RED, `@EventListener` control GREEN). Standalone in-process delivery is plain `@EventListener` on the same listener adapters (§3.1, §4.3); the Modulith annotation returns when full mode wires the registry |
