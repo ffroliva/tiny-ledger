@@ -24,6 +24,7 @@ import java.net.URI;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -34,6 +35,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.UriComponentsBuilder;
 
 /**
  * The read side's inbound adapter (spec §4.4, §7).
@@ -111,9 +113,19 @@ public class BalanceController implements BalanceApi {
         TransactionList body = new TransactionList(
                 page.transactions().stream().map(BalanceController::transaction).toList());
         if (page.nextCursor() != null) {
-            // §7: links.next is a URL — the same path carrying the opaque cursor, never re-encoded.
+            // §7: the next page is the same query one cursor further on — carrying only the cursor would
+            // reset the caller's limit to the default and drop the filters, paging a different result
+            // set. Timestamps echo as UTC instants, a form that has no '+' to decode back as a space.
             body.links(new PageLinks()
-                    .next("/api/v1/accounts/" + accountUid + "/transactions?cursor=" + page.nextCursor()));
+                    .next(UriComponentsBuilder.fromPath("/api/v1/accounts/" + accountUid + "/transactions")
+                            .queryParamIfPresent(
+                                    "minTransactionTimestamp", Optional.ofNullable(instant(minTransactionTimestamp)))
+                            .queryParamIfPresent(
+                                    "maxTransactionTimestamp", Optional.ofNullable(instant(maxTransactionTimestamp)))
+                            .queryParam("limit", limit)
+                            .queryParam("cursor", page.nextCursor())
+                            .build()
+                            .toUriString()));
         }
         return ResponseEntity.ok(body);
     }

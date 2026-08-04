@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -15,8 +16,9 @@ import tools.jackson.databind.ObjectMapper;
  * Spec §6.2 balance cache under the {@code full} profile. TTL is Redis's own key expiry, and the
  * projector's {@link #evict} keeps a write from being served stale before the TTL runs out.
  *
- * <p>Non-authoritative, therefore never fatal: every operation swallows whatever the Redis client
- * throws and logs it. A read degrades to a miss the projection answers, a write to no cache entry.
+ * <p>Non-authoritative, therefore never fatal: every operation swallows the {@link DataAccessException}
+ * the template translates a Redis failure into, and logs it. A read degrades to a miss the projection
+ * answers, a write to no cache entry. Anything else still propagates — a bug here is not an outage.
  */
 public class RedisBalanceCache implements BalanceCachePort {
 
@@ -46,7 +48,7 @@ public class RedisBalanceCache implements BalanceCachePort {
                     e);
             evict(accountId);
             return Optional.empty();
-        } catch (RuntimeException e) {
+        } catch (DataAccessException e) {
             log.warn("balance cache get failed for {}, reading through to the projection", accountId.value(), e);
             return Optional.empty();
         }
@@ -56,7 +58,7 @@ public class RedisBalanceCache implements BalanceCachePort {
     public void put(AccountId accountId, BalanceView view) {
         try {
             redis.opsForValue().set(key(accountId), objectMapper.writeValueAsString(view), ttl);
-        } catch (RuntimeException e) {
+        } catch (DataAccessException e) {
             log.warn("balance cache put failed for {}, the next read goes to the projection", accountId.value(), e);
         }
     }
@@ -65,7 +67,7 @@ public class RedisBalanceCache implements BalanceCachePort {
     public void evict(AccountId accountId) {
         try {
             redis.delete(key(accountId));
-        } catch (RuntimeException e) {
+        } catch (DataAccessException e) {
             // The projector evicts inside the append transaction: rethrowing here would roll back a
             // movement because a cache is down. The stale entry expires with its TTL instead.
             log.warn("balance cache evict failed for {}, the entry now expires with its TTL", accountId.value(), e);
