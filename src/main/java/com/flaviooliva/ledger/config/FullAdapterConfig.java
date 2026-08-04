@@ -39,6 +39,9 @@ public class FullAdapterConfig {
     /** Spec §14 step 7: the one stream the audit module consumes. */
     public static final String LEDGER_EVENTS_TOPIC = "ledger.events";
 
+    // A dedicated ObjectMapper, not Spring's shared bean: isolates the persisted event JSON from web
+    // ObjectMapper customizations, so a serializer/module change made for the API can't silently
+    // reshape payloads already written to storage.
     @Bean
     public EventStorePort eventStore(JdbcTemplate jdbcTemplate) {
         return new PostgresEventStore(jdbcTemplate, new ObjectMapper());

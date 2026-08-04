@@ -8,6 +8,7 @@ import com.flaviooliva.ledger.shared.Money;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -109,6 +110,12 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
             Money balanceAfter,
             Instant time,
             String reference) {
+        // F2: truncate to millisecond precision so the stored transaction_time matches the keyset
+        // cursor's millisecond encoding (Cursor below, and InMemoryBalanceProjection's "millisecond
+        // granularity throughout" contract) — otherwise a row sharing the boundary row's millisecond
+        // but differing only in the microseconds falls through both cursor arms and is silently
+        // dropped from the next page.
+        Timestamp truncated = Timestamp.from(time.truncatedTo(ChronoUnit.MILLIS));
         jdbcTemplate.update(
                 "INSERT INTO account_history (transaction_uid, account_id, movement_type, direction, "
                         + "amount_currency, amount_minor_units, balance_after_currency, balance_after_minor_units, "
@@ -123,8 +130,8 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
                 amount.minorUnits(),
                 balanceAfter.currency().getCurrencyCode(),
                 balanceAfter.minorUnits(),
-                Timestamp.from(time),
-                Timestamp.from(time),
+                truncated,
+                truncated,
                 reference);
     }
 

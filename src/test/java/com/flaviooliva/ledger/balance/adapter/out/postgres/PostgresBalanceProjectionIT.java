@@ -9,10 +9,12 @@ import com.flaviooliva.ledger.shared.AccountId;
 import com.flaviooliva.ledger.shared.Money;
 import com.flaviooliva.ledger.testsupport.AbstractIntegrationTest;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Currency;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -115,6 +117,40 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
         HistoryPage page3 = projection.history(id, new HistoryQuery(page2.nextCursor(), 2, null, null));
         assertThat(page3.transactions()).hasSize(1);
         assertThat(page3.nextCursor()).isNull();
+    }
+
+    @Test // F2: cursor.epochMilli() truncates sub-millisecond precision — rows sharing the boundary
+    // row's millisecond but differing only below it must not fall through both cursor arms.
+    void historyPaginationDoesNotDropRowsSharingAMillisecond() {
+        AccountId id = AccountId.random();
+        Instant t0 = Instant.parse("2026-08-04T12:00:00Z");
+        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
+
+        Instant sameMillis = t0.plusSeconds(60);
+        List<UUID> uids = new ArrayList<>();
+        for (int i = 1; i <= 3; i++) {
+            UUID movementUid = UUID.randomUUID();
+            uids.add(movementUid);
+            projection.apply(new MoneyDeposited(
+                    id,
+                    1 + i,
+                    sameMillis.plusNanos(i * 100_000L), // distinct microseconds, same millisecond
+                    movementUid,
+                    Money.of("GBP", 100 * i),
+                    "tx-" + i,
+                    Money.of("GBP", 100 * i)));
+        }
+
+        HistoryPage page1 = projection.history(id, new HistoryQuery(null, 2, null, null));
+        assertThat(page1.transactions()).hasSize(2);
+        assertThat(page1.nextCursor()).isNotNull();
+
+        HistoryPage page2 = projection.history(id, new HistoryQuery(page1.nextCursor(), 2, null, null));
+
+        List<UUID> seenAcrossPages = Stream.concat(page1.transactions().stream(), page2.transactions().stream())
+                .map(TransactionView::transactionUid)
+                .toList();
+        assertThat(seenAcrossPages).containsExactlyInAnyOrderElementsOf(uids);
     }
 
     @Test
