@@ -2,17 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Extend tiny-ledger with full persistence under the `full` profile — Postgres event store with OCC & Flyway migrations, Redis balance cache with event-driven eviction, Spring Modulith Kafka event publication relay, and the `audit` module serving auditor endpoints (`/api/v1/accounts/{accountUid}/events` and `/api/v1/audit/entries`), validated by Testcontainers `*IT` integration suites and Docker Compose.
+**Goal:** Extend tiny-ledger with full persistence under the `full` profile — Postgres event store with OCC & Liquibase migrations, Redis balance cache with event-driven eviction, Spring Modulith Kafka event publication relay, and the `audit` module serving auditor endpoints (`/api/v1/accounts/{accountUid}/events` and `/api/v1/audit/entries`), validated by Testcontainers `*IT` integration suites and Docker Compose.
 
 **Architecture:** 
 - `full` Spring profile activating production adapters alongside `standalone`.
-- **Postgres Event Store**: Flyway-managed schema `events`, optimistic concurrency control on aggregate sequence numbers, client UID idempotency index, transaction outbox table.
+- **Postgres Event Store**: Liquibase-managed schema `events`, optimistic concurrency control on aggregate sequence numbers, client UID idempotency index, transaction outbox table.
 - **Postgres Balance Projection**: Persistent projection store for account balances and transaction history.
 - **Redis Cache Adapter**: `RedisBalanceCache` implementing `BalanceCachePort` with key-based cache invalidation and TTL.
 - **Kafka Relay**: Spring Modulith event publication relay publishing events to Kafka topics.
 - **Audit Module**: Consumes Kafka event streams to maintain audit logs and serve auditor REST endpoints with pagination and filtering.
 
-**Tech Stack:** Java 25, Spring Boot 4.1.0, Spring Modulith (Kafka module), Flyway, PostgreSQL (Driver + Testcontainers), Redis (Lettuce + Testcontainers), Kafka (Spring Kafka + Testcontainers), OpenAPI, ArchUnit.
+**Tech Stack:** Java 25, Spring Boot 4.1.0, Spring Modulith (Kafka module), Liquibase, PostgreSQL (Driver + Testcontainers), Redis (Lettuce + Testcontainers), Kafka (Spring Kafka + Testcontainers), OpenAPI, ArchUnit.
 
 ---
 
@@ -30,20 +30,20 @@
 ## Plan 2 Task Breakdown
 
 ### Task 0: Infrastructure dependencies & Testcontainers Scaffold
-- **Goal**: Add Testcontainers dependencies (PostgreSQL, Redis, Kafka) and Flyway migration support to `pom.xml`. Create base `AbstractIntegrationTest` with shared container configuration.
+- **Goal**: Add Testcontainers dependencies (PostgreSQL, Redis, Kafka) and Liquibase migration support to `pom.xml`. Create base `AbstractIntegrationTest` with shared container configuration.
 - **Model**: `sonnet`
 - **Files**:
   - `pom.xml`
   - `src/test/java/com/flaviooliva/ledger/testsupport/AbstractIntegrationTest.java`
 - **Verification**: `./mvnw test-compile`
 
-### Task 1: Flyway Migrations for Event Store & Outbox (Spec §14 step 5)
-- **Goal**: Create V1 Flyway SQL migration script for `events` table, unique index on `(aggregate_id, sequence_number)`, unique index on `client_movement_uid`, and `event_outbox` table.
+### Task 1: Liquibase Migrations for Event Store & Outbox (Spec §14 step 5)
+- **Goal**: Create V1 Liquibase SQL migration script for `events` table, unique index on `(aggregate_id, sequence_number)`, unique index on `client_movement_uid`, and `event_outbox` table.
 - **Model**: `sonnet`
 - **Files**:
-  - `src/main/resources/db/migration/V1__init_event_store.sql`
-  - `src/test/java/com/flaviooliva/ledger/ledger/adapter/out/postgres/FlywayMigrationTest.java`
-- **Verification**: `./mvnw test -Dtest=FlywayMigrationTest`
+  - `src/main/resources/db/changelog/db.changelog-master.sql`
+  - `src/test/java/com/flaviooliva/ledger/ledger/adapter/out/postgres/LiquibaseMigrationTest.java`
+- **Verification**: `./mvnw test -Dtest=LiquibaseMigrationTest`
 
 ### Task 2: Postgres Event Store Adapter with Optimistic Concurrency & Idempotency (Spec §14 step 5)
 - **Goal**: Implement `PostgresEventStore` implementing `EventStorePort`. Enforce OCC (`ConcurrencyConflictException` on duplicate sequence number) and idempotency (`IdempotencyConflictException` / `DuplicateMovementException`).
@@ -62,7 +62,7 @@
 - **Verification**: `./mvnw test -Dtest=OutboxEventPublisherIT`
 
 ### Task 4: Persistent Postgres Balance Projection & Keyset Pagination (Spec §14 step 6)
-- **Goal**: Add V2 Flyway migration for `balance_projections` and `account_history` tables. Implement `PostgresBalanceProjection` implementing `BalanceProjectionPort`.
+- **Goal**: Add V2 Liquibase migration for `balance_projections` and `account_history` tables. Implement `PostgresBalanceProjection` implementing `BalanceProjectionPort`.
 - **Model**: `opus`
 - **Files**:
   - `src/main/resources/db/migration/V2__init_balance_projection.sql`
