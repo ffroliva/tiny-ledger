@@ -717,6 +717,7 @@ RFC 7807 `ProblemDetail` throughout, via Spring's built-in support
 | Forbidden — wrong role *or* wrong owner | 403 | `/errors/forbidden` |
 | Unknown account | 404 | `/errors/account-not-found` |
 | Event store unreachable | 503 | `/errors/event-store-unavailable`, with `Retry-After` |
+| Auditor operation invoked in standalone | 501 | `/errors/not-available-in-standalone` |
 
 Problem responses carry a `traceId` correlating to the tracing backend. No stack traces, no internal
 identifiers, no SQL fragments cross the boundary.
@@ -1393,3 +1394,4 @@ records the history. When an escalations section is non-empty, it is the canonic
 | 3.3 | 2026-08-03 | Codex final pass: authorise-before-idempotency ordering (§4.1/§6.3), Modulith guarantees configured not assumed (§4.3), framework annotations evicted from domain/application (programmatic externalisation, authz decorator, listener adapter), `findByMovementUid` on the port, brief framing made honest (§1), P0 convergence, 404 row, per-IP backstop, cache TTL contract, CLI name-ambiguity rule, single-entry wording |
 | 3.4 | 2026-08-04 | Implementation-time reconciliation: §9.2 framework-free bullet gains the `package-info.java` carve-out — §3 requires Modulith named-interface declarations (`ledger::events`) on the very packages §9.2 fences, and the two met head-on when the ArchUnit rules landed; boundary metadata exempted, rule intent (no framework coupling in domain logic) unchanged |
 | 3.5 | 2026-08-04 | Task 8 evidence-based reconciliation: standalone has no publication registry or transaction manager, so `@ApplicationModuleListener` cannot deliver there (absent from starter-core's classpath; with events-core the context fails to start wanting an `EventPublicationRegistry`; with api-only the listener registers and silently never fires — proven RED, `@EventListener` control GREEN). Standalone in-process delivery is plain `@EventListener` on the same listener adapters (§3.1, §4.3); the Modulith annotation returns when full mode wires the registry |
+| 3.6 | 2026-08-04 | Task 10 catalogue completion: §6.5 gains the 501 `/errors/not-available-in-standalone` row — §7 already mandated the standalone-501 behaviour for auditor operations; the error `type` the contract uses now has its catalogue entry so §6.5 stays the single authority |
