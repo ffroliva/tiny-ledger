@@ -9,6 +9,7 @@ import com.flaviooliva.ledger.ledger.domain.MoneyDeposited;
 import com.flaviooliva.ledger.ledger.domain.MoneyWithdrawn;
 import com.flaviooliva.ledger.ledger.domain.MovementRejected;
 import com.flaviooliva.ledger.shared.AccountId;
+import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.util.List;
 import java.util.Optional;
@@ -16,6 +17,8 @@ import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -68,8 +71,9 @@ public class PostgresEventStore implements EventStorePort {
         }
 
         long version = expectedVersion;
-        String sql = "INSERT INTO events (aggregate_id, aggregate_type, event_type, sequence_number, payload, created_at, client_movement_uid) VALUES (?, 'Account', ?, ?, ?::jsonb, ?, ?)";
-        
+        String insertEventSql = "INSERT INTO events (aggregate_id, aggregate_type, event_type, sequence_number, payload, created_at, client_movement_uid) VALUES (?, 'Account', ?, ?, ?::jsonb, ?, ?)";
+        String insertOutboxSql = "INSERT INTO event_outbox (id, event_id, aggregate_id, event_type, payload, created_at, processed) VALUES (?, ?, ?, ?, ?::jsonb, ?, false)";
+
         for (LedgerEvent event : events) {
             version++;
             if (event.version() != version) {
@@ -85,23 +89,38 @@ public class PostgresEventStore implements EventStorePort {
             }
 
             UUID clientMovementUid = clientMovementUidOf(event);
+            Timestamp createdAt = Timestamp.from(event.occurredAt());
 
             try {
+                KeyHolder keyHolder = new GeneratedKeyHolder();
+                jdbcTemplate.update(connection -> {
+                    PreparedStatement ps = connection.prepareStatement(insertEventSql, new String[]{"id"});
+                    ps.setObject(1, streamId.value());
+                    ps.setString(2, eventType);
+                    ps.setLong(3, event.version());
+                    ps.setString(4, payload);
+                    ps.setTimestamp(5, createdAt);
+                    ps.setObject(6, clientMovementUid);
+                    return ps;
+                }, keyHolder);
+
+                Long eventId = keyHolder.getKeyAs(Long.class);
+
                 jdbcTemplate.update(
-                        sql,
+                        insertOutboxSql,
+                        UUID.randomUUID(),
+                        eventId,
                         streamId.value(),
                         eventType,
-                        event.version(),
                         payload,
-                        Timestamp.from(event.occurredAt()),
-                        clientMovementUid
+                        createdAt
                 );
             } catch (DuplicateKeyException e) {
                 String message = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
                 if (message.contains("uk_events_client_movement_uid")) {
                     throw new DuplicateMovementException(clientMovementUid);
                 }
-                throw new ConcurrencyConflictException(streamId, expectedVersion, version);
+                throw new ConcurrencyConflictException(streamId, expectedVersion, expectedVersion + 1);
             }
         }
     }
