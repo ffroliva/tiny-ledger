@@ -8,11 +8,14 @@ import com.flaviooliva.ledger.ledger.adapter.out.spring.SpringEventPublisher;
 import com.flaviooliva.ledger.ledger.application.port.in.*;
 import com.flaviooliva.ledger.ledger.application.port.out.*;
 import com.flaviooliva.ledger.ledger.application.usecase.*;
+import com.flaviooliva.ledger.notification.application.NotificationRules;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
+@EnableConfigurationProperties(NotificationProperties.class)
 public class UseCaseConfig { // profile-independent — the whole trick of spec §1
     @Bean
     EventPublisherPort publisher(ApplicationEventPublisher p) {
@@ -54,5 +57,10 @@ public class UseCaseConfig { // profile-independent — the whole trick of spec 
     @Bean
     QueryAccountsUseCase queryAccounts(BalanceProjectionPort projection) {
         return new AccountsQueryService(projection);
+    }
+
+    @Bean
+    NotificationRules notificationRules(NotificationProperties properties) {
+        return new NotificationRules(properties.largeMovementMinorUnits());
     }
 }
