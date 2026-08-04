@@ -6,7 +6,6 @@ import com.flaviooliva.ledger.ledger.domain.*;
 import com.flaviooliva.ledger.shared.AccountId;
 import com.flaviooliva.ledger.shared.Money;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -141,9 +140,15 @@ public class InMemoryBalanceProjection implements BalanceProjectionPort {
     }
 
     private static boolean within(TransactionView tx, HistoryQuery query) {
-        Instant at = tx.transactionTime();
-        return (query.minTransactionTimestamp() == null || !at.isBefore(query.minTransactionTimestamp()))
-                && (query.maxTransactionTimestamp() == null || !at.isAfter(query.maxTransactionTimestamp()));
+        // Millisecond granularity throughout (§9.2b), bounds included: Postgres stores transaction_time
+        // truncated to millis and truncates these same bounds, so comparing finer precision here would
+        // answer differently in the two run modes for one bound — a row inside the boundary millisecond
+        // would be filtered out in standalone and kept in full.
+        long at = tx.transactionTime().toEpochMilli();
+        return (query.minTransactionTimestamp() == null
+                        || at >= query.minTransactionTimestamp().toEpochMilli())
+                && (query.maxTransactionTimestamp() == null
+                        || at <= query.maxTransactionTimestamp().toEpochMilli());
     }
 
     /** Keyset position. Millisecond granularity throughout, so the sort and the cursor agree. */

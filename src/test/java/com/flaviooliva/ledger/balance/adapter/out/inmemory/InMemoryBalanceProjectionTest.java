@@ -56,6 +56,25 @@ class InMemoryBalanceProjectionTest {
                 .containsExactly(MSB_HIGH, MSB_LOW, LSB_HIGH, LSB_LOW);
     }
 
+    /**
+     * The mirror of {@code PostgresBalanceProjectionIT.historyMinBoundIncludesTheRowItNames}: Postgres
+     * stores {@code transaction_time} truncated to millis and truncates the bound too, so a bound
+     * landing later inside the stored row's millisecond still includes it. Comparing full precision
+     * here answered the opposite, which is the §9.2b divergence this closes.
+     */
+    @Test
+    void aFilterBoundInsideTheRowsMillisecondStillIncludesIt() {
+        projection.apply(new AccountOpened(account, 1, T0, "alice", "ACC-001", GBP));
+        Instant storedAt = T0.plusSeconds(60).plusNanos(200_000); // …000200
+        projection.apply(new MoneyDeposited(
+                account, 2, storedAt, UUID.randomUUID(), Money.of("GBP", 100), "tx", Money.of("GBP", 100)));
+
+        Instant laterInTheSameMilli = T0.plusSeconds(60).plusNanos(700_000); // …000700
+        HistoryPage page = projection.history(account, new HistoryQuery(null, 10, laterInTheSameMilli, null));
+
+        assertThat(page.transactions()).hasSize(1);
+    }
+
     private void seed() {
         projection.apply(new AccountOpened(account, 1, T0, "alice", "ACC-001", GBP));
         long version = 2;
