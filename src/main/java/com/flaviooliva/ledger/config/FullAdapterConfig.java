@@ -132,9 +132,13 @@ public class FullAdapterConfig {
                 producerFactory.getConfigurationProperties(), new StringSerializer(), new StringSerializer()));
         // The destination is named rather than left to the default, which is `<topic>-dlt` in Spring
         // Kafka 4 — the operational contract is `ledger.events.DLT`, not whatever the default becomes.
+        // Partition -1 lets the producer place the record by key rather than reusing the source
+        // partition index: that keeps per-account order on the DLT too, and a DLT provisioned with
+        // fewer partitions than `ledger.events` still accepts it. Pinning the index would fail the
+        // publish exactly when the trail depends on it.
         return new DefaultErrorHandler(
                 new DeadLetterPublishingRecoverer(
-                        deadLetters, (record, exception) -> new TopicPartition(LEDGER_EVENTS_DLT, record.partition())),
+                        deadLetters, (record, exception) -> new TopicPartition(LEDGER_EVENTS_DLT, -1)),
                 new FixedBackOff(1_000L, 9));
     }
 

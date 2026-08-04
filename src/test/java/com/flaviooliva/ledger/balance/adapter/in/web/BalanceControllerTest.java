@@ -1,5 +1,7 @@
 package com.flaviooliva.ledger.balance.adapter.in.web;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -116,7 +118,24 @@ class BalanceControllerTest {
                 .andExpect(jsonPath("$.transactions[0].amount.minorUnits").value(2000))
                 .andExpect(jsonPath("$.transactions[0].balanceAfter.minorUnits").value(8000))
                 .andExpect(jsonPath("$.links.next")
-                        .value("/api/v1/accounts/" + ACCOUNT + "/transactions?cursor=" + CURSOR));
+                        .value("/api/v1/accounts/" + ACCOUNT + "/transactions?limit=50&cursor=" + CURSOR));
+    }
+
+    @Test // §7: the next page must repeat the caller's window, not silently widen it
+    void transactionFeedNextPageUrlKeepsTheLimitAndTheFilters() throws Exception {
+        given(queryHistory.history(any(), any())).willReturn(new HistoryPage(List.of(transaction()), CURSOR));
+
+        mvc.perform(get("/api/v1/accounts/{a}/transactions", ACCOUNT)
+                        .param("limit", "25")
+                        .param("minTransactionTimestamp", "2026-08-04T00:00:00+01:00")
+                        .param("maxTransactionTimestamp", "2026-08-05T00:00:00+01:00"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.links.next")
+                        .value("/api/v1/accounts/" + ACCOUNT + "/transactions"
+                                + "?minTransactionTimestamp=2026-08-03T23:00:00Z"
+                                + "&maxTransactionTimestamp=2026-08-04T23:00:00Z&limit=25&cursor=" + CURSOR))
+                // A '+' offset would decode back as a space and 400 the very next page.
+                .andExpect(jsonPath("$.links.next").value(not(containsString("+"))));
     }
 
     @Test // §7: absent once the feed is exhausted
