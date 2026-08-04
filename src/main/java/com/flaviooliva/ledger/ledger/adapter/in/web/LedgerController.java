@@ -111,7 +111,7 @@ public class LedgerController implements MovementsApi, AuditApi {
     }
 
     @Override // §7: auditor operations exist in the full profile only
-    public ResponseEntity<EventList> getEvents(String cursor, Integer limit) {
+    public ResponseEntity<EventList> getEvents(UUID accountUid, String cursor, Integer limit) {
         throw notAvailableInStandalone();
     }
 
