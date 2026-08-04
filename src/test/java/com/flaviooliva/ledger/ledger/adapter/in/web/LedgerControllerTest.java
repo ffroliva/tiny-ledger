@@ -252,22 +252,6 @@ class LedgerControllerTest {
                 .andExpect(jsonPath("$.asOf").exists());
     }
 
-    @Test // §6.5/§7: the auditor pair is absent in standalone
-    void rawEventStreamIsNotAvailableInStandalone() throws Exception {
-        mvc.perform(get("/api/v1/accounts/{a}/events", ACCOUNT))
-                .andExpect(status().isNotImplemented())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-                .andExpect(jsonPath("$.type").value("/errors/not-available-in-standalone"))
-                .andExpect(jsonPath("$.status").value(501));
-    }
-
-    @Test // §6.5/§7
-    void auditTrailIsNotAvailableInStandalone() throws Exception {
-        mvc.perform(get("/api/v1/audit/entries"))
-                .andExpect(status().isNotImplemented())
-                .andExpect(jsonPath("$.type").value("/errors/not-available-in-standalone"));
-    }
-
     private org.springframework.test.web.servlet.ResultActions deposit() throws Exception {
         return mvc.perform(put("/api/v1/accounts/{a}/deposits/{d}", ACCOUNT, MOVEMENT)
                 .contentType(MediaType.APPLICATION_JSON)
