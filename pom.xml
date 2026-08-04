@@ -9,7 +9,7 @@
     <version>4.1.0</version>
     <relativePath/>
   </parent>
-  <groupId>com.flaviooliva</groupId>
+  <groupId>com.ffroliva</groupId>
   <artifactId>tiny-ledger</artifactId>
   <version>0.1.0-SNAPSHOT</version>
   <properties>
@@ -83,8 +83,8 @@
             <configOptions>
               <interfaceOnly>true</interfaceOnly>
               <useSpringBoot3>true</useSpringBoot3>
-              <apiPackage>com.flaviooliva.ledger.api.generated.api</apiPackage>
-              <modelPackage>com.flaviooliva.ledger.api.generated.model</modelPackage>
+              <apiPackage>com.ffroliva.tinyledger.api.generated.api</apiPackage>
+              <modelPackage>com.ffroliva.tinyledger.api.generated.model</modelPackage>
               <useTags>true</useTags>
               <!-- No swagger-annotations and no jackson-databind-nullable on the classpath; keeping
                    the generated sources dependency-free is cheaper than adding either (spec §5). -->
@@ -107,7 +107,7 @@
           <execution><id>check</id><goals><goal>check</goal></goals>
             <configuration><rules><rule>
               <element>PACKAGE</element>
-              <includes><include>com.flaviooliva.ledger.*.domain*</include></includes>
+              <includes><include>com.ffroliva.tinyledger.*.domain*</include></includes>
               <limits>
                 <limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.90</minimum></limit>
                 <limit><counter>BRANCH</counter><value>COVEREDRATIO</value><minimum>0.85</minimum></limit>
