@@ -1,3 +1,6 @@
+--liquibase formatted sql
+
+--changeset flavio:1-init-event-store
 CREATE TABLE events (
     id BIGSERIAL PRIMARY KEY,
     aggregate_id UUID NOT NULL,

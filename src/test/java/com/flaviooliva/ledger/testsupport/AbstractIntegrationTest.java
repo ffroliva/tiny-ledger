@@ -1,5 +1,6 @@
 package com.flaviooliva.ledger.testsupport;
 
+import com.flaviooliva.ledger.LedgerApplication;
 import com.redis.testcontainers.RedisContainer;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
@@ -9,20 +10,20 @@ import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
-@SpringBootTest
+@SpringBootTest(classes = LedgerApplication.class)
 @ActiveProfiles("full")
 public abstract class AbstractIntegrationTest {
 
-    protected static final PostgreSQLContainer<?> POSTGRES =
+    public static final PostgreSQLContainer<?> POSTGRES =
             new PostgreSQLContainer<>(DockerImageName.parse("postgres:16-alpine"))
                     .withDatabaseName("tiny_ledger")
                     .withUsername("ledger")
                     .withPassword("ledger");
 
-    protected static final RedisContainer REDIS =
+    public static final RedisContainer REDIS =
             new RedisContainer(DockerImageName.parse("redis:7-alpine"));
 
-    protected static final KafkaContainer KAFKA =
+    public static final KafkaContainer KAFKA =
             new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.0"));
 
     static {
