@@ -75,6 +75,26 @@ class InMemoryBalanceProjectionTest {
         assertThat(page.transactions()).hasSize(1);
     }
 
+    /**
+     * The other half of the bound contract, mirroring {@code
+     * PostgresBalanceProjectionIT.historyMaxBoundIncludesTheRowItNames}: both sides of the comparison
+     * floor to the millisecond, so a max bound landing <em>earlier</em> inside the stored row's
+     * millisecond still includes it. Comparing the row at full precision would exclude it here and
+     * keep it in full — the §9.2b divergence, in the opposite direction to the min bound.
+     */
+    @Test
+    void aFilterMaxBoundInsideTheRowsMillisecondStillIncludesIt() {
+        projection.apply(new AccountOpened(account, 1, T0, "alice", "ACC-001", GBP));
+        Instant storedAt = T0.plusSeconds(60).plusNanos(700_000); // …000700
+        projection.apply(new MoneyDeposited(
+                account, 2, storedAt, UUID.randomUUID(), Money.of("GBP", 100), "tx", Money.of("GBP", 100)));
+
+        Instant earlierInTheSameMilli = T0.plusSeconds(60).plusNanos(200_000); // …000200
+        HistoryPage page = projection.history(account, new HistoryQuery(null, 10, null, earlierInTheSameMilli));
+
+        assertThat(page.transactions()).hasSize(1);
+    }
+
     private void seed() {
         projection.apply(new AccountOpened(account, 1, T0, "alice", "ACC-001", GBP));
         long version = 2;
