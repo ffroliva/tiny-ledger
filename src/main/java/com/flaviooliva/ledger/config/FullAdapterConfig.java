@@ -22,14 +22,22 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.core.ProducerFactory;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.modulith.events.EventExternalizationConfiguration;
 import org.springframework.modulith.events.RoutingTarget;
+import org.springframework.util.backoff.FixedBackOff;
 import tools.jackson.databind.ObjectMapper;
 
 @Configuration
@@ -38,6 +46,9 @@ public class FullAdapterConfig {
 
     /** Spec §14 step 7: the one stream the audit module consumes. */
     public static final String LEDGER_EVENTS_TOPIC = "ledger.events";
+
+    /** Where a record the audit consumer cannot process is parked instead of skipped. */
+    public static final String LEDGER_EVENTS_DLT = LEDGER_EVENTS_TOPIC + ".DLT";
 
     // A dedicated ObjectMapper, not Spring's shared bean: isolates the persisted event JSON from web
     // ObjectMapper customizations, so a serializer/module change made for the API can't silently
@@ -102,6 +113,29 @@ public class FullAdapterConfig {
     @Bean
     public AuditKafkaListener auditKafkaListener(AuditTrailPort trail) {
         return new AuditKafkaListener(trail);
+    }
+
+    /**
+     * Boot hands a single {@code CommonErrorHandler} bean to the listener container factory. Without
+     * one, {@code DefaultErrorHandler}'s default recoverer logs a record it cannot process, commits
+     * the offset and moves on — a silent, permanent hole in the compliance trail. Nine one-second
+     * retries absorb a transient blip; anything still failing is parked on {@code ledger.events.DLT},
+     * where it can be inspected and replayed.
+     *
+     * <p>Its own producer, built from the auto-configured one's settings: Modulith hands the shared
+     * {@code KafkaTemplate} a {@code byte[]}, while a dead-lettered record carries the String the
+     * audit consumer read.
+     */
+    @Bean
+    public DefaultErrorHandler auditListenerErrorHandler(ProducerFactory<?, ?> producerFactory) {
+        KafkaTemplate<String, String> deadLetters = new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(
+                producerFactory.getConfigurationProperties(), new StringSerializer(), new StringSerializer()));
+        // The destination is named rather than left to the default, which is `<topic>-dlt` in Spring
+        // Kafka 4 — the operational contract is `ledger.events.DLT`, not whatever the default becomes.
+        return new DefaultErrorHandler(
+                new DeadLetterPublishingRecoverer(
+                        deadLetters, (record, exception) -> new TopicPartition(LEDGER_EVENTS_DLT, record.partition())),
+                new FixedBackOff(1_000L, 9));
     }
 
     @Bean

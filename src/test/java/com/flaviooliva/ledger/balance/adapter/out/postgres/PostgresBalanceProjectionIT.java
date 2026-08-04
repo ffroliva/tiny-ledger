@@ -78,11 +78,57 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
     void applyIsIdempotent() {
         AccountId id = AccountId.random();
         Instant t0 = Instant.parse("2026-08-04T12:00:00Z");
+        Instant t1 = Instant.parse("2026-08-04T12:01:00Z");
 
         projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
-        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP)); // replay
+        projection.apply(new MoneyDeposited(
+                id, 2, t1, UUID.randomUUID(), Money.of("GBP", 5000), "salary", Money.of("GBP", 5000)));
+        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP)); // replay of the opening
 
-        assertThat(projection.balance(id)).isPresent();
+        BalanceView balance = projection.balance(id).orElseThrow();
+        assertThat(balance.amount().minorUnits()).isEqualTo(5000);
+        assertThat(balance.streamVersion()).isEqualTo(2);
+        // The staleness marker is a high-water mark: a replayed opening must not drag it backwards.
+        assertThat(balance.asOf()).isEqualTo(t1);
+    }
+
+    @Test // §9.2b: the same-millisecond tie-break the in-memory projection has to mirror
+    void sameMillisecondTiesBreakOnUuidBytewiseUnsigned() {
+        AccountId id = AccountId.random();
+        Instant t0 = Instant.parse("2026-08-04T12:00:00Z");
+        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
+
+        // Straddling the sign boundary of the most, then the least, significant bits.
+        List<UUID> descending = List.of(
+                UUID.fromString("80000000-0000-0000-0000-000000000000"),
+                UUID.fromString("7fffffff-ffff-ffff-ffff-ffffffffffff"),
+                UUID.fromString("00000000-0000-0000-8000-000000000000"),
+                UUID.fromString("00000000-0000-0000-7fff-ffffffffffff"));
+        long version = 2;
+        for (UUID uid : descending) {
+            projection.apply(new MoneyDeposited(
+                    id, version++, t0.plusSeconds(60), uid, Money.of("GBP", 100), "tx", Money.of("GBP", 100)));
+        }
+
+        HistoryPage page = projection.history(id, new HistoryQuery(null, 10, null, null));
+
+        assertThat(page.transactions().stream().map(TransactionView::transactionUid))
+                .containsExactlyElementsOf(descending);
+    }
+
+    @Test // transaction_time is stored truncated to millis, so a full-precision bound must be too
+    void historyMinBoundIncludesTheRowItNames() {
+        AccountId id = AccountId.random();
+        Instant t0 = Instant.parse("2026-08-04T12:00:00Z");
+        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
+
+        Instant microsecondPrecision = t0.plusSeconds(60).plusNanos(500_000);
+        projection.apply(new MoneyDeposited(
+                id, 2, microsecondPrecision, UUID.randomUUID(), Money.of("GBP", 100), "tx", Money.of("GBP", 100)));
+
+        HistoryPage page = projection.history(id, new HistoryQuery(null, 10, microsecondPrecision, null));
+
+        assertThat(page.transactions()).hasSize(1);
     }
 
     @Test

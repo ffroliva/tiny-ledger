@@ -43,5 +43,10 @@ public class PostgresEventStoreIT extends EventStoreContract {
         registry.add("spring.data.redis.port", AbstractIntegrationTest.REDIS::getFirstMappedPort);
 
         registry.add("spring.kafka.bootstrap-servers", AbstractIntegrationTest.KAFKA::getBootstrapServers);
+
+        // This context has an AuditKafkaListener of its own. Started, it joins the `tiny-ledger-audit`
+        // group and can take partitions away from KafkaAuditModuleIT's context; the event store
+        // contract needs no consumer at all, so it never starts.
+        registry.add("spring.kafka.listener.auto-startup", () -> "false");
     }
 }

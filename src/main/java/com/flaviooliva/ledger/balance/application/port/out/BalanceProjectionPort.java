@@ -10,7 +10,19 @@ import java.util.List;
 import java.util.Optional;
 
 public interface BalanceProjectionPort {
-    /** Idempotent on (accountId, version); events ahead of the stream are buffered until the gap fills. */
+    /**
+     * Folds one event into the read model.
+     *
+     * <p>Ordering is the caller's job: an implementation may assume events arrive in stream order per
+     * account. Delivery is at-least-once, so the call must be idempotent on (accountId, version) —
+     * a redelivered event changes nothing.
+     *
+     * <p>{@link com.flaviooliva.ledger.balance.adapter.out.inmemory.InMemoryBalanceProjection} also
+     * buffers events that arrive ahead of the stream until the gap fills. That is a convenience of
+     * that implementation, not part of this contract:
+     * {@link com.flaviooliva.ledger.balance.adapter.out.postgres.PostgresBalanceProjection} does not
+     * buffer, because it is fed synchronously and in order inside the append transaction (ADR 0001).
+     */
     void apply(LedgerEvent event);
 
     Optional<BalanceView> balance(AccountId accountId);

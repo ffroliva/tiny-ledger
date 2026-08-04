@@ -8,6 +8,7 @@ import com.flaviooliva.ledger.api.generated.model.EventList;
 import com.flaviooliva.ledger.api.generated.model.PageLinks;
 import com.flaviooliva.ledger.audit.application.port.out.AuditTrailPort;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -20,6 +21,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.ErrorResponseException;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.web.util.UriUtils;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
@@ -62,11 +64,11 @@ public class AuditController implements AuditApi {
             // §7: the next page is the same query one cursor further on — dropping the caller's limit
             // here would silently reset it to the default on every subsequent page.
             body.links(new PageLinks()
-                    .next(UriComponentsBuilder.fromPath("/api/v1/accounts/{accountUid}/events")
-                            .queryParamIfPresent("limit", Optional.ofNullable(limit))
-                            .queryParam("cursor", page.nextCursor())
-                            .buildAndExpand(accountUid)
-                            .encode()
+                    .next(UriComponentsBuilder.fromPath("/api/v1/accounts/" + accountUid + "/events")
+                            .queryParamIfPresent(
+                                    "limit", Optional.ofNullable(limit).map(AuditController::encoded))
+                            .queryParam("cursor", encoded(page.nextCursor()))
+                            .build(true)
                             .toUriString()));
         }
         return ResponseEntity.ok(body);
@@ -89,18 +91,34 @@ public class AuditController implements AuditApi {
             // caller's limit here would silently page over a different result set.
             body.links(new PageLinks()
                     .next(UriComponentsBuilder.fromPath("/api/v1/audit/entries")
-                            .queryParamIfPresent("accountUid", Optional.ofNullable(accountUid))
                             .queryParamIfPresent(
-                                    "minTransactionTimestamp", Optional.ofNullable(minTransactionTimestamp))
+                                    "accountUid",
+                                    Optional.ofNullable(accountUid).map(AuditController::encoded))
                             .queryParamIfPresent(
-                                    "maxTransactionTimestamp", Optional.ofNullable(maxTransactionTimestamp))
-                            .queryParamIfPresent("limit", Optional.ofNullable(limit))
-                            .queryParam("cursor", page.nextCursor())
-                            .build()
-                            .encode()
+                                    "minTransactionTimestamp",
+                                    Optional.ofNullable(minTransactionTimestamp).map(AuditController::encoded))
+                            .queryParamIfPresent(
+                                    "maxTransactionTimestamp",
+                                    Optional.ofNullable(maxTransactionTimestamp).map(AuditController::encoded))
+                            .queryParamIfPresent(
+                                    "limit", Optional.ofNullable(limit).map(AuditController::encoded))
+                            .queryParam("cursor", encoded(page.nextCursor()))
+                            .build(true)
                             .toUriString()));
         }
         return ResponseEntity.ok(body);
+    }
+
+    /**
+     * Percent-encodes one query value; the builders above are handed pre-encoded components
+     * ({@code build(true)}) so nothing is escaped twice. {@code UriUtils} alone is not enough:
+     * RFC 3986 lists {@code '+'} as a sub-delimiter and leaves it alone, but a query string's
+     * {@code '+'} decodes back as a space — an echoed {@code +01:00} offset would return as
+     * {@code " 01:00"} and 400 the very next page.
+     */
+    private static String encoded(Object value) {
+        return UriUtils.encodeQueryParam(value.toString(), StandardCharsets.UTF_8)
+                .replace("+", "%2B");
     }
 
     private AuditTrailPort available() {
