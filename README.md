@@ -18,7 +18,6 @@ The startup log prints `AUTH DISABLED (standalone)` and binds `127.0.0.1:8080` o
 With the app running, open an account, deposit into it, and read the balance:
 
 ```bash
-./mvnw -q spring-boot:run &
 DEP_UID=$(python -c "import uuid;print(uuid.uuid4())")
 ACC=$(curl -s -X POST 127.0.0.1:8080/api/v1/accounts -H 'Content-Type: application/json' \
   -d '{"name":"ACC-001","currency":"GBP"}' | python -c "import json,sys;print(json.load(sys.stdin)['accountUid'])")
