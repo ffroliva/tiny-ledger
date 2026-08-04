@@ -17,8 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
  * Spec §4.4 read model under the {@code full} profile. Idempotent on (accountId, streamVersion).
  *
  * <p>Unlike {@link com.flaviooliva.ledger.balance.adapter.out.inmemory.InMemoryBalanceProjection}
- * it does not buffer ahead-of-stream events: the outbox relay replays a whole batch on failure, so
- * a gap surfaces as a rolled-back FK violation and is retried in order rather than reordered here.
+ * it does not buffer ahead-of-stream events. It is fed synchronously and in order by the in-process
+ * listener, inside the same transaction as the append (ADR 0001), so a gap can only mean the
+ * transaction failed — and then nothing was written at all.
  */
 public class PostgresBalanceProjection implements BalanceProjectionPort {
 
@@ -49,57 +50,90 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
             case MoneyDeposited e -> {
                 if (isAlreadyApplied(e.accountId(), e.version())) return;
                 updateBalance(e.accountId(), e.balanceAfter(), e.version(), e.occurredAt());
-                insertHistory(e.movementUid(), e.accountId(), MovementType.DEPOSIT, TransactionView.IN,
-                        e.amount(), e.balanceAfter(), e.occurredAt(), e.reference());
+                insertHistory(
+                        e.movementUid(),
+                        e.accountId(),
+                        MovementType.DEPOSIT,
+                        TransactionView.IN,
+                        e.amount(),
+                        e.balanceAfter(),
+                        e.occurredAt(),
+                        e.reference());
             }
             case MoneyWithdrawn e -> {
                 if (isAlreadyApplied(e.accountId(), e.version())) return;
                 updateBalance(e.accountId(), e.balanceAfter(), e.version(), e.occurredAt());
-                insertHistory(e.movementUid(), e.accountId(), MovementType.WITHDRAWAL, TransactionView.OUT,
-                        e.amount(), e.balanceAfter(), e.occurredAt(), e.reference());
+                insertHistory(
+                        e.movementUid(),
+                        e.accountId(),
+                        MovementType.WITHDRAWAL,
+                        TransactionView.OUT,
+                        e.amount(),
+                        e.balanceAfter(),
+                        e.occurredAt(),
+                        e.reference());
             }
             case MovementRejected e -> {
                 if (isAlreadyApplied(e.accountId(), e.version())) return;
                 jdbcTemplate.update(
                         "UPDATE balance_projections SET stream_version = ?, as_of = ? WHERE account_id = ?",
-                        e.version(), Timestamp.from(e.occurredAt()), e.accountId().value());
+                        e.version(),
+                        Timestamp.from(e.occurredAt()),
+                        e.accountId().value());
             }
         }
     }
 
     private boolean isAlreadyApplied(AccountId accountId, long version) {
         List<Long> versions = jdbcTemplate.queryForList(
-                "SELECT stream_version FROM balance_projections WHERE account_id = ?",
-                Long.class, accountId.value());
+                "SELECT stream_version FROM balance_projections WHERE account_id = ?", Long.class, accountId.value());
         return !versions.isEmpty() && versions.getFirst() >= version;
     }
 
     private void updateBalance(AccountId accountId, Money balanceAfter, long version, Instant asOf) {
         jdbcTemplate.update(
                 "UPDATE balance_projections SET balance_minor_units = ?, stream_version = ?, as_of = ?, currency = ? WHERE account_id = ?",
-                balanceAfter.minorUnits(), version, Timestamp.from(asOf),
-                balanceAfter.currency().getCurrencyCode(), accountId.value());
+                balanceAfter.minorUnits(),
+                version,
+                Timestamp.from(asOf),
+                balanceAfter.currency().getCurrencyCode(),
+                accountId.value());
     }
 
-    private void insertHistory(UUID movementUid, AccountId accountId, MovementType type, String direction,
-                               Money amount, Money balanceAfter, Instant time, String reference) {
+    private void insertHistory(
+            UUID movementUid,
+            AccountId accountId,
+            MovementType type,
+            String direction,
+            Money amount,
+            Money balanceAfter,
+            Instant time,
+            String reference) {
         jdbcTemplate.update(
                 "INSERT INTO account_history (transaction_uid, account_id, movement_type, direction, "
                         + "amount_currency, amount_minor_units, balance_after_currency, balance_after_minor_units, "
                         + "status, transaction_time, settlement_time, reference) "
                         + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SETTLED', ?, ?, ?) "
                         + "ON CONFLICT (account_id, transaction_uid) DO NOTHING",
-                movementUid, accountId.value(), type.name(), direction,
-                amount.currency().getCurrencyCode(), amount.minorUnits(),
-                balanceAfter.currency().getCurrencyCode(), balanceAfter.minorUnits(),
-                Timestamp.from(time), Timestamp.from(time), reference);
+                movementUid,
+                accountId.value(),
+                type.name(),
+                direction,
+                amount.currency().getCurrencyCode(),
+                amount.minorUnits(),
+                balanceAfter.currency().getCurrencyCode(),
+                balanceAfter.minorUnits(),
+                Timestamp.from(time),
+                Timestamp.from(time),
+                reference);
     }
 
     @Override
     public Optional<BalanceView> balance(AccountId accountId) {
         List<BalanceView> results = jdbcTemplate.query(
                 "SELECT account_id, currency, balance_minor_units, as_of, stream_version FROM balance_projections WHERE account_id = ?",
-                balanceRowMapper(), accountId.value());
+                balanceRowMapper(),
+                accountId.value());
         return results.isEmpty() ? Optional.empty() : Optional.of(results.getFirst());
     }
 
@@ -108,11 +142,10 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
         int limit = Math.max(1, query.limit());
         Cursor after = query.cursor() == null ? null : Cursor.decode(query.cursor());
 
-        StringBuilder sql = new StringBuilder(
-                "SELECT transaction_uid, account_id, movement_type, direction, "
-                        + "amount_currency, amount_minor_units, balance_after_currency, balance_after_minor_units, "
-                        + "status, transaction_time, settlement_time, reference "
-                        + "FROM account_history WHERE account_id = ?");
+        StringBuilder sql = new StringBuilder("SELECT transaction_uid, account_id, movement_type, direction, "
+                + "amount_currency, amount_minor_units, balance_after_currency, balance_after_minor_units, "
+                + "status, transaction_time, settlement_time, reference "
+                + "FROM account_history WHERE account_id = ?");
         List<Object> params = new ArrayList<>();
         params.add(accountId.value());
 
@@ -147,14 +180,16 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
     public List<AccountView> accountsOwnedBy(String owner) {
         return jdbcTemplate.query(
                 "SELECT account_id, account_name, owner, currency, created_at FROM balance_projections WHERE owner = ? ORDER BY created_at, account_id",
-                accountRowMapper(), owner);
+                accountRowMapper(),
+                owner);
     }
 
     @Override
     public Optional<AccountView> account(AccountId accountId) {
         List<AccountView> results = jdbcTemplate.query(
                 "SELECT account_id, account_name, owner, currency, created_at FROM balance_projections WHERE account_id = ?",
-                accountRowMapper(), accountId.value());
+                accountRowMapper(),
+                accountId.value());
         return results.isEmpty() ? Optional.empty() : Optional.of(results.getFirst());
     }
 
@@ -173,7 +208,9 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
                 MovementType.valueOf(rs.getString("movement_type")),
                 rs.getString("direction"),
                 new Money(Currency.getInstance(rs.getString("amount_currency")), rs.getLong("amount_minor_units")),
-                new Money(Currency.getInstance(rs.getString("balance_after_currency")), rs.getLong("balance_after_minor_units")),
+                new Money(
+                        Currency.getInstance(rs.getString("balance_after_currency")),
+                        rs.getLong("balance_after_minor_units")),
                 rs.getString("status"),
                 rs.getTimestamp("transaction_time").toInstant(),
                 rs.getTimestamp("settlement_time").toInstant(),

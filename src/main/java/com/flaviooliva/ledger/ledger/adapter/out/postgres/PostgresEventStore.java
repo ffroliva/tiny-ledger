@@ -9,7 +9,6 @@ import com.flaviooliva.ledger.ledger.domain.MoneyDeposited;
 import com.flaviooliva.ledger.ledger.domain.MoneyWithdrawn;
 import com.flaviooliva.ledger.ledger.domain.MovementRejected;
 import com.flaviooliva.ledger.shared.AccountId;
-import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.util.List;
 import java.util.Optional;
@@ -17,8 +16,7 @@ import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.jdbc.support.KeyHolder;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -57,27 +55,33 @@ public class PostgresEventStore implements EventStorePort {
         return null;
     }
 
+    /**
+     * NESTED, not REQUIRED: the use case now runs in one transaction (ADR 0001) and recovers from
+     * a losing idempotency race by reading the winning event back. A duplicate-key failure aborts
+     * the whole Postgres transaction, so that read would fail too — the savepoint a nested
+     * transaction takes is what lets the caller carry on after the conflict.
+     */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.NESTED)
     public void append(AccountId streamId, long expectedVersion, List<LedgerEvent> events) {
         Long currentVersion = jdbcTemplate.queryForObject(
                 "SELECT COALESCE(MAX(sequence_number), 0) FROM events WHERE aggregate_id = ?",
                 Long.class,
-                streamId.value()
-        );
+                streamId.value());
         long current = currentVersion != null ? currentVersion : 0;
         if (current != expectedVersion) {
             throw new ConcurrencyConflictException(streamId, expectedVersion, current);
         }
 
         long version = expectedVersion;
-        String insertEventSql = "INSERT INTO events (aggregate_id, aggregate_type, event_type, sequence_number, payload, created_at, client_movement_uid) VALUES (?, 'Account', ?, ?, ?::jsonb, ?, ?)";
-        String insertOutboxSql = "INSERT INTO event_outbox (id, event_id, aggregate_id, event_type, payload, created_at, processed) VALUES (?, ?, ?, ?, ?::jsonb, ?, false)";
+        String insertEventSql =
+                "INSERT INTO events (aggregate_id, aggregate_type, event_type, sequence_number, payload, created_at, client_movement_uid) VALUES (?, 'Account', ?, ?, ?::jsonb, ?, ?)";
 
         for (LedgerEvent event : events) {
             version++;
             if (event.version() != version) {
-                throw new IllegalArgumentException("Event version mismatch: expected " + version + " but got " + event.version());
+                throw new IllegalArgumentException(
+                        "Event version mismatch: expected " + version + " but got " + event.version());
             }
 
             String eventType = event.getClass().getSimpleName();
@@ -92,29 +96,14 @@ public class PostgresEventStore implements EventStorePort {
             Timestamp createdAt = Timestamp.from(event.occurredAt());
 
             try {
-                KeyHolder keyHolder = new GeneratedKeyHolder();
-                jdbcTemplate.update(connection -> {
-                    PreparedStatement ps = connection.prepareStatement(insertEventSql, new String[]{"id"});
-                    ps.setObject(1, streamId.value());
-                    ps.setString(2, eventType);
-                    ps.setLong(3, event.version());
-                    ps.setString(4, payload);
-                    ps.setTimestamp(5, createdAt);
-                    ps.setObject(6, clientMovementUid);
-                    return ps;
-                }, keyHolder);
-
-                Long eventId = keyHolder.getKeyAs(Long.class);
-
                 jdbcTemplate.update(
-                        insertOutboxSql,
-                        UUID.randomUUID(),
-                        eventId,
+                        insertEventSql,
                         streamId.value(),
                         eventType,
+                        event.version(),
                         payload,
-                        createdAt
-                );
+                        createdAt,
+                        clientMovementUid);
             } catch (DuplicateKeyException e) {
                 String message = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
                 if (message.contains("uk_events_client_movement_uid")) {
