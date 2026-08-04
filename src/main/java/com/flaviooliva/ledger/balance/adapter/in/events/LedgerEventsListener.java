@@ -8,8 +8,8 @@ import org.springframework.stereotype.Component;
 /**
  * The only Spring-touching piece of {@code balance}: turns published ledger events into projection writes.
  *
- * <p>DEVIATION (pending spec-deviation ruling): the brief mandates {@code @ApplicationModuleListener}.
- * That annotation is not on this classpath at all ({@code spring-modulith-starter-core} does not pull
+ * <p>RATIFIED (spec v3.5, §4.3 "Standalone caveat"): the brief mandates {@code @ApplicationModuleListener},
+ * but that annotation is not on this classpath at all ({@code spring-modulith-starter-core} does not pull
  * {@code spring-modulith-events-api}, and {@code spring-tx} is test-scope only). Adding those two
  * dependencies makes it compile but the method never fires: it is meta-annotated
  * {@code @TransactionalEventListener}, whose {@code fallbackExecution} defaults to {@code false}, and
@@ -17,7 +17,9 @@ import org.springframework.stereotype.Component;
  * Adding {@code spring-modulith-events-core} (its {@code @Async}/{@code @EnableAsync} support) breaks
  * startup outright — {@code EventPublicationAutoConfiguration} demands an {@code EventPublicationRegistry},
  * i.e. a database. Plain {@code @EventListener} delivers synchronously with zero new dependencies;
- * {@code LedgerEventsListenerTest} is the standing proof.
+ * {@code LedgerEventsListenerTest} is the standing proof. Spec v3.5 governs this as the standalone
+ * profile's mechanism: {@code @EventListener} here, and the annotation flips back to
+ * {@code @ApplicationModuleListener} when the full profile wires the publication registry (§3.1).
  */
 @Component
 public class LedgerEventsListener {
