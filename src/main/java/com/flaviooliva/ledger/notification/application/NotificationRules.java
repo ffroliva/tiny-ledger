@@ -1,5 +1,6 @@
 package com.flaviooliva.ledger.notification.application;
 
+import com.flaviooliva.ledger.ledger.domain.AccountOpened;
 import com.flaviooliva.ledger.ledger.domain.LedgerEvent;
 import com.flaviooliva.ledger.ledger.domain.MoneyDeposited;
 import com.flaviooliva.ledger.ledger.domain.MoneyWithdrawn;
@@ -29,6 +30,7 @@ public class NotificationRules {
             case MoneyWithdrawn w
             when isLarge(w.amount().minorUnits()) ->
                 Optional.of(notify(w.movementUid(), w, "LARGE_MOVEMENT", w.amount()));
+            case AccountOpened a -> Optional.empty();
             default -> Optional.empty();
         };
     }

@@ -31,7 +31,8 @@ public class RecordMovementService implements RecordMovementUseCase {
                 cmd.movementUid(),
                 account -> account.deposit(cmd, clock.now()),
                 MovementType.DEPOSIT,
-                cmd.amount());
+                cmd.amount(),
+                cmd.reference());
     }
 
     @Override
@@ -42,7 +43,8 @@ public class RecordMovementService implements RecordMovementUseCase {
                 cmd.movementUid(),
                 account -> account.withdraw(cmd, clock.now()),
                 MovementType.WITHDRAWAL,
-                cmd.amount());
+                cmd.amount(),
+                cmd.reference());
     }
 
     private MovementResult record(
@@ -51,35 +53,42 @@ public class RecordMovementService implements RecordMovementUseCase {
             UUID movementUid,
             java.util.function.Function<Account, List<LedgerEvent>> action,
             MovementType type,
-            com.flaviooliva.ledger.shared.Money amount) {
+            com.flaviooliva.ledger.shared.Money amount,
+            String reference) {
         List<LedgerEvent> history = store.read(accountId); // ①
         if (history.isEmpty()) throw new AccountNotFoundException(accountId);
         Account account = Account.rehydrate(history); // ②
         if (!account.owner().equals(caller)) throw new OwnershipException(caller, accountId); // ③
         Optional<LedgerEvent> existing = store.findByMovementUid(movementUid); // ④ (after authz)
-        if (existing.isPresent()) return replayOf(existing.get(), accountId, type, amount);
+        if (existing.isPresent()) return replayOf(existing.get(), accountId, type, amount, reference);
         List<LedgerEvent> events = action.apply(account); // ⑤
         try {
             store.append(accountId, account.version(), events); // ⑥
         } catch (DuplicateMovementException raced) {
-            return replayOf(store.findByMovementUid(movementUid).orElseThrow(), accountId, type, amount);
+            return replayOf(store.findByMovementUid(movementUid).orElseThrow(), accountId, type, amount, reference);
         }
         events.forEach(publisher::publish); // ⑦
         return resultOf(events.getFirst(), Outcome.CREATED, Outcome.REJECTED); // ⑧
     }
 
     private MovementResult replayOf(
-            LedgerEvent event, AccountId requested, MovementType type, com.flaviooliva.ledger.shared.Money amount) {
+            LedgerEvent event,
+            AccountId requested,
+            MovementType type,
+            com.flaviooliva.ledger.shared.Money amount,
+            String reference) {
         boolean samePayload =
                 switch (event) {
                     case MoneyDeposited d ->
                         d.accountId().equals(requested)
                                 && type == MovementType.DEPOSIT
-                                && d.amount().equals(amount);
+                                && d.amount().equals(amount)
+                                && java.util.Objects.equals(d.reference(), reference);
                     case MoneyWithdrawn w ->
                         w.accountId().equals(requested)
                                 && type == MovementType.WITHDRAWAL
-                                && w.amount().equals(amount);
+                                && w.amount().equals(amount)
+                                && java.util.Objects.equals(w.reference(), reference);
                     case MovementRejected r ->
                         r.accountId().equals(requested)
                                 && r.type() == type
