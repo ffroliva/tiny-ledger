@@ -143,7 +143,7 @@ identity (§6.3) — and an optional free-text `reference` that travels to the f
 ## 3. Module structure (Spring Modulith)
 
 One deployable, one Maven module, package-per-application-module under
-`com.flaviooliva.ledger`. Boundaries are verified at build time by
+`com.ffroliva.tinyledger`. Boundaries are verified at build time by
 `ApplicationModules.of(LedgerApplication.class).verify()`.
 
 **Four application modules, one open kernel, one non-module platform package.**
@@ -189,7 +189,7 @@ organises **layer-first** (domain / application / adapters). These are orthogona
 combination is: *module at the top level, layers inside each module.*
 
 ```
-com.flaviooliva.ledger
+com.ffroliva.tinyledger
 ├── shared/                              ← open module: Money, AccountId, Currency
 ├── ledger/                              ← closed module — the write side
 │   ├── package-info.java                ← @ApplicationModule, allowedDependencies
@@ -488,7 +488,7 @@ path, two disambiguated mappings, each inside its owning module.
 
 ### 4.5 Composition root — the mechanism behind the two run modes
 
-Wiring lives in exactly one place, `com.flaviooliva.ledger.config`, as Spring `@Configuration`
+Wiring lives in exactly one place, `com.ffroliva.tinyledger.config`, as Spring `@Configuration`
 classes selected by profile. Nothing else in the codebase constructs an adapter, and no use-case or
 domain class carries a Spring stereotype annotation — use cases are plain classes instantiated by the
 composition root with constructor injection.

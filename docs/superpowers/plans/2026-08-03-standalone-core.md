@@ -18,7 +18,7 @@ openapi-generator (contract-first), spotless + JaCoCo.
 
 ## Global Constraints (from docs/spec.md v3.3 — the contract; cite it, don't re-decide it)
 
-- Package root `com.flaviooliva.ledger`; module/package layout exactly §3.1.
+- Package root `com.ffroliva.tinyledger`; module/package layout exactly §3.1.
 - Versions come from `dr-jskill`'s `versions.json` — bump there first, then `pom.xml` properties (§1.5). Boot **4.1.0**, Java **25**.
 - **Jackson 3** annotations/imports from the start (`tools.jackson.*` where applicable) — never Jackson 2 (§1.5).
 - `.properties`, never YAML; `@ConfigurationProperties` for typed config (§1.5).
@@ -40,7 +40,7 @@ openapi-generator (contract-first), spotless + JaCoCo.
 pom.xml · mvnw · .mvn/ · .editorconfig · .gitattributes
 docs/ (scaffold: INDEX.md, CHANGELOG.md, tutorial/, how-to/, api/openapi.yaml, governance-baseline.md)
 scripts/ci/check_docs_governance.py
-src/main/java/com/flaviooliva/ledger/
+src/main/java/com/ffroliva/tinyledger/
   LedgerApplication.java
   shared/  Money, AccountId, CurrencyMismatchException, package-info (OPEN module)
   ledger/  package-info · domain/{LedgerEvent,AccountOpened,MoneyDeposited,MoneyWithdrawn,
@@ -178,9 +178,9 @@ git commit -m "docs: Diátaxis scaffold and governance baseline (spec §14 step 
 **Files:**
 - Create: `pom.xml`, Maven wrapper (`mvn wrapper:wrapper -Dmaven=3.9.9` or copy from dr-jskill assets), `.editorconfig`, `.gitattributes` (from `.claude/skills/dr-jskill/assets/`)
 - Create: `.github/workflows/ci.yml` (spec §14 step 1 — CI from the skeleton onward)
-- Create: `src/main/java/com/flaviooliva/ledger/LedgerApplication.java`
+- Create: `src/main/java/com/ffroliva/tinyledger/LedgerApplication.java`
 - Create: `package-info.java` for `shared` (open), `ledger`, `balance`, `audit`, `notification`
-- Test: `src/test/java/com/flaviooliva/ledger/architecture/ModulithTest.java`
+- Test: `src/test/java/com/ffroliva/tinyledger/architecture/ModulithTest.java`
 
 **Interfaces:**
 - Produces: the build every later task runs (`./mvnw -q verify`); module boundaries as compile-time fact.
@@ -199,7 +199,7 @@ git commit -m "docs: Diátaxis scaffold and governance baseline (spec §14 step 
     <version>4.1.0</version>
     <relativePath/>
   </parent>
-  <groupId>com.flaviooliva</groupId>
+  <groupId>com.ffroliva</groupId>
   <artifactId>tiny-ledger</artifactId>
   <version>0.1.0-SNAPSHOT</version>
   <properties>
@@ -248,7 +248,7 @@ git commit -m "docs: Diátaxis scaffold and governance baseline (spec §14 step 
           <execution><id>check</id><goals><goal>check</goal></goals>
             <configuration><rules><rule>
               <element>PACKAGE</element>
-              <includes><include>com.flaviooliva.ledger.*.domain*</include></includes>
+              <includes><include>com.ffroliva.tinyledger.*.domain*</include></includes>
               <limits>
                 <limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.90</minimum></limit>
                 <limit><counter>BRANCH</counter><value>COVEREDRATIO</value><minimum>0.85</minimum></limit>
@@ -266,7 +266,7 @@ git commit -m "docs: Diátaxis scaffold and governance baseline (spec §14 step 
 
 `LedgerApplication.java`:
 ```java
-package com.flaviooliva.ledger;
+package com.ffroliva.tinyledger;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -284,22 +284,22 @@ public class LedgerApplication {
 `shared/package-info.java`:
 ```java
 @org.springframework.modulith.ApplicationModule(type = org.springframework.modulith.ApplicationModule.Type.OPEN)
-package com.flaviooliva.ledger.shared;
+package com.ffroliva.tinyledger.shared;
 ```
 
 `ledger/package-info.java` (same pattern for `balance`, `audit`, `notification`, with the
 `allowedDependencies` from spec §3: ledger→`shared`; balance/audit/notification→`shared`, `ledger::events`):
 ```java
 @org.springframework.modulith.ApplicationModule(allowedDependencies = {"shared"})
-package com.flaviooliva.ledger.ledger;
+package com.ffroliva.tinyledger.ledger;
 ```
 
 - [ ] **Step 3: Write the failing Modulith verification test**
 
 ```java
-package com.flaviooliva.ledger.architecture;
+package com.ffroliva.tinyledger.architecture;
 
-import com.flaviooliva.ledger.LedgerApplication;
+import com.ffroliva.tinyledger.LedgerApplication;
 import org.junit.jupiter.api.Test;
 import org.springframework.modulith.core.ApplicationModules;
 
@@ -348,7 +348,7 @@ git commit -m "feat: Maven skeleton, module markers, Modulith verification, CI (
 
 **Files:**
 - Create: `shared/Money.java`, `shared/AccountId.java`, `shared/CurrencyMismatchException.java`
-- Test: `src/test/java/com/flaviooliva/ledger/shared/MoneyTest.java`
+- Test: `src/test/java/com/ffroliva/tinyledger/shared/MoneyTest.java`
 
 **Interfaces:**
 - Produces: `record Money(java.util.Currency currency, long minorUnits)` with
@@ -359,7 +359,7 @@ git commit -m "feat: Maven skeleton, module markers, Modulith verification, CI (
 - [ ] **Step 1: Write the failing tests**
 
 ```java
-package com.flaviooliva.ledger.shared;
+package com.ffroliva.tinyledger.shared;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -402,7 +402,7 @@ class MoneyTest {
 - [ ] **Step 3: Implement**
 
 ```java
-package com.flaviooliva.ledger.shared;
+package com.ffroliva.tinyledger.shared;
 
 import java.util.Currency;
 import java.util.Objects;
@@ -439,7 +439,7 @@ public record Money(Currency currency, long minorUnits) {
 ```
 
 ```java
-package com.flaviooliva.ledger.shared;
+package com.ffroliva.tinyledger.shared;
 
 public class CurrencyMismatchException extends RuntimeException {
     public CurrencyMismatchException(String expected, String actual) {
@@ -449,7 +449,7 @@ public class CurrencyMismatchException extends RuntimeException {
 ```
 
 ```java
-package com.flaviooliva.ledger.shared;
+package com.ffroliva.tinyledger.shared;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -476,7 +476,7 @@ public record AccountId(UUID value) {
 **Files:**
 - Create: `ledger/domain/{MovementType,LedgerEvent,AccountOpened,MoneyDeposited,MoneyWithdrawn,MovementRejected,Account}.java`, `ledger/domain/policy/OverdraftPolicy.java`
 - Create: `ledger/application/port/in/{OpenAccount,Deposit,Withdraw}.java` (commands)
-- Test: `src/test/java/com/flaviooliva/ledger/ledger/domain/AccountTest.java`
+- Test: `src/test/java/com/ffroliva/tinyledger/ledger/domain/AccountTest.java`
 
 **Interfaces (Produces — every later task relies on these exact shapes):**
 
@@ -512,11 +512,11 @@ Rejection reasons are the §6.5 slugs: `"insufficient-funds"`, `"currency-mismat
 - [ ] **Step 1: Write the failing tests** — one test per §2.2 invariant plus the rejection paths:
 
 ```java
-package com.flaviooliva.ledger.ledger.domain;
+package com.ffroliva.tinyledger.ledger.domain;
 
 import static org.assertj.core.api.Assertions.*;
 
-import com.flaviooliva.ledger.shared.*;
+import com.ffroliva.tinyledger.shared.*;
 import java.time.Instant;
 import java.util.*;
 import org.junit.jupiter.api.Test;
@@ -619,11 +619,11 @@ test's own `history` list — the assertions are the contract.)
 - [ ] **Step 3: Implement the events/commands exactly as the Interfaces block, then `Account`:**
 
 ```java
-package com.flaviooliva.ledger.ledger.domain;
+package com.ffroliva.tinyledger.ledger.domain;
 
-import com.flaviooliva.ledger.ledger.application.port.in.*;
-import com.flaviooliva.ledger.ledger.domain.policy.OverdraftPolicy;
-import com.flaviooliva.ledger.shared.*;
+import com.ffroliva.tinyledger.ledger.application.port.in.*;
+import com.ffroliva.tinyledger.ledger.domain.policy.OverdraftPolicy;
+import com.ffroliva.tinyledger.shared.*;
 import java.time.Instant;
 import java.util.Currency;
 import java.util.List;
@@ -703,9 +703,9 @@ public final class Account {
 
 `policy/OverdraftPolicy.java`:
 ```java
-package com.flaviooliva.ledger.ledger.domain.policy;
+package com.ffroliva.tinyledger.ledger.domain.policy;
 
-import com.flaviooliva.ledger.shared.Money;
+import com.ffroliva.tinyledger.shared.Money;
 
 public final class OverdraftPolicy {
     private OverdraftPolicy() {}
@@ -726,14 +726,14 @@ public final class OverdraftPolicy {
 ### Task 4: Architecture rules — ArchUnit (spec §9.2)
 
 **Files:**
-- Test: `src/test/java/com/flaviooliva/ledger/architecture/HexagonalRulesTest.java`
+- Test: `src/test/java/com/ffroliva/tinyledger/architecture/HexagonalRulesTest.java`
 
 **Interfaces:** Consumes the package layout from Tasks 1–3. Produces the mechanical governance every later task builds under.
 
 - [ ] **Step 1: Write the rules (they must PASS against Tasks 1–3's code — they are the executable §9.2):**
 
 ```java
-package com.flaviooliva.ledger.architecture;
+package com.ffroliva.tinyledger.architecture;
 
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
@@ -742,7 +742,7 @@ import com.tngtech.archunit.lang.ArchRule;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.*;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
-@AnalyzeClasses(packages = "com.flaviooliva.ledger")
+@AnalyzeClasses(packages = "com.ffroliva.tinyledger")
 class HexagonalRulesTest {
 
     @ArchTest
@@ -769,7 +769,7 @@ class HexagonalRulesTest {
 
     @ArchTest
     static final ArchRule noCyclicPackages = slices()
-            .matching("com.flaviooliva.ledger.(*)..").should().beFreeOfCycles();
+            .matching("com.ffroliva.tinyledger.(*)..").should().beFreeOfCycles();
 
     @ArchTest // §9.2 anti-CRUD: one use case, one service
     static final ArchRule noServiceDependsOnAnotherService = noClasses()
@@ -779,7 +779,7 @@ class HexagonalRulesTest {
     @ArchTest // §4.6: wire DTOs only below the web adapter
     static final ArchRule generatedDtosStayInWebAdapters = noClasses()
             .that().resideOutsideOfPackage("..adapter.in.web..")
-            .should().dependOnClassesThat().resideInAPackage("com.flaviooliva.ledger.api.generated..");
+            .should().dependOnClassesThat().resideInAPackage("com.ffroliva.tinyledger.api.generated..");
 
     @ArchTest // §3.1: time and identity arrive through ports
     static final ArchRule domainNeverCallsNowOrRandomUuid = noClasses()
@@ -802,7 +802,7 @@ class HexagonalRulesTest {
 - Create: `ledger/application/port/in/{OpenAccountUseCase,RecordMovementUseCase,QueryStrongBalanceUseCase,OpenedAccount,MovementResult,Outcome,StrongBalance}.java`
 - Create: `ledger/application/error/{ConcurrencyConflictException,DuplicateMovementException,IdempotencyConflictException,OwnershipException,AccountNotFoundException}.java`
 - Create: `ledger/application/usecase/{OpenAccountService,RecordMovementService,StrongBalanceService}.java`
-- Test: `src/test/java/com/flaviooliva/ledger/ledger/application/RecordMovementServiceTest.java`
+- Test: `src/test/java/com/ffroliva/tinyledger/ledger/application/RecordMovementServiceTest.java`
 
 **Interfaces (Produces):**
 
@@ -849,16 +849,16 @@ re-read by UID and answer as ④; ⑦ publish each event; ⑧ build result
 - [ ] **Step 1: Write the failing tests** — in-memory fakes inline in the test class:
 
 ```java
-package com.flaviooliva.ledger.ledger.application;
+package com.ffroliva.tinyledger.ledger.application;
 
 import static org.assertj.core.api.Assertions.*;
 
-import com.flaviooliva.ledger.ledger.application.error.*;
-import com.flaviooliva.ledger.ledger.application.port.in.*;
-import com.flaviooliva.ledger.ledger.application.port.out.*;
-import com.flaviooliva.ledger.ledger.application.usecase.*;
-import com.flaviooliva.ledger.ledger.domain.*;
-import com.flaviooliva.ledger.shared.*;
+import com.ffroliva.tinyledger.ledger.application.error.*;
+import com.ffroliva.tinyledger.ledger.application.port.in.*;
+import com.ffroliva.tinyledger.ledger.application.port.out.*;
+import com.ffroliva.tinyledger.ledger.application.usecase.*;
+import com.ffroliva.tinyledger.ledger.domain.*;
+import com.ffroliva.tinyledger.shared.*;
 import java.time.Instant;
 import java.util.*;
 import org.junit.jupiter.api.*;
@@ -980,13 +980,13 @@ class RecordMovementServiceTest {
 - [ ] **Step 3: Implement** ports/records/exceptions exactly as the Interfaces block, then:
 
 ```java
-package com.flaviooliva.ledger.ledger.application.usecase;
+package com.ffroliva.tinyledger.ledger.application.usecase;
 
-import com.flaviooliva.ledger.ledger.application.error.*;
-import com.flaviooliva.ledger.ledger.application.port.in.*;
-import com.flaviooliva.ledger.ledger.application.port.out.*;
-import com.flaviooliva.ledger.ledger.domain.*;
-import com.flaviooliva.ledger.shared.AccountId;
+import com.ffroliva.tinyledger.ledger.application.error.*;
+import com.ffroliva.tinyledger.ledger.application.port.in.*;
+import com.ffroliva.tinyledger.ledger.application.port.out.*;
+import com.ffroliva.tinyledger.ledger.domain.*;
+import com.ffroliva.tinyledger.shared.AccountId;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -1014,7 +1014,7 @@ public class RecordMovementService implements RecordMovementUseCase {
 
     private MovementResult record(String caller, AccountId accountId, UUID movementUid,
                                   java.util.function.Function<Account, List<LedgerEvent>> action,
-                                  MovementType type, com.flaviooliva.ledger.shared.Money amount) {
+                                  MovementType type, com.ffroliva.tinyledger.shared.Money amount) {
         List<LedgerEvent> history = store.read(accountId);
         if (history.isEmpty()) throw new AccountNotFoundException(accountId);
         Account account = Account.rehydrate(history);
@@ -1032,7 +1032,7 @@ public class RecordMovementService implements RecordMovementUseCase {
     }
 
     private MovementResult replayOf(LedgerEvent event, AccountId requested, MovementType type,
-                                    com.flaviooliva.ledger.shared.Money amount) {
+                                    com.ffroliva.tinyledger.shared.Money amount) {
         boolean samePayload = switch (event) {
             case MoneyDeposited d -> d.accountId().equals(requested) && type == MovementType.DEPOSIT && d.amount().equals(amount);
             case MoneyWithdrawn w -> w.accountId().equals(requested) && type == MovementType.WITHDRAWAL && w.amount().equals(amount);
@@ -1081,7 +1081,7 @@ follow the same shape — both plain classes, both constructor-injected ports on
 
 **Files:**
 - Create: `ledger/adapter/out/inmemory/InMemoryEventStore.java`
-- Test: `src/test/java/com/flaviooliva/ledger/contract/EventStoreContract.java`, `.../InMemoryEventStoreTest.java`
+- Test: `src/test/java/com/ffroliva/tinyledger/contract/EventStoreContract.java`, `.../InMemoryEventStoreTest.java`
 
 **Interfaces:**
 - Consumes: `EventStorePort` (Task 5).
@@ -1092,14 +1092,14 @@ follow the same shape — both plain classes, both constructor-injected ports on
 - [ ] **Step 1: Write the contract suite (failing — no adapter yet):**
 
 ```java
-package com.flaviooliva.ledger.contract;
+package com.ffroliva.tinyledger.contract;
 
 import static org.assertj.core.api.Assertions.*;
 
-import com.flaviooliva.ledger.ledger.application.error.*;
-import com.flaviooliva.ledger.ledger.application.port.out.EventStorePort;
-import com.flaviooliva.ledger.ledger.domain.*;
-import com.flaviooliva.ledger.shared.*;
+import com.ffroliva.tinyledger.ledger.application.error.*;
+import com.ffroliva.tinyledger.ledger.application.port.out.EventStorePort;
+import com.ffroliva.tinyledger.ledger.domain.*;
+import com.ffroliva.tinyledger.shared.*;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
@@ -1187,12 +1187,12 @@ class InMemoryEventStoreTest extends EventStoreContract {
 - [ ] **Step 3: Implement**
 
 ```java
-package com.flaviooliva.ledger.ledger.adapter.out.inmemory;
+package com.ffroliva.tinyledger.ledger.adapter.out.inmemory;
 
-import com.flaviooliva.ledger.ledger.application.error.*;
-import com.flaviooliva.ledger.ledger.application.port.out.EventStorePort;
-import com.flaviooliva.ledger.ledger.domain.*;
-import com.flaviooliva.ledger.shared.AccountId;
+import com.ffroliva.tinyledger.ledger.application.error.*;
+import com.ffroliva.tinyledger.ledger.application.port.out.EventStorePort;
+import com.ffroliva.tinyledger.ledger.domain.*;
+import com.ffroliva.tinyledger.shared.AccountId;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -1253,7 +1253,7 @@ public class InMemoryEventStore implements EventStorePort {
 - Create: `config/{StandaloneAdapterConfig,UseCaseConfig,AuthorizationConfig}.java`
 - Create: `platform/{FailClosedGuard,StartupBanner}.java`
 - Create: `src/main/resources/application.properties`, `application-standalone.properties`
-- Test: `src/test/java/com/flaviooliva/ledger/config/FailClosedGuardTest.java`
+- Test: `src/test/java/com/ffroliva/tinyledger/config/FailClosedGuardTest.java`
 
 **Interfaces:**
 - Produces: Spring context that boots in `standalone`; `UseCaseConfig` beans
@@ -1264,11 +1264,11 @@ public class InMemoryEventStore implements EventStorePort {
 - [ ] **Step 1: Failing guard test** (ApplicationContextRunner):
 
 ```java
-package com.flaviooliva.ledger.config;
+package com.ffroliva.tinyledger.config;
 
 import static org.assertj.core.api.Assertions.*;
 
-import com.flaviooliva.ledger.platform.FailClosedGuard;
+import com.ffroliva.tinyledger.platform.FailClosedGuard;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
@@ -1294,7 +1294,7 @@ class FailClosedGuardTest {
 - [ ] **Step 2: Run** — FAIL. **Step 3: Implement:**
 
 ```java
-package com.flaviooliva.ledger.platform;
+package com.ffroliva.tinyledger.platform;
 
 import org.springframework.context.EnvironmentAware;
 import org.springframework.context.annotation.Configuration;
@@ -1327,12 +1327,12 @@ public class FailClosedGuard implements EnvironmentAware {
 `TransactionTemplate` decorator arrives with Postgres in Plan 2; authz decorator is real now):
 
 ```java
-package com.flaviooliva.ledger.config;
+package com.ffroliva.tinyledger.config;
 
-import com.flaviooliva.ledger.ledger.adapter.out.spring.SpringEventPublisher;
-import com.flaviooliva.ledger.ledger.application.port.in.*;
-import com.flaviooliva.ledger.ledger.application.port.out.*;
-import com.flaviooliva.ledger.ledger.application.usecase.*;
+import com.ffroliva.tinyledger.ledger.adapter.out.spring.SpringEventPublisher;
+import com.ffroliva.tinyledger.ledger.application.port.in.*;
+import com.ffroliva.tinyledger.ledger.application.port.out.*;
+import com.ffroliva.tinyledger.ledger.application.usecase.*;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -1484,8 +1484,8 @@ listener adapter delegates; log adapter emits one structured SLF4J line
   (`{"accounts":[…]}`, `{"transactions":[…],"links":{"next":…}}`), `ProblemDetail` responses per the
   §6.5 catalogue, `consistency` query param enum `[strong]`, cursor + `minTransactionTimestamp`/`maxTransactionTimestamp` params, security scheme `bearerAuth` (enforced in Plan 3)
 - Modify: `pom.xml` — `openapi-generator-maven-plugin` (`generatorName=spring`,
-  `interfaceOnly=true`, `useSpringBoot3=true`, `apiPackage=com.flaviooliva.ledger.api.generated.api`,
-  `modelPackage=com.flaviooliva.ledger.api.generated.model`, `useTags=true`)
+  `interfaceOnly=true`, `useSpringBoot3=true`, `apiPackage=com.ffroliva.tinyledger.api.generated.api`,
+  `modelPackage=com.ffroliva.tinyledger.api.generated.model`, `useTags=true`)
 
 **Interfaces:**
 - Produces: generated `AccountsApi`, `MovementsApi`, `BalanceApi`, `TransactionsApi`, `AuditApi`
@@ -1552,7 +1552,7 @@ Expected: 201 → deposit JSON with `balanceAfter`; balance JSON with `asOf` + `
 ### Task 12: Cucumber `@standalone` suite (spec §9.3, §14 step 4)
 
 **Files:**
-- Create: `src/test/java/com/flaviooliva/ledger/cucumber/{CucumberTest,CucumberSpringConfig,LedgerSteps}.java`
+- Create: `src/test/java/com/ffroliva/tinyledger/cucumber/{CucumberTest,CucumberSpringConfig,LedgerSteps}.java`
 - Create: `src/test/resources/features/{accounts.feature,deposits.feature,withdrawals.feature,history.feature,idempotency.feature,notification.feature,eventual-consistency.feature}`
 - Create: test utility `cucumber/PausableListenerGate.java` (test-profile bean the listener adapter consults; `pause()`/`resume()` — E1/E2's deliberate stale window)
 

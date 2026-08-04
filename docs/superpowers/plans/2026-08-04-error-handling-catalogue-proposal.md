@@ -37,7 +37,7 @@ the cause.
 
 **`TinyLedgerException`** — an abstract `RuntimeException` in `shared`, carrying an `ErrorCode` and
 message arguments. The six existing exceptions extend it. Named for the system, not the `ledger`
-*module* — `com.flaviooliva.ledger.ledger` already exists, so `LedgerException` would read as that
+*module* — `com.ffroliva.tinyledger.ledger` already exists, so `LedgerException` would read as that
 module's exception when it is the supertype for `audit`, `balance` and `notification` too.
 
 **One translation point** — a single `@ExceptionHandler(TinyLedgerException.class)` in `platform`
@@ -102,30 +102,35 @@ field varies — which is also the direction the approved Open Banking item poin
 A domain exception hierarchy; `ErrorResponse` on the `shared` parent; per-module hierarchies; any i18n
 resolution machinery before there is a human reading the output.
 
-## Companion decision — root package rename to `com.flaviooliva.tinyledger`
+## Companion decision — root package rename to `com.ffroliva.tinyledger`
 
-Decided by the user 2026-08-04, in the same discussion: the root package becomes
-`com.flaviooliva.tinyledger`, so the module package stops doubling the word
-(`com.flaviooliva.ledger.ledger` → `com.flaviooliva.tinyledger.ledger`). `tledger` was considered and
+**Done in this branch**, at the user's request, before the merge to `main` — so `main` receives the
+final names in one history rather than a 110-file rename landing on top of them.
+
+`com.flaviooliva.ledger` → `com.ffroliva.tinyledger`, folding two decisions into one sweep: align the
+package with the GitHub account (`github.com/ffroliva`), and stop the module package doubling the word
+(`com.flaviooliva.ledger.ledger` → `com.ffroliva.tinyledger.ledger`). `tledger` was considered and
 rejected as less readable — the abbreviation saves four characters in a string that is autocompleted,
-at the cost of a prefix needing explanation forever.
+at the cost of a prefix needing explanation forever. `groupId` became `com.ffroliva`, keeping Maven's
+convention that the group is the org's reverse domain and `artifactId` (`tiny-ledger`) is the project.
 
-**Do it as its own commit, separate from any behaviour change.** It touches 110 of 110 Java files, so
-mixing it with real work makes the diff unreviewable and invalidates any outstanding review that cites
-`file:line`. Alone, "both pipelines green, zero behaviour delta" is a complete proof of it.
+It travelled as its own commit with no behaviour change, so "both pipelines green, zero behaviour
+delta" is a complete proof of it.
 
 Touchpoints beyond the Java files:
 
-- `pom.xml`: `<apiPackage>`, `<modelPackage>` (OpenAPI generator) and JaCoCo's
-  `<include>com.flaviooliva.ledger.*.domain*</include>` domain-coverage rule.
+- `pom.xml`, four places: `<groupId>`, `<apiPackage>`, `<modelPackage>` (OpenAPI generator) and JaCoCo's
+  `<include>com.ffroliva.tinyledger.*.domain*</include>` domain-coverage rule.
 - `docs/spec.md` §2 source tree, and the plan documents.
 - Nothing in `*.properties` — verified clean.
 
-**The trap:** several references are *string literals*, not symbols, so an IDE "rename package" will
-not finish the job — `HexagonalRulesTest`'s `@AnalyzeClasses(packages = "com.flaviooliva.ledger")`, the
-`generatedDtosStayInWebAdapters` rule's `"com.flaviooliva.ledger.api.generated.."`, and the JaCoCo
-include above. Missed, the architecture fence analyses nothing and still reports green. Run with
-`clean` so the generator re-emits into the new packages.
+**The trap, for anyone repeating this:** five references are *string literals*, not symbols, so an IDE
+"rename package" does not finish the job — `HexagonalRulesTest`'s `@AnalyzeClasses(packages = …)`, its
+`slices().matching("…​.(*)..")` cycle rule, the `generatedDtosStayInWebAdapters` fence's two
+`api.generated..` strings, `CucumberTest`'s `GLUE_PROPERTY_NAME`, and the JaCoCo include above. Missed,
+the architecture rules analyse an empty class set and **still report green** — a silently disabled
+fence. Verify by asserting zero occurrences of the old name remain, not by reading the test output. Run
+with `clean` so the generator re-emits into the new packages.
 
 ## Open questions for Plan 3 planning
 
