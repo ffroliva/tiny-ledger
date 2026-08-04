@@ -1,0 +1,828 @@
+openapi: 3.1.0
+info:
+  title: Tiny Ledger API
+  version: 1.0.0
+  summary: Event-sourced ledger — accounts, money movements, balances and audit trail.
+  description: |
+    The contract precedes the code (spec §5): server interfaces and DTOs are generated from this
+    document, so a controller that drifts from it fails compilation.
+
+    Conventions (spec §7, §7.1 records each adoption from the Starling Bank public API):
+
+    - Identifiers are UUIDs named `<entity>Uid` — never `id`, never a database key.
+    - Money is one shape everywhere: `{"currency": "GBP", "minorUnits": 10000}`. `minorUnits` is an
+      `int64` of pence or cents. No float, no decimal string.
+    - Money movement is `PUT` to a client-generated movement UID: the UID is both the dedup key and
+      the movement's permanent identity (§6.3). There is no idempotency header.
+    - Lists are wrapped in a named key and paginated by an opaque cursor (`links.next`).
+    - Errors are RFC 7807 problem details (§6.5), never Starling's `{"errors": [...]}`.
+
+    The two auditor operations (`getEvents`, `listAuditEntries`) exist in the `full` profile only;
+    the `standalone` profile answers them `501` (§7).
+  contact:
+    name: Flávio Oliva
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: /
+    description: The deployable itself — path versioning lives in the paths (§7.1).
+tags:
+  - name: accounts
+    description: Opening accounts and reading account metadata.
+  - name: movements
+    description: Deposits and withdrawals — idempotent `PUT` on a client-generated UID (§6.3).
+  - name: balance
+    description: The account balance, with its staleness markers (§4.4).
+  - name: transactions
+    description: The account's transaction feed — cursor-paginated, newest first.
+  - name: audit
+    description: Auditor-only operations. `full` profile only; `standalone` answers `501` (§7).
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/accounts:
+    post:
+      tags: [accounts]
+      operationId: openAccount
+      summary: Open an account
+      description: Requires `ledger:writer`. The `accountUid` is server-generated (§6.3).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenAccountRequest'
+      responses:
+        '201':
+          description: Account opened.
+          headers:
+            Location:
+              description: The URI of the account just opened.
+              required: true
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/EventStoreUnavailable' }
+    get:
+      tags: [accounts]
+      operationId: listAccounts
+      summary: List the caller's own accounts
+      description: |
+        Scoped to the JWT subject — a caller never sees another principal's accounts (§9.3 N12).
+        Requires `ledger:reader`.
+      responses:
+        '200':
+          description: The caller's accounts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountList'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/EventStoreUnavailable' }
+
+  /api/v1/accounts/{accountUid}:
+    parameters:
+      - $ref: '#/components/parameters/AccountUid'
+    get:
+      tags: [accounts]
+      operationId: getAccount
+      summary: Read account metadata
+      responses:
+        '200':
+          description: The account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/AccountNotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/EventStoreUnavailable' }
+
+  /api/v1/accounts/{accountUid}/deposits/{depositUid}:
+    parameters:
+      - $ref: '#/components/parameters/AccountUid'
+      - name: depositUid
+        in: path
+        required: true
+        description: Client-generated UUID — the deposit's identity and its dedup key (§6.3).
+        schema:
+          type: string
+          format: uuid
+    put:
+      tags: [movements]
+      operationId: putDeposit
+      summary: Deposit money
+      description: |
+        Idempotent by identity (§6.3): the first write answers `201`, a replay of the same UID with
+        the same payload answers `200` with the original result, and the same UID with a different
+        payload answers `409`. Lookups are global — reusing a UID against a different account is a
+        `409`, not a fresh movement.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MovementRequest'
+      responses:
+        '201':
+          description: Deposit recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '200':
+          description: Replay of an identical deposit — the original result, never re-applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/AccountNotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: Currency mismatch with the account (§6.5).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                currencyMismatch:
+                  $ref: '#/components/examples/CurrencyMismatch'
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/EventStoreUnavailable' }
+
+  /api/v1/accounts/{accountUid}/withdrawals/{withdrawalUid}:
+    parameters:
+      - $ref: '#/components/parameters/AccountUid'
+      - name: withdrawalUid
+        in: path
+        required: true
+        description: Client-generated UUID — the withdrawal's identity and its dedup key (§6.3).
+        schema:
+          type: string
+          format: uuid
+    put:
+      tags: [movements]
+      operationId: putWithdrawal
+      summary: Withdraw money
+      description: |
+        Idempotent by identity (§6.3). Rejections replay deterministically: retrying a refused
+        withdrawal with the same UID returns the original `422`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MovementRequest'
+      responses:
+        '201':
+          description: Withdrawal recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '200':
+          description: Replay of an identical withdrawal — the original result, never re-applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/AccountNotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: |
+            The movement was refused by a business invariant (§6.5) — insufficient funds, or a
+            currency mismatch with the account. The `type` distinguishes them.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                insufficientFunds:
+                  summary: Insufficient funds
+                  value:
+                    type: /errors/insufficient-funds
+                    title: Insufficient funds
+                    status: 422
+                    detail: The account balance is lower than the requested withdrawal.
+                    traceId: 7c6f2e1a9b4d5c30
+                currencyMismatch:
+                  $ref: '#/components/examples/CurrencyMismatch'
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/EventStoreUnavailable' }
+
+  /api/v1/accounts/{accountUid}/balance:
+    parameters:
+      - $ref: '#/components/parameters/AccountUid'
+    get:
+      tags: [balance]
+      operationId: getBalance
+      summary: Read the account balance
+      description: |
+        Served from the projection by default, which is eventually consistent — `asOf` and
+        `streamVersion` are the staleness markers (§4.4). `consistency=strong` bypasses cache and
+        projection, folding the event stream instead.
+      parameters:
+        - name: consistency
+          in: query
+          required: false
+          description: |
+            `strong` reads through to the event store. Omit for the projection read.
+          schema:
+            type: string
+            enum: [strong]
+      responses:
+        '200':
+          description: The balance.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Balance'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/AccountNotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/EventStoreUnavailable' }
+
+  /api/v1/accounts/{accountUid}/transactions:
+    parameters:
+      - $ref: '#/components/parameters/AccountUid'
+    get:
+      tags: [transactions]
+      operationId: listTransactions
+      summary: List the account's transactions
+      description: |
+        Newest first, cursor-paginated. `links.next` carries the cursor for the following page and
+        is absent once the feed is exhausted.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/MinTransactionTimestamp'
+        - $ref: '#/components/parameters/MaxTransactionTimestamp'
+      responses:
+        '200':
+          description: One page of the transaction feed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionList'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/AccountNotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/EventStoreUnavailable' }
+
+  /api/v1/accounts/{accountUid}/events:
+    parameters:
+      - $ref: '#/components/parameters/AccountUid'
+    get:
+      tags: [audit]
+      operationId: getEvents
+      summary: Read the raw event stream of an account
+      description: |
+        The account's events in stream order. Requires `ledger:auditor` (§6.4).
+        `full` profile only — `standalone` answers `501` (§7).
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: The event stream.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventList'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/AccountNotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '501': { $ref: '#/components/responses/NotAvailableInStandalone' }
+        '503': { $ref: '#/components/responses/EventStoreUnavailable' }
+
+  /api/v1/audit/entries:
+    get:
+      tags: [audit]
+      operationId: listAuditEntries
+      summary: Read the audit trail
+      description: |
+        The compliance trail across all accounts, filterable by account and time range. Requires
+        `ledger:auditor` (§6.4). `full` profile only — `standalone` answers `501` (§7).
+      parameters:
+        - name: accountUid
+          in: query
+          required: false
+          description: Restrict the trail to one account. Omit for every account.
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/MinTransactionTimestamp'
+        - $ref: '#/components/parameters/MaxTransactionTimestamp'
+      responses:
+        '200':
+          description: One page of the audit trail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEntryList'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '501': { $ref: '#/components/responses/NotAvailableInStandalone' }
+        '503': { $ref: '#/components/responses/EventStoreUnavailable' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        OIDC access token from Keycloak, validated as a resource server (§6.4). Enforcement arrives
+        with the `full` profile; the `standalone` profile runs with a fixed local principal.
+
+  parameters:
+    AccountUid:
+      name: accountUid
+      in: path
+      required: true
+      description: The account's unguessable UUID.
+      schema:
+        type: string
+        format: uuid
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: |
+        Opaque keyset cursor — URL-safe Base64 without padding. Pass back the value from
+        `links.next`; omit for the first page. Never construct one.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum items in the page.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 200
+        default: 50
+    MinTransactionTimestamp:
+      name: minTransactionTimestamp
+      in: query
+      required: false
+      description: Inclusive lower bound on the transaction timestamp.
+      schema:
+        type: string
+        format: date-time
+    MaxTransactionTimestamp:
+      name: maxTransactionTimestamp
+      in: query
+      required: false
+      description: Inclusive upper bound on the transaction timestamp.
+      schema:
+        type: string
+        format: date-time
+
+  responses:
+    BadRequest:
+      description: |
+        Malformed shape (§6.5) — zero, negative or non-integer `minorUnits`, a bad currency code, or
+        an unreadable body. `type` is `/errors/invalid-amount`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            type: /errors/invalid-amount
+            title: Invalid amount
+            status: 400
+            detail: minorUnits must be a positive integer.
+            traceId: 7c6f2e1a9b4d5c30
+    Unauthenticated:
+      description: No credential, or one that does not validate. `type` is `/errors/unauthenticated`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            type: /errors/unauthenticated
+            title: Unauthenticated
+            status: 401
+            traceId: 7c6f2e1a9b4d5c30
+    Forbidden:
+      description: |
+        Wrong role or wrong owner (§6.5). Wrong-owner access returns `403`, not `404` — the
+        account-existence oracle is accepted because `accountUid`s are unguessable UUIDs.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            type: /errors/forbidden
+            title: Forbidden
+            status: 403
+            traceId: 7c6f2e1a9b4d5c30
+    AccountNotFound:
+      description: No such account. `type` is `/errors/account-not-found`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            type: /errors/account-not-found
+            title: Account not found
+            status: 404
+            traceId: 7c6f2e1a9b4d5c30
+    Conflict:
+      description: |
+        Either the movement UID was reused with a different payload
+        (`/errors/idempotency-conflict` — the original movement stands), or the append lost an
+        optimistic-concurrency race (`/errors/version-conflict`). The `type` distinguishes them.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          examples:
+            idempotencyConflict:
+              summary: Reused movement UID, different payload
+              value:
+                type: /errors/idempotency-conflict
+                title: Idempotency conflict
+                status: 409
+                detail: This movement UID already identifies a different movement.
+                traceId: 7c6f2e1a9b4d5c30
+            versionConflict:
+              summary: Concurrent modification
+              value:
+                type: /errors/version-conflict
+                title: Version conflict
+                status: 409
+                detail: The account stream moved on; retry the command.
+                traceId: 7c6f2e1a9b4d5c30
+    RateLimited:
+      description: Rate limit exceeded (§6.1). `type` is `/errors/rate-limit-exceeded`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            type: /errors/rate-limit-exceeded
+            title: Rate limit exceeded
+            status: 429
+            traceId: 7c6f2e1a9b4d5c30
+    NotAvailableInStandalone:
+      description: |
+        The operation exists in the `full` profile only (§7). `type` is
+        `/errors/not-available-in-standalone`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            type: /errors/not-available-in-standalone
+            title: Not available in standalone
+            status: 501
+            detail: The auditor operations require the full profile.
+            traceId: 7c6f2e1a9b4d5c30
+    EventStoreUnavailable:
+      description: The event store is unreachable. `type` is `/errors/event-store-unavailable`.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          required: true
+          schema:
+            type: integer
+            format: int32
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            type: /errors/event-store-unavailable
+            title: Event store unavailable
+            status: 503
+            traceId: 7c6f2e1a9b4d5c30
+
+  examples:
+    CurrencyMismatch:
+      summary: Currency mismatch with the account
+      value:
+        type: /errors/currency-mismatch
+        title: Currency mismatch
+        status: 422
+        detail: The amount's currency differs from the account's.
+        traceId: 7c6f2e1a9b4d5c30
+
+  schemas:
+    Money:
+      type: object
+      description: |
+        The one money shape — requests, responses and balances alike (§7). `minorUnits` is an
+        `int64` of pence or cents: the domain `Money` serialised without translation.
+      required: [currency, minorUnits]
+      properties:
+        currency:
+          type: string
+          description: ISO-4217 alphabetic code.
+          pattern: '^[A-Z]{3}$'
+          examples: [GBP]
+        minorUnits:
+          type: integer
+          format: int64
+          description: Whole minor units. Never a float, never a decimal string.
+          examples: [10000]
+
+    MovementAmount:
+      type: object
+      description: |
+        `Money` as a movement may carry it: strictly positive. Zero, negative or non-integer
+        `minorUnits` is a `400` `/errors/invalid-amount` (§6.5); the sign lives in `direction`, not
+        in the amount.
+      required: [currency, minorUnits]
+      properties:
+        currency:
+          type: string
+          description: ISO-4217 alphabetic code. Must match the account's, or the write is a `422`.
+          pattern: '^[A-Z]{3}$'
+          examples: [GBP]
+        minorUnits:
+          type: integer
+          format: int64
+          minimum: 1
+          examples: [10000]
+
+    OpenAccountRequest:
+      type: object
+      required: [name, currency]
+      properties:
+        name:
+          type: string
+          description: The account's human-readable name — the CLI resolves names to UIDs with it.
+          minLength: 1
+          maxLength: 140
+          examples: [ACC-001]
+        currency:
+          type: string
+          description: ISO-4217 alphabetic code. Fixed for the life of the account.
+          pattern: '^[A-Z]{3}$'
+          examples: [GBP]
+
+    MovementRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          $ref: '#/components/schemas/MovementAmount'
+        reference:
+          type: string
+          description: Free-text reference carried on the movement.
+          maxLength: 140
+          examples: [rent]
+
+    Account:
+      type: object
+      required: [accountUid, name, currency, createdAt, owner]
+      properties:
+        accountUid:
+          type: string
+          format: uuid
+        name:
+          type: string
+          examples: [ACC-001]
+        currency:
+          type: string
+          description: ISO-4217 alphabetic code.
+          pattern: '^[A-Z]{3}$'
+          examples: [GBP]
+        createdAt:
+          type: string
+          format: date-time
+        owner:
+          type: string
+          description: The principal that opened the account — the JWT subject.
+          examples: [alice]
+
+    AccountList:
+      type: object
+      description: Wrapped in a named key so siblings can be added without breaking clients (§7).
+      required: [accounts]
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+
+    Balance:
+      type: object
+      description: |
+        One truthful `amount` — appends settle atomically — plus the staleness markers the
+        eventually-consistent read owes its caller (§4.4, §9.3 E1).
+      required: [accountUid, amount, asOf, streamVersion]
+      properties:
+        accountUid:
+          type: string
+          format: uuid
+        amount:
+          $ref: '#/components/schemas/Money'
+        asOf:
+          type: string
+          format: date-time
+          description: When the projection this answer came from was last advanced.
+        streamVersion:
+          type: integer
+          format: int64
+          description: The stream version this balance folds up to.
+          examples: [3]
+
+    Transaction:
+      type: object
+      description: |
+        `direction` carries the sign so `amount` is always positive; `type` is the orthogonal axis
+        saying what kind of movement it was (§7).
+      required:
+        - transactionUid
+        - accountUid
+        - type
+        - direction
+        - amount
+        - balanceAfter
+        - status
+        - transactionTime
+        - settlementTime
+      properties:
+        transactionUid:
+          type: string
+          format: uuid
+          description: For a movement, the client-generated UID it was written to (§6.3).
+        accountUid:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [DEPOSIT, WITHDRAWAL]
+        direction:
+          type: string
+          enum: [IN, OUT]
+        amount:
+          $ref: '#/components/schemas/Money'
+        balanceAfter:
+          $ref: '#/components/schemas/Money'
+        status:
+          type: string
+          description: |
+            Only `SETTLED` is produced today — appends settle atomically. `PENDING` and `REVERSED`
+            are reserved so pending states never need a breaking change (§7).
+          enum: [SETTLED, PENDING, REVERSED]
+        transactionTime:
+          type: string
+          format: date-time
+        settlementTime:
+          type: string
+          format: date-time
+          description: Equal to `transactionTime` today, for the same reason `status` is reserved.
+        reference:
+          type: string
+          examples: [rent]
+
+    PageLinks:
+      type: object
+      description: Trimmed to `next` — the only link a cursor feed owes its caller (§7.1).
+      properties:
+        next:
+          type: string
+          description: |
+            The opaque cursor for the following page, absent once the feed is exhausted.
+
+    TransactionList:
+      type: object
+      required: [transactions]
+      properties:
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+        links:
+          $ref: '#/components/schemas/PageLinks'
+
+    Event:
+      type: object
+      description: A raw domain event as the store holds it (§2.3). Auditor-only.
+      required: [accountUid, version, type, occurredAt]
+      properties:
+        accountUid:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          format: int64
+          description: Position in the account's stream.
+        type:
+          type: string
+          enum: [AccountOpened, MoneyDeposited, MoneyWithdrawn, MovementRejected]
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          description: The event's own fields, as recorded.
+          additionalProperties: true
+
+    EventList:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+        links:
+          $ref: '#/components/schemas/PageLinks'
+
+    AuditEntry:
+      type: object
+      description: One row of the compliance trail, recorded from the event stream (§4.3).
+      required: [accountUid, version, type, occurredAt, recordedAt]
+      properties:
+        accountUid:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          format: int64
+        type:
+          type: string
+          enum: [AccountOpened, MoneyDeposited, MoneyWithdrawn, MovementRejected]
+        occurredAt:
+          type: string
+          format: date-time
+          description: When the event happened in the ledger.
+        recordedAt:
+          type: string
+          format: date-time
+          description: When the audit module recorded it — later than `occurredAt` by the Kafka hop.
+        traceId:
+          type: string
+          description: Correlates the entry to the request that caused it (§6.6).
+
+    AuditEntryList:
+      type: object
+      required: [auditEntries]
+      properties:
+        auditEntries:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEntry'
+        links:
+          $ref: '#/components/schemas/PageLinks'
+
+    ProblemDetail:
+      type: object
+      description: |
+        RFC 7807 problem detail (§6.5). No stack traces, no internal identifiers, no SQL fragments
+        cross the boundary.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          description: The machine-readable error code — the catalogue in §6.5.
+          examples: ['/errors/insufficient-funds']
+        title:
+          type: string
+        status:
+          type: integer
+          format: int32
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+        traceId:
+          type: string
+          description: Correlates the failure to the tracing backend (§6.6).

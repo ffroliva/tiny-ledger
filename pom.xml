@@ -47,6 +47,27 @@
     <plugins>
       <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin>
       <plugin>
+        <groupId>org.openapitools</groupId><artifactId>openapi-generator-maven-plugin</artifactId><version>${openapi-generator.version}</version>
+        <executions><execution><goals><goal>generate</goal></goals>
+          <configuration>
+            <inputSpec>docs/api/openapi.yaml</inputSpec>
+            <generatorName>spring</generatorName>
+            <configOptions>
+              <interfaceOnly>true</interfaceOnly>
+              <useSpringBoot3>true</useSpringBoot3>
+              <apiPackage>com.flaviooliva.ledger.api.generated.api</apiPackage>
+              <modelPackage>com.flaviooliva.ledger.api.generated.model</modelPackage>
+              <useTags>true</useTags>
+              <!-- No swagger-annotations and no jackson-databind-nullable on the classpath; keeping
+                   the generated sources dependency-free is cheaper than adding either (spec §5). -->
+              <documentationProvider>none</documentationProvider>
+              <annotationLibrary>none</annotationLibrary>
+              <openApiNullable>false</openApiNullable>
+            </configOptions>
+          </configuration>
+        </execution></executions>
+      </plugin>
+      <plugin>
         <groupId>com.diffplug.spotless</groupId><artifactId>spotless-maven-plugin</artifactId><version>3.9.0</version>
         <configuration><java><palantirJavaFormat/></java></configuration>
         <executions><execution><goals><goal>check</goal></goals></execution></executions>
