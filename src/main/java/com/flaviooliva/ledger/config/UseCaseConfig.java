@@ -22,14 +22,16 @@ public class UseCaseConfig { // profile-independent — the whole trick of spec 
         return new SpringEventPublisher(p);
     }
 
+    // Concrete return types: the `full` profile wraps these in a transactional decorator
+    // (ADR 0001) and needs to inject the undecorated service unambiguously.
     @Bean
-    OpenAccountUseCase openAccount(
+    OpenAccountService openAccount(
             EventStorePort store, EventPublisherPort publisher, ClockPort clock, IdGeneratorPort ids) {
         return new OpenAccountService(store, publisher, clock, ids);
     }
 
     @Bean
-    RecordMovementUseCase recordMovement(
+    RecordMovementService recordMovement(
             EventStorePort store, EventPublisherPort publisher, ClockPort clock, IdGeneratorPort ids) {
         return new RecordMovementService(store, publisher, clock, ids);
     }

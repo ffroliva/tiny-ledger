@@ -59,7 +59,8 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
         UUID movementUid = UUID.randomUUID();
 
         projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
-        projection.apply(new MoneyDeposited(id, 2, t1, movementUid, Money.of("GBP", 5000), "salary", Money.of("GBP", 5000)));
+        projection.apply(
+                new MoneyDeposited(id, 2, t1, movementUid, Money.of("GBP", 5000), "salary", Money.of("GBP", 5000)));
 
         BalanceView balance = projection.balance(id).orElseThrow();
         assertThat(balance.amount().minorUnits()).isEqualTo(5000);
@@ -90,8 +91,14 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
 
         for (int i = 0; i < 5; i++) {
             Instant t = t0.plusSeconds(60 * (i + 1));
-            projection.apply(new MoneyDeposited(id, 2 + i, t, UUID.randomUUID(),
-                    Money.of("GBP", 100 * (i + 1)), "tx-" + i, Money.of("GBP", 100 * (i + 1) * (i + 1))));
+            projection.apply(new MoneyDeposited(
+                    id,
+                    2 + i,
+                    t,
+                    UUID.randomUUID(),
+                    Money.of("GBP", 100 * (i + 1)),
+                    "tx-" + i,
+                    Money.of("GBP", 100 * (i + 1) * (i + 1))));
         }
 
         // Page 1: limit 2
