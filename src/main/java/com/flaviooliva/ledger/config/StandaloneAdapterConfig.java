@@ -8,6 +8,8 @@ import com.flaviooliva.ledger.ledger.adapter.out.inmemory.InMemoryEventStore;
 import com.flaviooliva.ledger.ledger.application.port.out.ClockPort;
 import com.flaviooliva.ledger.ledger.application.port.out.EventStorePort;
 import com.flaviooliva.ledger.ledger.application.port.out.IdGeneratorPort;
+import com.flaviooliva.ledger.notification.adapter.out.log.LogNotificationAdapter;
+import com.flaviooliva.ledger.notification.application.NotificationPort;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -41,5 +43,10 @@ public class StandaloneAdapterConfig {
     @Bean // §6.2: the 60 s TTL is a composition-root decision, not a cache-implementation one
     BalanceCachePort balanceCache(ClockPort clock) {
         return new MapBalanceCache(Duration.ofSeconds(60), clock::now);
+    }
+
+    @Bean
+    NotificationPort logNotificationAdapter() {
+        return new LogNotificationAdapter();
     }
 }
