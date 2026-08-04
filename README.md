@@ -13,7 +13,8 @@ Full design contract: [`docs/spec.md`](docs/spec.md). How it was built:
 ## Quickstart (standalone)
 
 Prerequisite: **JDK 25**. No database, no broker, no auth to configure — `standalone` is the
-default Spring profile and the only mode this build ships.
+default Spring profile. (`full` mode — Postgres, Redis, Kafka — also ships in this build; see
+[Run modes](#run-modes).)
 
 ```bash
 ./mvnw spring-boot:run
