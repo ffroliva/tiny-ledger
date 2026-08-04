@@ -18,6 +18,11 @@ public class BalanceProjector {
 
     public void on(LedgerEvent event) {
         projection.apply(event);
+        // ponytail: eviction fires here, inside the still-open append transaction, before commit —
+        // a concurrent read between this eviction and the commit can repopulate the cache with the
+        // pre-write balance, stale for up to the 60s TTL. Bounded today by the staleness markers
+        // (asOf/streamVersion) and consistency=strong; move eviction to post-commit (e.g. a
+        // TransactionSynchronization) if that window ever needs to close.
         switch (event) {
             case MoneyDeposited d -> cache.evict(d.accountId());
             case MoneyWithdrawn w -> cache.evict(w.accountId());

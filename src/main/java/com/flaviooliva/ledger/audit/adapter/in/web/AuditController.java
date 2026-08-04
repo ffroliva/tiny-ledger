@@ -59,7 +59,15 @@ public class AuditController implements AuditApi {
         AuditTrailPort.Page page = available().eventStream(accountUid, cursor, limit);
         EventList body = new EventList(page.entries().stream().map(this::event).toList());
         if (page.nextCursor() != null) {
-            body.links(new PageLinks().next("/api/v1/accounts/" + accountUid + "/events?cursor=" + page.nextCursor()));
+            // §7: the next page is the same query one cursor further on — dropping the caller's limit
+            // here would silently reset it to the default on every subsequent page.
+            body.links(new PageLinks()
+                    .next(UriComponentsBuilder.fromPath("/api/v1/accounts/{accountUid}/events")
+                            .queryParamIfPresent("limit", Optional.ofNullable(limit))
+                            .queryParam("cursor", page.nextCursor())
+                            .buildAndExpand(accountUid)
+                            .encode()
+                            .toUriString()));
         }
         return ResponseEntity.ok(body);
     }
@@ -77,8 +85,8 @@ public class AuditController implements AuditApi {
         AuditEntryList body = new AuditEntryList(
                 page.entries().stream().map(AuditController::auditEntry).toList());
         if (page.nextCursor() != null) {
-            // §7: the next page is the same query one cursor further on — dropping the filters here would
-            // silently page over a different result set.
+            // §7: the next page is the same query one cursor further on — dropping the filters or the
+            // caller's limit here would silently page over a different result set.
             body.links(new PageLinks()
                     .next(UriComponentsBuilder.fromPath("/api/v1/audit/entries")
                             .queryParamIfPresent("accountUid", Optional.ofNullable(accountUid))
@@ -86,6 +94,7 @@ public class AuditController implements AuditApi {
                                     "minTransactionTimestamp", Optional.ofNullable(minTransactionTimestamp))
                             .queryParamIfPresent(
                                     "maxTransactionTimestamp", Optional.ofNullable(maxTransactionTimestamp))
+                            .queryParamIfPresent("limit", Optional.ofNullable(limit))
                             .queryParam("cursor", page.nextCursor())
                             .build()
                             .encode()
