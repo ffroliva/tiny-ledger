@@ -1,7 +1,7 @@
 package com.flaviooliva.ledger.config;
 
-import com.flaviooliva.ledger.balance.adapter.out.inmemory.InMemoryBalanceProjection;
-import com.flaviooliva.ledger.balance.adapter.out.inmemory.MapBalanceCache;
+import com.flaviooliva.ledger.balance.adapter.out.postgres.PostgresBalanceProjection;
+import com.flaviooliva.ledger.balance.adapter.out.redis.RedisBalanceCache;
 import com.flaviooliva.ledger.balance.application.port.out.BalanceCachePort;
 import com.flaviooliva.ledger.balance.application.port.out.BalanceProjectionPort;
 import com.flaviooliva.ledger.ledger.adapter.out.postgres.PostgresEventStore;
@@ -13,11 +13,10 @@ import com.flaviooliva.ledger.notification.application.NotificationPort;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
-import javax.sql.DataSource;
-import liquibase.integration.spring.SpringLiquibase;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import tools.jackson.databind.ObjectMapper;
@@ -26,14 +25,6 @@ import tools.jackson.databind.ObjectMapper;
 @Profile("full")
 @EnableScheduling
 public class FullAdapterConfig {
-
-    @Bean
-    public SpringLiquibase liquibase(DataSource dataSource) {
-        SpringLiquibase liquibase = new SpringLiquibase();
-        liquibase.setDataSource(dataSource);
-        liquibase.setChangeLog("classpath:db/changelog/db.changelog-master.xml");
-        return liquibase;
-    }
 
     @Bean
     public EventStorePort eventStore(JdbcTemplate jdbcTemplate) {
@@ -51,13 +42,13 @@ public class FullAdapterConfig {
     }
 
     @Bean
-    public BalanceProjectionPort balanceProjection() {
-        return new InMemoryBalanceProjection();
+    public BalanceProjectionPort balanceProjection(JdbcTemplate jdbcTemplate) {
+        return new PostgresBalanceProjection(jdbcTemplate);
     }
 
     @Bean
-    public BalanceCachePort balanceCache(ClockPort clock) {
-        return new MapBalanceCache(Duration.ofSeconds(60), clock::now);
+    public BalanceCachePort balanceCache(StringRedisTemplate redis, ObjectMapper objectMapper) {
+        return new RedisBalanceCache(redis, objectMapper, Duration.ofSeconds(60));
     }
 
     @Bean

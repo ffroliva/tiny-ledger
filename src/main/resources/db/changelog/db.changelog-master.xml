@@ -6,5 +6,6 @@
         http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
 
     <include file="changes/001-init-event-store.sql" relativeToChangelogFile="true"/>
+    <include file="changes/002-init-balance-projection.sql" relativeToChangelogFile="true"/>
 
 </databaseChangeLog>
