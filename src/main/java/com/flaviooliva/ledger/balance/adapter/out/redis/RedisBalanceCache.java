@@ -16,9 +16,11 @@ import tools.jackson.databind.ObjectMapper;
  * Spec §6.2 balance cache under the {@code full} profile. TTL is Redis's own key expiry, and the
  * projector's {@link #evict} keeps a write from being served stale before the TTL runs out.
  *
- * <p>Non-authoritative, therefore never fatal: every operation swallows the {@link DataAccessException}
- * the template translates a Redis failure into, and logs it. A read degrades to a miss the projection
- * answers, a write to no cache entry. Anything else still propagates — a bug here is not an outage.
+ * <p>Non-authoritative, therefore never fatal: a read degrades to a miss the projection answers, a
+ * write to no cache entry. Redis failures arrive as the {@link DataAccessException} the template
+ * translates them into and are logged at WARN; a serialisation failure is our own bug rather than an
+ * outage, so it is logged at ERROR — but still not rethrown, because both happen around a request that
+ * has already been answered correctly. Anything else propagates.
  */
 public class RedisBalanceCache implements BalanceCachePort {
 
@@ -60,6 +62,11 @@ public class RedisBalanceCache implements BalanceCachePort {
             redis.opsForValue().set(key(accountId), objectMapper.writeValueAsString(view), ttl);
         } catch (DataAccessException e) {
             log.warn("balance cache put failed for {}, the next read goes to the projection", accountId.value(), e);
+        } catch (JacksonException e) {
+            // Not an outage — a view we cannot serialise is our bug. ERROR so it surfaces instead of
+            // hiding among the outage warnings, but never fatal: this runs after the balance has already
+            // been read and returning a 500 now would fail a request that had succeeded.
+            log.error("balance cache put: {} could not be serialised, so it is not cached", accountId.value(), e);
         }
     }
 
