@@ -18,7 +18,7 @@
 
 ## Global Constraints
 
-- Package root `com.flaviooliva.ledger`; package layout per spec §3.1.
+- Package root `com.ffroliva.tinyledger`; package layout per spec §3.1.
 - `standalone` remains intact and passing all existing unit and Cucumber tests.
 - `full` profile adds Postgres, Redis, Kafka, and Audit adapters without modifying domain model or application contracts.
 - Hexagonal rules hold: zero framework annotations in `domain` or `application` logic.
@@ -34,7 +34,7 @@
 - **Model**: `sonnet`
 - **Files**:
   - `pom.xml`
-  - `src/test/java/com/flaviooliva/ledger/testsupport/AbstractIntegrationTest.java`
+  - `src/test/java/com/ffroliva/tinyledger/testsupport/AbstractIntegrationTest.java`
 - **Verification**: `./mvnw test-compile`
 
 ### Task 1: Liquibase Migrations for Event Store & Outbox (Spec §14 step 5)
@@ -42,23 +42,23 @@
 - **Model**: `sonnet`
 - **Files**:
   - `src/main/resources/db/changelog/db.changelog-master.sql`
-  - `src/test/java/com/flaviooliva/ledger/ledger/adapter/out/postgres/LiquibaseMigrationTest.java`
+  - `src/test/java/com/ffroliva/tinyledger/ledger/adapter/out/postgres/LiquibaseMigrationTest.java`
 - **Verification**: `./mvnw test -Dtest=LiquibaseMigrationTest`
 
 ### Task 2: Postgres Event Store Adapter with Optimistic Concurrency & Idempotency (Spec §14 step 5)
 - **Goal**: Implement `PostgresEventStore` implementing `EventStorePort`. Enforce OCC (`ConcurrencyConflictException` on duplicate sequence number) and idempotency (`IdempotencyConflictException` / `DuplicateMovementException`).
 - **Model**: `opus`
 - **Files**:
-  - `src/main/java/com/flaviooliva/ledger/ledger/adapter/out/postgres/PostgresEventStore.java`
-  - `src/test/java/com/flaviooliva/ledger/ledger/adapter/out/postgres/PostgresEventStoreIT.java`
+  - `src/main/java/com/ffroliva/tinyledger/ledger/adapter/out/postgres/PostgresEventStore.java`
+  - `src/test/java/com/ffroliva/tinyledger/ledger/adapter/out/postgres/PostgresEventStoreIT.java`
 - **Verification**: `./mvnw test -Dtest=PostgresEventStoreIT`
 
 ### Task 3: Postgres Transactional Outbox & Event Publisher (Spec §14 step 5)
 - **Goal**: Write outbox records atomically with events in `PostgresEventStore` and implement outbox relay to publish domain events.
 - **Model**: `opus`
 - **Files**:
-  - `src/main/java/com/flaviooliva/ledger/ledger/adapter/out/postgres/OutboxEventPublisher.java`
-  - `src/test/java/com/flaviooliva/ledger/ledger/adapter/out/postgres/OutboxEventPublisherIT.java`
+  - `src/main/java/com/ffroliva/tinyledger/ledger/adapter/out/postgres/OutboxEventPublisher.java`
+  - `src/test/java/com/ffroliva/tinyledger/ledger/adapter/out/postgres/OutboxEventPublisherIT.java`
 - **Verification**: `./mvnw test -Dtest=OutboxEventPublisherIT`
 
 ### Task 4: Persistent Postgres Balance Projection & Keyset Pagination (Spec §14 step 6)
@@ -66,16 +66,16 @@
 - **Model**: `opus`
 - **Files**:
   - `src/main/resources/db/migration/V2__init_balance_projection.sql`
-  - `src/main/java/com/flaviooliva/ledger/balance/adapter/out/postgres/PostgresBalanceProjection.java`
-  - `src/test/java/com/flaviooliva/ledger/balance/adapter/out/postgres/PostgresBalanceProjectionIT.java`
+  - `src/main/java/com/ffroliva/tinyledger/balance/adapter/out/postgres/PostgresBalanceProjection.java`
+  - `src/test/java/com/ffroliva/tinyledger/balance/adapter/out/postgres/PostgresBalanceProjectionIT.java`
 - **Verification**: `./mvnw test -Dtest=PostgresBalanceProjectionIT`
 
 ### Task 5: Redis Balance Cache & Event-Driven Eviction (Spec §14 step 6)
 - **Goal**: Implement `RedisBalanceCache` implementing `BalanceCachePort` with key-based cache invalidation and 60s TTL.
 - **Model**: `opus`
 - **Files**:
-  - `src/main/java/com/flaviooliva/ledger/balance/adapter/out/redis/RedisBalanceCache.java`
-  - `src/test/java/com/flaviooliva/ledger/balance/adapter/out/redis/RedisBalanceCacheIT.java`
+  - `src/main/java/com/ffroliva/tinyledger/balance/adapter/out/redis/RedisBalanceCache.java`
+  - `src/test/java/com/ffroliva/tinyledger/balance/adapter/out/redis/RedisBalanceCacheIT.java`
 - **Verification**: `./mvnw test -Dtest=RedisBalanceCacheIT`
 
 ### Task 6: Kafka Event Relay & Audit Module Consumer (Spec §14 step 7)
@@ -83,17 +83,17 @@
 - **Model**: `opus`
 - **Files**:
   - `src/main/resources/db/migration/V3__init_audit_store.sql`
-  - `src/main/java/com/flaviooliva/ledger/audit/adapter/in/events/AuditKafkaListener.java`
-  - `src/main/java/com/flaviooliva/ledger/audit/adapter/out/postgres/PostgresAuditRepository.java`
-  - `src/test/java/com/flaviooliva/ledger/audit/KafkaAuditModuleIT.java`
+  - `src/main/java/com/ffroliva/tinyledger/audit/adapter/in/events/AuditKafkaListener.java`
+  - `src/main/java/com/ffroliva/tinyledger/audit/adapter/out/postgres/PostgresAuditRepository.java`
+  - `src/test/java/com/ffroliva/tinyledger/audit/KafkaAuditModuleIT.java`
 - **Verification**: `./mvnw test -Dtest=KafkaAuditModuleIT`
 
 ### Task 7: Auditor REST Endpoints in `full` Profile (Spec §7, §14 step 7)
 - **Goal**: Implement `AuditController` serving `GET /api/v1/accounts/{accountUid}/events` and `GET /api/v1/audit/entries` in `full` profile mode.
 - **Model**: `opus`
 - **Files**:
-  - `src/main/java/com/flaviooliva/ledger/audit/adapter/in/web/AuditController.java`
-  - `src/test/java/com/flaviooliva/ledger/audit/adapter/in/web/AuditControllerTest.java`
+  - `src/main/java/com/ffroliva/tinyledger/audit/adapter/in/web/AuditController.java`
+  - `src/test/java/com/ffroliva/tinyledger/audit/adapter/in/web/AuditControllerTest.java`
 - **Verification**: `./mvnw test -Dtest=AuditControllerTest`
 
 ### Task 8: Docker Compose & End-to-End `@full` Scenario Verification
