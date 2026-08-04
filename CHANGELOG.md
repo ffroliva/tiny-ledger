@@ -7,3 +7,11 @@
 - OpenAPI contract and generated server interfaces (spec §14 step 3).
 - Web adapters (§7 API on the in-memory core), `@standalone` Cucumber suite, README quickstart,
   CI Stage 6 docs governance (spec §14 step 4) — **Plan 1 (standalone core) complete.**
+- Postgres event store with OCC and client-UID idempotency, Liquibase changelog, transactional
+  outbox and its relay (spec §14 step 5).
+- Postgres balance projection with keyset history pagination and Redis balance cache with
+  event-driven eviction, both under the `full` profile (spec §14 step 6).
+
+### Fixed
+- `standalone` no longer fails to boot on the JDBC driver the `full` profile put on the classpath,
+  and the Liquibase changelog actually runs (Boot 4 ships that auto-configuration separately).
