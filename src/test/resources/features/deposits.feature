@@ -18,11 +18,6 @@ Feature: Deposits credit the account
     And the balance of "ACC-001" is 120.00
     And the stream version of "ACC-001" is 4
 
-  # GAP (reported, not asserted): §6.5 names a third malformed shape — a non-integer minorUnits.
-  # `100.5` is currently accepted with 201 and silently truncated to 100 minor units, because
-  # Jackson's ACCEPT_FLOAT_AS_INT is on by default. Closing it is one production property
-  # (spring.jackson.deserialization.accept-float-as-int=false), which this task may not change,
-  # so the row is asserted for the two shapes the implementation honours today.
   @N4
   Scenario Outline: A deposit whose minorUnits is not a positive integer is malformed
     Given an account "ACC-001" in GBP
@@ -34,6 +29,20 @@ Feature: Deposits credit the account
       | minorUnits |
       | 0          |
       | -100       |
+
+  # §6.5 names a third malformed shape — a non-integer minorUnits — and the ledger does not honour it:
+  # 100.5 is accepted with 201 and silently truncated to 100 minor units, because Jackson's
+  # ACCEPT_FLOAT_AS_INT is on by default. The row below is EXECUTABLE and excluded by tag, not by
+  # omission: the runner filters `@standalone and not @known-gap`, so it is skipped today and fails
+  # loudly the moment it is run. Closing the gap is one production property
+  # (spring.jackson.deserialization.accept-float-as-int=false); landing it means deleting @known-gap
+  # from this scenario, and nothing else.
+  @N4 @known-gap
+  Scenario: A deposit whose minorUnits is a non-integer is malformed
+    Given an account "ACC-001" in GBP
+    When a deposit with a raw minorUnits value of 100.5 is requested into "ACC-001"
+    Then the request is rejected with 400 "/errors/invalid-amount"
+    And nothing is appended to the stream of "ACC-001"
 
   @N5
   Scenario: A movement in a currency the account does not hold is refused

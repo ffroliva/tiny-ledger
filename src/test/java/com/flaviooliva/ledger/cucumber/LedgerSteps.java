@@ -194,6 +194,8 @@ public class LedgerSteps {
                             .stream()
                             .map(LedgerSteps::join)
                             .toList();
+        } finally {
+            racingStore.disarm(); // armed for these three lines only; @After is the backstop
         }
     }
 
@@ -465,6 +467,9 @@ public class LedgerSteps {
         ResponseEntity<String> replay = put(lastMovementPath, lastMovementBody);
         assertThat(replay.getStatusCode().value()).isEqualTo(422);
         assertThat(text(replay, "$.type")).isEqualTo(refusal);
+        // the replay answered from the stored event, so it appended nothing of its own
+        assertThat(number(get(strongBalancePath(currentAccount)), "$.streamVersion"))
+                .isEqualTo(versionBefore + 1);
     }
 
     // ------------------------------------------------------------- the wire
