@@ -61,7 +61,8 @@ class HexagonalRulesTest {
     @ArchTest // §4.6: wire DTOs only below the web adapter
     static final ArchRule generatedDtosStayInWebAdapters = noClasses()
             .that()
-            .resideOutsideOfPackage("..adapter.in.web..")
+            // the generated sources reference each other (Api → model); the rule fences hand-written code.
+            .resideOutsideOfPackages("..adapter.in.web..", "com.flaviooliva.ledger.api.generated..")
             .should()
             .dependOnClassesThat()
             .resideInAPackage("com.flaviooliva.ledger.api.generated..");
