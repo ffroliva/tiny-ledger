@@ -1,5 +1,7 @@
 package com.flaviooliva.ledger.audit.adapter.in.web;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -9,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.flaviooliva.ledger.audit.application.port.out.AuditTrailPort;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Nested;
@@ -137,6 +140,27 @@ class AuditControllerTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.links.next")
                             .value("/api/v1/audit/entries?accountUid=" + ACCOUNT + "&limit=25&cursor=" + CURSOR));
+        }
+
+        @Test // a bare '+' in a query value decodes back as a space, so an echoed offset must be escaped
+        void auditTrailNextPageUrlPercentEncodesTimestampOffsets() throws Exception {
+            given(trail.trail(new AuditTrailPort.TrailQuery(
+                            ACCOUNT,
+                            null,
+                            50,
+                            OffsetDateTime.parse("2026-08-04T00:00:00+01:00").toInstant(),
+                            null)))
+                    .willReturn(page(CURSOR));
+
+            mvc.perform(get("/api/v1/audit/entries")
+                            .param("accountUid", ACCOUNT.toString())
+                            .param("minTransactionTimestamp", "2026-08-04T00:00:00+01:00"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.links.next")
+                            .value("/api/v1/audit/entries?accountUid=" + ACCOUNT
+                                    + "&minTransactionTimestamp=2026-08-04T00:00%2B01:00&limit=50&cursor="
+                                    + CURSOR))
+                    .andExpect(jsonPath("$.links.next").value(not(containsString("+"))));
         }
 
         @Test // §6.5: the contract's limit bounds are enforced at the edge, before the trail is read

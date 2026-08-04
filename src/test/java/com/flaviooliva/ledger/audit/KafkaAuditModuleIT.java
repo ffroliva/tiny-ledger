@@ -12,9 +12,20 @@ import com.flaviooliva.ledger.shared.Money;
 import com.flaviooliva.ledger.testsupport.AbstractIntegrationTest;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Currency;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -81,6 +92,65 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
                             .entries())
                     .isEmpty();
         });
+    }
+
+    /**
+     * A record the audit consumer cannot process must end up somewhere an operator can find it. The
+     * default behaviour — log, skip, commit the offset — would leave a hole in the trail that nothing
+     * records.
+     */
+    @Test
+    void aRecordTheConsumerCannotProcessIsParkedOnTheDlt() throws Exception {
+        try (Consumer<String, String> dlt = probe("ledger.events.DLT");
+                Producer<String, String> producer = producer()) {
+            dlt.poll(Duration.ofMillis(200)); // subscribe and create the topic before anything is sent
+
+            // No headers and a key that is not a UUID: the listener throws on every attempt.
+            producer.send(new ProducerRecord<>("ledger.events", "not-a-uuid", "{}"))
+                    .get();
+
+            List<String> parked = new ArrayList<>();
+            await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
+                dlt.poll(Duration.ofSeconds(1)).forEach(record -> parked.add(record.key()));
+                assertThat(parked).contains("not-a-uuid");
+            });
+        }
+
+        // …and the consumer is still consuming: the next good event reaches the trail.
+        var opened = openAccount.open(new OpenAccount("dave", "ACC-DLT", Currency.getInstance("GBP")));
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(
+                        trail.eventStream(opened.accountId().value(), null, 50).entries())
+                .isNotEmpty());
+    }
+
+    private static Producer<String, String> producer() {
+        return new KafkaProducer<>(Map.of(
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
+                KAFKA.getBootstrapServers(),
+                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
+                StringSerializer.class.getName(),
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
+                StringSerializer.class.getName()));
+    }
+
+    private static Consumer<String, String> probe(String topic) {
+        Consumer<String, String> consumer = new KafkaConsumer<>(Map.of(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
+                KAFKA.getBootstrapServers(),
+                ConsumerConfig.GROUP_ID_CONFIG,
+                "dlt-probe-" + UUID.randomUUID(),
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                "earliest",
+                // The DLT does not exist until the recoverer publishes: notice it without waiting out
+                // the five-minute default metadata age.
+                ConsumerConfig.METADATA_MAX_AGE_CONFIG,
+                "1000",
+                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
+                StringDeserializer.class.getName(),
+                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+                StringDeserializer.class.getName()));
+        consumer.subscribe(List.of(topic));
+        return consumer;
     }
 
     @Test

@@ -5,6 +5,8 @@ import com.flaviooliva.ledger.balance.application.port.out.BalanceCachePort;
 import com.flaviooliva.ledger.shared.AccountId;
 import java.time.Duration;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -12,9 +14,13 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * Spec §6.2 balance cache under the {@code full} profile. TTL is Redis's own key expiry, and the
  * projector's {@link #evict} keeps a write from being served stale before the TTL runs out.
+ *
+ * <p>Non-authoritative, therefore never fatal: every operation swallows whatever the Redis client
+ * throws and logs it. A read degrades to a miss the projection answers, a write to no cache entry.
  */
 public class RedisBalanceCache implements BalanceCachePort {
 
+    private static final Logger log = LoggerFactory.getLogger(RedisBalanceCache.class);
     private static final String KEY_PREFIX = "balance:";
 
     private final StringRedisTemplate redis;
@@ -29,25 +35,41 @@ public class RedisBalanceCache implements BalanceCachePort {
 
     @Override
     public Optional<BalanceView> get(AccountId accountId) {
-        String json = redis.opsForValue().get(key(accountId));
-        if (json == null) return Optional.empty();
         try {
-            return Optional.of(objectMapper.readValue(json, BalanceView.class));
+            String json = redis.opsForValue().get(key(accountId));
+            return json == null ? Optional.empty() : Optional.of(objectMapper.readValue(json, BalanceView.class));
         } catch (JacksonException e) {
             // A cache entry we can no longer read is a miss, not an outage — the projection answers.
-            redis.delete(key(accountId));
+            log.warn(
+                    "balance cache get: unreadable entry for {}, dropping it and reading through",
+                    accountId.value(),
+                    e);
+            evict(accountId);
+            return Optional.empty();
+        } catch (RuntimeException e) {
+            log.warn("balance cache get failed for {}, reading through to the projection", accountId.value(), e);
             return Optional.empty();
         }
     }
 
     @Override
     public void put(AccountId accountId, BalanceView view) {
-        redis.opsForValue().set(key(accountId), objectMapper.writeValueAsString(view), ttl);
+        try {
+            redis.opsForValue().set(key(accountId), objectMapper.writeValueAsString(view), ttl);
+        } catch (RuntimeException e) {
+            log.warn("balance cache put failed for {}, the next read goes to the projection", accountId.value(), e);
+        }
     }
 
     @Override
     public void evict(AccountId accountId) {
-        redis.delete(key(accountId));
+        try {
+            redis.delete(key(accountId));
+        } catch (RuntimeException e) {
+            // The projector evicts inside the append transaction: rethrowing here would roll back a
+            // movement because a cache is down. The stale entry expires with its TTL instead.
+            log.warn("balance cache evict failed for {}, the entry now expires with its TTL", accountId.value(), e);
+        }
     }
 
     private static String key(AccountId accountId) {
