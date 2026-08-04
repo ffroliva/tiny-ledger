@@ -18,7 +18,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 public class PostgresEventStore implements EventStorePort {
@@ -34,17 +33,13 @@ public class PostgresEventStore implements EventStorePort {
         return (rs, rowNum) -> {
             String eventType = rs.getString("event_type");
             String payload = rs.getString("payload");
-            try {
-                return switch (eventType) {
-                    case "AccountOpened" -> objectMapper.readValue(payload, AccountOpened.class);
-                    case "MoneyDeposited" -> objectMapper.readValue(payload, MoneyDeposited.class);
-                    case "MoneyWithdrawn" -> objectMapper.readValue(payload, MoneyWithdrawn.class);
-                    case "MovementRejected" -> objectMapper.readValue(payload, MovementRejected.class);
-                    default -> throw new IllegalStateException("Unknown event type: " + eventType);
-                };
-            } catch (JacksonException e) {
-                throw new RuntimeException("Failed to deserialize event payload", e);
-            }
+            return switch (eventType) {
+                case "AccountOpened" -> objectMapper.readValue(payload, AccountOpened.class);
+                case "MoneyDeposited" -> objectMapper.readValue(payload, MoneyDeposited.class);
+                case "MoneyWithdrawn" -> objectMapper.readValue(payload, MoneyWithdrawn.class);
+                case "MovementRejected" -> objectMapper.readValue(payload, MovementRejected.class);
+                default -> throw new IllegalStateException("Unknown event type: " + eventType);
+            };
         };
     }
 
@@ -64,11 +59,10 @@ public class PostgresEventStore implements EventStorePort {
     @Override
     @Transactional(propagation = Propagation.NESTED)
     public void append(AccountId streamId, long expectedVersion, List<LedgerEvent> events) {
-        Long currentVersion = jdbcTemplate.queryForObject(
+        long current = jdbcTemplate.queryForObject(
                 "SELECT COALESCE(MAX(sequence_number), 0) FROM events WHERE aggregate_id = ?",
                 Long.class,
                 streamId.value());
-        long current = currentVersion != null ? currentVersion : 0;
         if (current != expectedVersion) {
             throw new ConcurrencyConflictException(streamId, expectedVersion, current);
         }
@@ -85,12 +79,7 @@ public class PostgresEventStore implements EventStorePort {
             }
 
             String eventType = event.getClass().getSimpleName();
-            String payload;
-            try {
-                payload = objectMapper.writeValueAsString(event);
-            } catch (JacksonException e) {
-                throw new RuntimeException("Failed to serialize event", e);
-            }
+            String payload = objectMapper.writeValueAsString(event);
 
             UUID clientMovementUid = clientMovementUidOf(event);
             Timestamp createdAt = Timestamp.from(event.occurredAt());
