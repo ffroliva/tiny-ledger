@@ -6,3 +6,12 @@ HANDOFF.md
 
 # Build output
 target/
+
+# Source briefs held for reference only. They are the assessor's material, not
+# ours to publish — this repository is public. Kept on disk, never committed.
+docs/source/
+
+# Tooling caches
+.pytest_cache/
+.serena/
+__pycache__/
