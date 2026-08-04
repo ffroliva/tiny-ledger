@@ -257,6 +257,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Balance'
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/AccountNotFound' }
@@ -312,6 +313,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EventList'
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/AccountNotFound' }
@@ -377,8 +379,9 @@ components:
       in: query
       required: false
       description: |
-        Opaque keyset cursor — URL-safe Base64 without padding. Pass back the value from
-        `links.next`; omit for the first page. Never construct one.
+        Opaque keyset cursor — URL-safe Base64 without padding, as carried in the `cursor` query
+        parameter of the previous page's `links.next` URL. Clients may simply follow `links.next`.
+        Omit for the first page. Never construct one.
       schema:
         type: string
     Limit:
@@ -412,8 +415,9 @@ components:
   responses:
     BadRequest:
       description: |
-        Malformed shape (§6.5) — zero, negative or non-integer `minorUnits`, a bad currency code, or
-        an unreadable body. `type` is `/errors/invalid-amount`.
+        Malformed shape (§6.5) — zero, negative or non-integer `minorUnits`, a bad currency code, an
+        unreadable body, or a query parameter outside its declared range or enum. `type` is
+        `/errors/invalid-amount`.
       content:
         application/problem+json:
           schema:
@@ -717,7 +721,9 @@ components:
         next:
           type: string
           description: |
-            The opaque cursor for the following page, absent once the feed is exhausted.
+            The URL of the following page — the same path carrying a `cursor` query parameter.
+            Follow it as-is; it is absent (or null) once the feed is exhausted.
+          examples: ['/api/v1/accounts/f91e6c0e-1f3d-4b2a-9c77-0b1c2d3e4f50/transactions?cursor=eyJ0IjoxNzU0MzE1MTI5fQ']
 
     TransactionList:
       type: object
