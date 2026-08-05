@@ -1171,9 +1171,10 @@ Postgres, because an in-memory store can pass it for the wrong reason — which 
 port contract test in §9.2b is there to rule out.
 
 ### 9.4 Integration — Spring Boot Test + Testcontainers
-Real Postgres, Kafka, Redis and Keycloak in containers. Event-store concurrency semantics, event
-externalisation, projection updates, cache eviction on events, JWT validation, rate-limit
-enforcement.
+Real Postgres, Kafka and Redis in containers. Keycloak is **not** among them at v3.9 — the suite
+trusts a committed test key via `public-key-location`, so the production `issuer-uri` decoder branch
+is unexercised (see the gaps table). Event-store concurrency semantics, event externalisation,
+projection updates, cache eviction on events, JWT validation.
 
 Integration tests are named **`*IT`** and run by **Failsafe** at the `verify` phase; `*Test` stays
 Surefire — fast, container-free, every push. The §12.1 stage split (2 vs 7) is thereby mirrored in
@@ -1296,9 +1297,10 @@ either.
   read-only root filesystem, no shell in the final image, JVM container-aware flags. `dr-jskill`'s
   AOT, native (GraalVM 25) and CRaC variants are carried alongside — startup time is a legitimate
   talking point for a payments service, and the assets already exist.
-- **`docker-compose.yml`:** app, Postgres, Kafka (KRaft, no ZooKeeper), Redis, Keycloak with a
-  pre-provisioned realm, OTel Collector, Prometheus, Grafana, Tempo, Loki. Healthchecks and dependency
-  ordering so `docker compose up` reaches a working system unattended.
+- **`docker-compose.yml`:** **Built:** Postgres, Kafka (KRaft, no ZooKeeper), Redis, each with a
+  healthcheck — see `docker/docker-compose.yml`. No `app` service; the jar runs on the host against
+  the published ports (§1). **Specified, not yet built:** Keycloak with a pre-provisioned realm, an
+  OTel Collector, Prometheus, Grafana, Tempo, Loki — §14 steps 8–9 add them.
 - **Migrations:** Liquibase, versioned changelogs, applied on startup.
 - **Config:** environment variables only; no secrets in images or compose files — `.env.sample`
   (§1.5) documents every variable.
