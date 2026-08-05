@@ -730,6 +730,14 @@ git commit -m "feat: add Spring Security, configured per profile rather than exc
 
 Both controllers currently hardcode `private static final String CALLER = AuthorizationConfig.STANDALONE_PRINCIPAL;`. In `full` the caller must be the JWT subject.
 
+**Council fixes folded here — two, and one refutes a verification I reported as sound.**
+
+**A package cycle.** I checked the current tree, found that nothing outside `platform` imports `platform`, and concluded this task was cycle-free. That was the wrong state to check: **after** this task the controllers — which live in the `balance` and `ledger` slices — import `platform.CallerPrincipal`, and `CallerPrincipal` imports `config.AuthorizationConfig`. Since `config` already imports `balance`, the result is `config → balance → platform → config`, and `noCyclicPackages` fails at Step 6 where this plan predicts exit 0.
+
+Fix: **move the constant to `shared`**, the open kernel every slice may depend on. Create `shared/StandalonePrincipal.java` with `public static final String NAME = "local";`, repoint `AuthorizationConfig`'s existing users at it (or delete `AuthorizationConfig` if that constant was its only content — check), and have `CallerPrincipal` reference `StandalonePrincipal.NAME`. `platform → shared` closes no loop.
+
+**A static flag that cannot work.** An earlier revision made `standalone` a `static volatile` set from the constructor. Under `@WebMvcTest` the bean is never built — a plain `@Component` in `platform` is not in a web slice — so the flag stays `false`, `current()` throws, and **all three controller slice tests 500**. It also leaks across contexts within a JVM. So it is an **instance** bean, injected into the controllers by constructor, as written below.
+
 **Files:**
 - Create: `src/main/java/com/ffroliva/tinyledger/platform/CallerPrincipal.java`
 - Modify: `src/main/java/com/ffroliva/tinyledger/ledger/adapter/in/web/LedgerController.java`, `src/main/java/com/ffroliva/tinyledger/balance/adapter/in/web/BalanceController.java`
@@ -807,25 +815,24 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 @Component
 public class CallerPrincipal {
 
-    private static volatile boolean standalone;
+    private final boolean standalone;
 
-    CallerPrincipal(Environment environment) {
-        // Read once at startup rather than per request; the profile cannot change at runtime.
-        standalone = environment.matchesProfiles("standalone") || environment.getActiveProfiles().length == 0;
+    public CallerPrincipal(Environment environment) {
+        this.standalone = environment.matchesProfiles("standalone") || environment.getActiveProfiles().length == 0;
     }
 
-    public static String current() {
+    public String current() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth instanceof JwtAuthenticationToken jwt) return jwt.getToken().getSubject();
         // Council fix (P1-1): fail CLOSED outside standalone. Returning the fixed principal whenever
         // authentication is absent would turn a security misconfiguration into a *wrong answer* — the
-        // ownership check would then compare against whatever "local" happens to own — instead of a
-        // refusal. FailClosedGuard asserts the same principle for profile configuration; this is its
-        // per-request counterpart.
+        // ownership check would compare against whatever "local" happens to own — instead of a refusal.
+        // FailClosedGuard asserts the same principle for profile configuration; this is its per-request
+        // counterpart.
         if (!standalone) {
             throw new IllegalStateException("no authenticated principal outside the standalone profile");
         }
-        return AuthorizationConfig.STANDALONE_PRINCIPAL;
+        return StandalonePrincipal.NAME;
     }
 
     public static Set<String> roles() {
@@ -950,15 +957,31 @@ git commit -m "feat: carry the caller into the balance and history queries (m2 s
 
 ### Task 6: The authorization decorator
 
-**Council fix (P0-1) — this task moves ALL ownership checks to the boundary, not just the read ones.** An earlier draft decorated only `QueryBalanceUseCase` and `QueryHistoryUseCase`. But `RecordMovementService.java:61` and `StrongBalanceService.java:28` **already check ownership in-service**:
+**Council fix (P0-1), REVISED BY EVIDENCE — reads authorise at the boundary, writes keep their in-service check.**
+
+The history matters, because two earlier answers were wrong. The first draft decorated only the read ports, which would have left one §6.4 rule enforced in two places permanently — the CR14 drift. The correction was to move *everything* to the boundary (option (a)). Reading the code settles it against **both**:
 
 ```java
-if (!account.owner().equals(caller)) throw new OwnershipException(caller, accountId);
+// RecordMovementService — the numbered steps are the service's own comments
+List<LedgerEvent> history = store.read(accountId);                    // ①
+Account account = Account.rehydrate(history);                         // ②
+if (!account.owner().equals(caller)) throw new OwnershipException(…); // ③
+Optional<LedgerEvent> existing = store.findByMovementUid(movementUid);// ④ (after authz)
 ```
 
-Shipping the draft would have left one §6.4 rule enforced in two different places permanently — writes inside the service, reads outside it — which is precisely the spec-versus-code drift the Plan 2 close-out spent a docs pass correcting (CR14). The user chose **option (a)**: one mechanism at the port boundary, matching what §6.4 already promises.
+Two facts follow, neither of which survives option (a):
 
-So this task also **moves** the two in-service checks into decorators. Concretely: delete the `if (!account.owner().equals(caller))` line from `RecordMovementService` and `StrongBalanceService`, add `Movements` and `StrongBalance` decorators alongside the `Balances` and `History` ones below, and update `RecordMovementServiceTest` and `StrongBalanceServiceTest` — those currently assert the service throws `OwnershipException`, and after this it does not. **Move those assertions into `AuthorizedUseCasesTest` rather than deleting them**; losing them would drop real coverage. Note §6.3 ordering while you do it: the ownership check must still run *before* the idempotency lookup, so the authorization decorator must sit **outside** the transactional one in the wiring order.
+1. **The write-side check authorises against the rehydrated aggregate — the event stream, the system of record.** A decorator runs *before* ①, so it cannot see the aggregate and must fall back to the read model. That is a change of **authority**, not merely of location: ownership would be decided by a projection rather than by the events. For a money movement that is a downgrade, and no test would show it.
+2. **§6.3's authorise-before-idempotency is ③ before ④** — an ordering *inside* the service, which the code already satisfies and even comments. An earlier version of this task claimed the decorator must therefore sit outside the transactional one. **That was wrong**: §6.3 constrains authorisation relative to the idempotency lookup, not relative to `BEGIN`.
+
+So: **do not touch `RecordMovementService` or `StrongBalanceService`.** Leave ③ where it is; it is authoritative and correctly ordered. Decorate only `QueryBalanceUseCase` and `QueryHistoryUseCase`, which have no aggregate to consult and for which the projection *is* the right source.
+
+This also dissolves two other council P0s rather than patching them:
+
+- **No `@Primary` collision.** `FullAdapterConfig:146,152` already declare `@Primary` for `OpenAccountUseCase` and `RecordMovementUseCase`; adding write decorators for those same types would have thrown `NoUniqueBeanDefinitionException` and **`full` would never have started**. The read decorators are different types, so there is no clash.
+- **No 403-instead-of-404 on writes.** A boundary check cannot distinguish "absent" from "unowned", so option (a) would have turned an unknown account on the write path into a 403, contradicting §6.5. The in-service check keeps the correct 404.
+
+**What this costs, stated honestly:** §6.4 currently reads as though a single decorator enforces ownership everywhere. It does not, and after this plan it still will not. **Amend §6.4 in the Plan 3 spec revision** to describe the split and why: writes and strong reads authorise in-service against the rehydrated aggregate because that is the authority and because §6.3 orders it there; projection-backed reads authorise at the port boundary because they have no aggregate. Recording that is what stops this becoming the next CR14 — the drift is only a defect while the document disagrees with the code.
 
 Mirrors `TransactionalUseCases` exactly: package-private decorator classes in `config`, wired in the composition root, so `application` gains no framework annotation. **Throws `OwnershipException`, never Spring's `AccessDeniedException`** — measured on 2026-08-05, a Spring `AccessDeniedException` thrown from inside a controller invocation is claimed by `ErrorHandlingAdvice`'s catch-all and returned as an **opaque 500**, in all three observation modes, because `@ExceptionHandler` resolves it before `ExceptionTranslationFilter` can. `OwnershipException` returns 403 `/errors/forbidden` and was verified to keep doing so with Security on the classpath.
 
@@ -1171,6 +1194,39 @@ Also add its positive twin: alice reading her own balance succeeds. A test that 
 git add src/main/java/com/ffroliva/tinyledger/config src/test/java/com/ffroliva/tinyledger/config src/test/resources/features
 git commit -m "feat: authorise reads at the port boundary, refusing with the catalogued 403"
 ```
+
+---
+
+### Task 6b: Deny the auditor endpoints in `full` until roles exist
+
+**Council fix (security P0-B).** Verified in `PostgresAuditTrail`:
+
+```java
+StringBuilder sql = new StringBuilder(SELECT).append(" WHERE true");
+if (query.accountId() != null) { sql.append(" AND account_id = ?"); … }
+```
+
+`accountUid` is **optional** on `GET /api/v1/audit/entries`. Omit it and the query is `WHERE true`, paging the **entire cross-account trail** — every account id, every amount, every reference. `GET /api/v1/accounts/{id}/events` then returns verbatim event payloads for any id so obtained. Spec §7 says these two operations are `ledger:auditor`-only, but this plan defers role checks to a follow-up. So after Task 3 makes `full` authenticated, **any** valid token — `alice`'s — has full auditor power over every customer's data. It also voids §6.5's "account UUIDs are unguessable" justification, because the trail hands them out.
+
+Ownership decoration cannot fix this: an audit trail is deliberately not owner-scoped, and `AuditController` calls the out-port directly with no use-case seam to wrap (parked finding `m2`).
+
+Until roles land, `full` must **refuse** these two operations rather than serve them:
+
+- [ ] **Step 1: Write the failing test** — under the `full` context from Task 3 Step 7, assert `GET /api/v1/audit/entries` with a valid `alice` token returns **403** `/errors/forbidden`, and the same for `GET /api/v1/accounts/{id}/events`.
+- [ ] **Step 2: Run it** — expect FAIL (currently 200 with the whole trail).
+- [ ] **Step 3: Deny them in the chain.** In `SecurityConfig.fullChain`, before `anyRequest().authenticated()`:
+
+```java
+                .authorizeHttpRequests(auth -> auth
+                        // §7: auditor operations are ledger:auditor-only. Roles arrive in the follow-up
+                        // plan; until then `full` refuses rather than serving every customer's trail to
+                        // any authenticated caller. standalone already answers these 501.
+                        .requestMatchers("/api/v1/audit/**", "/api/v1/accounts/*/events").denyAll()
+                        .anyRequest().authenticated())
+```
+
+- [ ] **Step 4: Run it** — expect PASS. Confirm the `standalone` 501 behaviour is unchanged, since that profile has its own chain.
+- [ ] **Step 5: Commit** with an explicit note that this is a **temporary denial**, to be replaced by a `ledger:auditor` role check in the follow-up plan — and add it to that plan's opening scope so it is not forgotten. A denial that outlives its reason becomes a mystery.
 
 ---
 
