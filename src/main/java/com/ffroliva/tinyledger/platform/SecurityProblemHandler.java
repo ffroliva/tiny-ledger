@@ -51,8 +51,9 @@ public class SecurityProblemHandler implements AuthenticationEntryPoint, AccessD
         ProblemDetail body = ProblemDetail.forStatus(code.status());
         body.setType(URI.create(code.type()));
         body.setTitle(code.title());
-        // §6.5/§6.6: the same correlating id ErrorHandlingAdvice attaches. Requires the interaction-id
-        // filter to run BEFORE the security chain — see Task 7.
+        // §6.5/§6.6: the same correlating id ErrorHandlingAdvice attaches. It is only here because
+        // FapiInteractionIdFilter outranks the security chain — measured: dropping its @Order leaves this
+        // null on every 401 and every chain-level 403.
         String traceId = MDC.get("traceId");
         if (traceId != null) body.setProperty("traceId", traceId);
         response.setStatus(code.status());

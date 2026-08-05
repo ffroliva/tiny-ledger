@@ -10,6 +10,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -244,6 +245,32 @@ class BalanceControllerTest {
         mvc.perform(get("/api/v1/accounts/{a}", ACCOUNT))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.type").value("/errors/account-not-found"));
+    }
+
+    @Test // the filter is in the chain, not merely written — deleting @Component turns this red
+    void everyResponseCarriesAnInteractionId() throws Exception {
+        given(queryAccounts.accountsOwnedBy(any())).willReturn(List.of());
+
+        mvc.perform(get("/api/v1/accounts"))
+                .andExpect(status().isOk())
+                .andExpect(header().exists("x-fapi-interaction-id"));
+    }
+
+    /**
+     * §6.5/§6.6: the body's {@code traceId} must BE the header, or the correlation is imaginary. A pair of
+     * {@code exists()} assertions is independently satisfiable — an implementation minting two different UUIDs,
+     * one for the header and one for the MDC, would pass both while the correlation is silently broken.
+     * Supplying {@code abc-123} also proves the echo path through the real chain, which the direct-{@code
+     * doFilter} unit test cannot.
+     */
+    @Test
+    void theProblemBodyTraceIdIsTheInteractionId() throws Exception {
+        given(queryBalance.balance(any(), any())).willThrow(new RuntimeException("boom"));
+
+        mvc.perform(get("/api/v1/accounts/{a}/balance", ACCOUNT).header("x-fapi-interaction-id", "abc-123"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(header().string("x-fapi-interaction-id", "abc-123"))
+                .andExpect(jsonPath("$.traceId").value("abc-123"));
     }
 
     private static TransactionView transaction() {

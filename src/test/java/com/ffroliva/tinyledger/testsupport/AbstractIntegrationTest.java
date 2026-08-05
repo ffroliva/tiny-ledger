@@ -3,6 +3,7 @@ package com.ffroliva.tinyledger.testsupport;
 import com.ffroliva.tinyledger.TinyLedgerApplication;
 import com.redis.testcontainers.RedisContainer;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -10,8 +11,20 @@ import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+/**
+ * {@code @AutoConfigureMockMvc} is here, on the shared base, for the same reason the JWT key is: a per-class
+ * declaration would change the context cache key and fork the {@code full} context (ADR 0003). It is what makes
+ * an autowired {@code MockMvc} assemble its filter chain from the application's filter <em>registrations</em> —
+ * {@code SpringBootMockMvcBuilderCustomizer$FilterRegistrationBeans extends ServletContextInitializerBeans},
+ * so plain {@code Filter} beans are adapted and sorted by {@code @Order} exactly as a servlet container sorts
+ * them, and {@code securityFilterChainRegistration} keeps its {@code DEFAULT_FILTER_ORDER = -100}. Measured:
+ * a hand-built {@code MockMvcBuilders.webAppContextSetup(context).apply(springSecurity())} registers
+ * <em>only</em> the security filter, so {@code FapiInteractionIdFilter} never ran and its header was null on
+ * every response — filter ordering is unobservable there, because there is nothing to order.
+ */
 @SpringBootTest(classes = TinyLedgerApplication.class)
 @ActiveProfiles("full")
+@AutoConfigureMockMvc
 public abstract class AbstractIntegrationTest {
 
     public static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
