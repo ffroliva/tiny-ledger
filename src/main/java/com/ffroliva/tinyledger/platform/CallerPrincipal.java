@@ -1,9 +1,6 @@
 package com.ffroliva.tinyledger.platform;
 
 import com.ffroliva.tinyledger.shared.StandalonePrincipal;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
 import org.springframework.core.env.Environment;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -27,7 +24,14 @@ public class CallerPrincipal {
     public String current() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth instanceof JwtAuthenticationToken jwt) {
-            return jwt.getToken().getSubject();
+            // `sub` is optional as far as the resource server is concerned: JwtValidators checks the
+            // issuer and the timestamps, never the subject. A subject-less token is authenticated but
+            // anonymous, so it takes the same path as no authentication at all — otherwise `null` is
+            // stamped on the account as its owner and every subject-less token shares one principal.
+            String subject = jwt.getToken().getSubject();
+            if (subject != null && !subject.isBlank()) {
+                return subject;
+            }
         }
         // Fail CLOSED outside standalone. Returning the fixed principal whenever authentication is
         // absent would turn a security misconfiguration into a *wrong answer* — the ownership check
@@ -37,15 +41,5 @@ public class CallerPrincipal {
             throw new IllegalStateException("no authenticated principal outside the standalone profile");
         }
         return StandalonePrincipal.NAME;
-    }
-
-    /** Instance, not static — a static sibling would force the {@code standalone} guard's deletion. */
-    public Set<String> roles() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (!(auth instanceof JwtAuthenticationToken jwt)) {
-            return Set.of();
-        }
-        List<String> roles = jwt.getToken().getClaimAsStringList("roles");
-        return roles == null ? Set.of() : new LinkedHashSet<>(roles);
     }
 }
