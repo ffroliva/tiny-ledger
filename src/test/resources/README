@@ -1,0 +1,4 @@
+test-jwt-private.pem / test-jwt-public.pem are TEST-ONLY keys, generated for this repository and
+committed on purpose. They sign nothing outside the test suite, guard nothing, and are not a secret —
+see TestJwt for why the key has to be a file rather than one generated at class-init (ADR 0003: a
+generated key can only reach the context as a bean, and a per-class bean forks the `full` context).
