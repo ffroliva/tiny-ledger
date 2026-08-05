@@ -22,6 +22,7 @@ import com.ffroliva.tinyledger.ledger.application.port.in.QueryStrongBalanceUseC
 import com.ffroliva.tinyledger.ledger.application.port.in.RecordMovementUseCase;
 import com.ffroliva.tinyledger.ledger.application.port.in.StrongBalance;
 import com.ffroliva.tinyledger.ledger.domain.MovementType;
+import com.ffroliva.tinyledger.platform.CallerPrincipal;
 import com.ffroliva.tinyledger.shared.AccountId;
 import com.ffroliva.tinyledger.shared.Money;
 import java.time.Instant;
@@ -29,6 +30,7 @@ import java.util.Currency;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -68,6 +70,16 @@ class BalanceControllerTest {
 
     @MockitoBean
     private RecordMovementUseCase recordMovement;
+
+    // A platform @Component is not part of a @WebMvcTest slice, so constructor-injecting it into the
+    // controllers fails the context at startup with NoSuchBeanDefinitionException unless it is mocked.
+    @MockitoBean
+    private CallerPrincipal callerPrincipal;
+
+    @BeforeEach
+    void caller() {
+        given(callerPrincipal.current()).willReturn("local");
+    }
 
     @Test // §4.4: the parameterless mapping is balance's — the projection read
     void plainBalanceReadIsServedByTheProjection() throws Exception {

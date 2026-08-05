@@ -6,7 +6,6 @@ import com.ffroliva.tinyledger.api.generated.model.Balance;
 import com.ffroliva.tinyledger.api.generated.model.MovementRequest;
 import com.ffroliva.tinyledger.api.generated.model.OpenAccountRequest;
 import com.ffroliva.tinyledger.api.generated.model.Transaction;
-import com.ffroliva.tinyledger.config.AuthorizationConfig;
 import com.ffroliva.tinyledger.ledger.application.port.in.Deposit;
 import com.ffroliva.tinyledger.ledger.application.port.in.MovementResult;
 import com.ffroliva.tinyledger.ledger.application.port.in.OpenAccountUseCase;
@@ -15,6 +14,7 @@ import com.ffroliva.tinyledger.ledger.application.port.in.Outcome;
 import com.ffroliva.tinyledger.ledger.application.port.in.QueryStrongBalanceUseCase;
 import com.ffroliva.tinyledger.ledger.application.port.in.RecordMovementUseCase;
 import com.ffroliva.tinyledger.ledger.application.port.in.Withdraw;
+import com.ffroliva.tinyledger.platform.CallerPrincipal;
 import com.ffroliva.tinyledger.shared.AccountId;
 import jakarta.validation.Valid;
 import java.net.URI;
@@ -44,19 +44,20 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class LedgerController implements MovementsApi {
 
-    private static final String CALLER = AuthorizationConfig.STANDALONE_PRINCIPAL;
-
     private final OpenAccountUseCase openAccount;
     private final RecordMovementUseCase recordMovement;
     private final QueryStrongBalanceUseCase strongBalance;
+    private final CallerPrincipal callerPrincipal;
 
     public LedgerController(
             OpenAccountUseCase openAccount,
             RecordMovementUseCase recordMovement,
-            QueryStrongBalanceUseCase strongBalance) {
+            QueryStrongBalanceUseCase strongBalance,
+            CallerPrincipal callerPrincipal) {
         this.openAccount = openAccount;
         this.recordMovement = recordMovement;
         this.strongBalance = strongBalance;
+        this.callerPrincipal = callerPrincipal;
     }
 
     @PostMapping(
@@ -64,17 +65,18 @@ public class LedgerController implements MovementsApi {
             consumes = "application/json",
             produces = {"application/json", "application/problem+json"})
     public ResponseEntity<Account> openAccount(@Valid @RequestBody OpenAccountRequest request) {
-        OpenedAccount opened = openAccount.open(LedgerApiMapper.toCommand(request, CALLER));
+        String caller = callerPrincipal.current();
+        OpenedAccount opened = openAccount.open(LedgerApiMapper.toCommand(request, caller));
         return ResponseEntity.created(
                         URI.create("/api/v1/accounts/" + opened.accountId().value()))
-                .body(LedgerApiMapper.toAccount(opened, request, CALLER));
+                .body(LedgerApiMapper.toAccount(opened, request, caller));
     }
 
     @Override
     public ResponseEntity<Transaction> putDeposit(UUID accountUid, UUID depositUid, MovementRequest request) {
         return respond(
                 recordMovement.deposit(new Deposit(
-                        CALLER,
+                        callerPrincipal.current(),
                         new AccountId(accountUid),
                         depositUid,
                         LedgerApiMapper.toMoney(request.getAmount()),
@@ -86,7 +88,7 @@ public class LedgerController implements MovementsApi {
     public ResponseEntity<Transaction> putWithdrawal(UUID accountUid, UUID withdrawalUid, MovementRequest request) {
         return respond(
                 recordMovement.withdraw(new Withdraw(
-                        CALLER,
+                        callerPrincipal.current(),
                         new AccountId(accountUid),
                         withdrawalUid,
                         LedgerApiMapper.toMoney(request.getAmount()),
@@ -99,8 +101,8 @@ public class LedgerController implements MovementsApi {
             params = "consistency=strong",
             produces = {"application/json", "application/problem+json"})
     public ResponseEntity<Balance> getStrongBalance(@PathVariable UUID accountUid) {
-        return ResponseEntity.ok(
-                LedgerApiMapper.toBalance(strongBalance.strongBalance(CALLER, new AccountId(accountUid))));
+        return ResponseEntity.ok(LedgerApiMapper.toBalance(
+                strongBalance.strongBalance(callerPrincipal.current(), new AccountId(accountUid))));
     }
 
     /**
