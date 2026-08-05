@@ -10,9 +10,10 @@
 ## 1. Purpose and dual delivery
 
 An event-sourced banking ledger — single-entry per account, double-entry transfers recorded as the
-next increment (§13) — built as a modular monolith and delivered
-production-ready: containerised, observable, secured, rate-limited, cached, and tested at every
-level from unit to load.
+next increment (§13) — built as a modular monolith and specified for production readiness:
+containerised, observable, secured, rate-limited, cached, and tested at every level from unit to
+load. §14 tracks which of those are built; *Open issues* records where this document and the code
+differ today.
 
 The origin is a *"Build a tiny ledger"* take-home exercise. That brief asks for three features in a few
 hours with in-memory storage and explicitly excludes auth, monitoring and atomic operations. This
@@ -22,7 +23,7 @@ codebase**:
 | Mode | Command | What runs | Purpose |
 |---|---|---|---|
 | **`standalone`** (default) | `./mvnw spring-boot:run` | In-memory event store, in-memory cache, no auth, no broker. Binds `127.0.0.1` only; the startup banner prints `AUTH DISABLED (standalone)`. **JDK 25** is the only prerequisite. | The brief's runtime in one command: clone, run, curl the APIs. The scope beyond the brief is a recorded, deliberate choice (`agentic-workflow.md` §6) — an accepted submission risk, not claimed compliance. |
-| **`full`** | `docker compose up` | PostgreSQL, Kafka, Redis, Keycloak, OTel Collector, Prometheus, Grafana, Tempo, Loki. | The production-shaped system. |
+| **`full`** | `docker compose up` | **Built:** PostgreSQL, Kafka (KRaft, no ZooKeeper), Redis — see `docker/docker-compose.yml`. **Specified, not yet built:** Keycloak, an OTel Collector, Prometheus, Grafana, Tempo, Loki — §14 steps 8–9 add them. | The production-shaped system. |
 
 Both modes run the **same domain code and the same core ledger API** — the two auditor operations
 are `full`-only (§7), a declared profile-gated exclusion from parity, not an adapter difference.
@@ -686,7 +687,8 @@ is closed — a fifth requires an ADR.**
 | Returns a collection the caller sees only part of | The port takes the visibility scope as a parameter (`accountsOwnedBy`) — the scope *is* the authorisation | There is no set to decorate; widening it is a port-signature change |
 | Depends on role alone, with no account subject (`/audit/**`, `/accounts/*/events`) | The security filter chain in `config` | There is no subject to compare and no inbound port to decorate |
 
-Absent is never answered as unowned: an account that does not exist is §6.5's 404, whoever asks.
+Absent is never answered as unowned: an account that does not exist is §6.5's 404, whoever asks —
+on every route but `/transactions`, whose 200-with-empty-page divergence the gaps table records.
 
 No gate enforces the closure clause — it is a review obligation, not a build failure. `HexagonalRulesTest`
 constrains where code may live, not where a check may be made.
@@ -713,7 +715,8 @@ ownership check against the JWT subject stops her reading `ACC-001`. A test suit
 
 `ACC-001`…`ACC-900` are account *names* (Starling's `AccountV2.name`), not identifiers — the API
 knows only `accountUid`s, pinned to deterministic UUIDs by `docker/keycloak/realm-tiny-ledger.json`
-plus a seed script the compose stack runs once, so scenarios can reference them.
+plus a seed script the compose stack runs once, so scenarios can reference them — neither the realm
+file nor the seed script is built at v3.9 (see the gaps table).
 
 **The ownership mechanism, end to end:** `AccountOpened` records the `owner` (§2.3), so ownership
 is a fact of the event stream, not sidecar state; every command and query carries the caller
@@ -905,7 +908,7 @@ Feb 2025), reviewed 2026-08-04.
 | `x-fapi-interaction-id` request/response correlation header | **Adopt** | Built | One filter; gives 2xx responses the correlation `traceId` only gives errors |
 | Unsigned amount + direction indicator (`CreditDebitIndicator`) | **Adopt** (already, as `direction` `IN`/`OUT`) | Built | Same idea, arrived at via Starling; record the mapping |
 | Keyset cursor pagination | **Adopt** (already conformant) | Built | OB leaves the pagination mechanism to the ASPSP |
-| Sender-constrained tokens (FAPI 2.0 §5.3.4) via DPoP | **Adopt** | Not built | Keycloak 26.4 client profile + Spring Security 6.5 auto-validation; the one real §6.4 gap |
+| Sender-constrained tokens (FAPI 2.0 §5.3.4) via DPoP | **Adopt** | Not built | Keycloak 26.4 client profile + Spring Security 7 auto-validation; the §6.4 gap this table's conventions surface |
 | `Links.Self` on list and item responses | **Adapt** | Not built | One field, good REST; the rest of the `Data`/`Meta` envelope is not worth the churn |
 | `Data`/`Meta` response envelope | **Diverge** | n/a | Named list keys (`{"transactions": […]}`) already extensible; wrapping buys nothing without an OB client |
 | `{Amount: "10.00", Currency}` decimal-string money | **Diverge, documented** | n/a | §2.1 — precision safety over conformance; the divergence is recorded, not accidental |
@@ -1460,4 +1463,4 @@ describe the intended model, not enforced behaviour. **Nor does any rate limiter
 | 3.6 | 2026-08-04 | Task 10 catalogue completion: §6.5 gains the 501 `/errors/not-available-in-standalone` row — §7 already mandated the standalone-501 behaviour for auditor operations; the error `type` the contract uses now has its catalogue entry so §6.5 stays the single authority |
 | 3.7 | 2026-08-04 | Migration tool selection update: user explicitly requested Liquibase changelogs for schema migrations instead of Flyway |
 | 3.8 | 2026-08-04 | Plan 2 close-out truth alignment (`/code-review` CR14): the spec still promised the mechanism ADR 0001 replaced. Kafka routing is a programmatic `EventExternalizationConfiguration` bean, not `@Externalized` on the events (§4.3, §2 tree, tech table, §4.3 division-of-labour, audit consumer note); the in-process legs (`balance`, `notification`) are plain synchronous `@EventListener` in **both** run modes and carry no publication row, so v3.5's "the annotation returns when full mode wires the registry" is retired rather than fulfilled; §9.7's trace-boundary count drops from three to two because the projection never leaves the publishing thread. No behaviour changed — the code was already this; only the spec was stale |
-| 3.9 | 2026-08-05 | Plan 3 close-out truth alignment: §6.4 claimed a single authorisation decorator while the code enforces at four sites, so the mechanism is restated principle-first — every decision is made by the component holding the state it needs — with the four sites enumerated and the list closed against a fifth; §6.4 claimed §9.2 forbids `@PreAuthorize` while §4.5 claimed it forbids framework annotations in the application layer at all, and both were false — that rule names exactly three, `@Service`, `@Component` and `@Transactional`, of which only the first two are stereotypes — so both sites now cite §4.5's design rule; nine known gaps recorded under *Open issues* — the `getAccount` 404-for-unowned and `/transactions` 200-for-absent divergences from §6.5, `POST /accounts` authorised by authentication alone, `full`'s temporary 403 on both auditor operations, the Keycloak realm and its test users, which §6.4 described as committed while neither the realm file nor a Keycloak service exists, and four controls the document describes but the code does not carry: no rate limiter despite §6.1, no `aud` validation, an unvalidated and unbounded `x-fapi-interaction-id`, and Boot's `/error` echoing the request path; new §7.2 Open Banking / FAPI 2.0 alignment table carrying per-row build status, because a verdict of Adopt is not a claim of conformance. No behaviour changed — only the document was stale |
+| 3.9 | 2026-08-05 | Plan 3 close-out truth alignment: §6.4 claimed a single authorisation decorator while the code enforces at four sites, so the mechanism is restated principle-first — every decision is made by the component holding the state it needs — with the four sites enumerated and the list closed against a fifth; §6.4 claimed §9.2 forbids `@PreAuthorize` while §4.5 claimed it forbids framework annotations in the application layer at all, and both were false — that rule names exactly three, `@Service`, `@Component` and `@Transactional`, of which only the first two are stereotypes — so both sites now cite §4.5's design rule; nine known gaps recorded under *Open issues* — the `getAccount` 404-for-unowned and `/transactions` 200-for-absent divergences from §6.5, `POST /accounts` authorised by authentication alone, `full`'s temporary 403 on both auditor operations, the Keycloak realm and its test users, which §6.4 described as committed while neither the realm file nor a Keycloak service exists, and four security gaps: no rate limiter despite §6.1, no `aud` validation, an unvalidated and unbounded `x-fapi-interaction-id`, and Boot's `/error` echoing the request path; new §7.2 Open Banking / FAPI 2.0 alignment table carrying per-row build status, because a verdict of Adopt is not a claim of conformance. No behaviour changed — only the document was stale |
