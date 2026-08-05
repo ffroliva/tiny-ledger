@@ -43,17 +43,6 @@ class SecurityConfigTest {
     }
 
     /**
-     * §6.4: the read ports resolve to the authorisation decorators, asserted on the bean graph rather than
-     * over HTTP — which is what lets this live under plain {@code verify}.
-     *
-     * <p>It is here, and not only in {@code SecurityConfigIT}, because that IT runs under {@code -Pit} and
-     * ADR 0003's {@code unit} CI job has no Docker: without this, the {@code @Primary} wiring has **zero**
-     * coverage in the fast job. Deleting the {@code authorizedHistory} bean was measured to leave the whole
-     * unit suite green — one candidate remains, the context starts clean, and every caller can page every
-     * other caller's history. This is the assertion that makes that fail fast, in both run modes, since
-     * {@code UseCaseConfig} is profile-independent.
-     */
-    /**
      * §7: {@code full} refuses the two auditor operations until the {@code ledger:auditor} role lands, and it
      * does so with a chain-level {@code denyAll()} in {@code fullChain}. {@code standalone} has its own chain
      * and must keep answering the contractual 501 (`openapi.yaml:296-355`). Nothing else in the repository
@@ -74,6 +63,17 @@ class SecurityConfigTest {
                 .andExpect(jsonPath("$.type").value("/errors/not-available-in-standalone"));
     }
 
+    /**
+     * §6.4: the read ports resolve to the authorisation decorators, asserted on the bean graph rather than
+     * over HTTP — which is what lets this live under plain {@code verify}.
+     *
+     * <p>It is here, and not only in {@code SecurityConfigIT}, because that IT runs under {@code -Pit} and
+     * ADR 0003's {@code unit} CI job has no Docker: without this, the {@code @Primary} wiring has **zero**
+     * coverage in the fast job. Deleting the {@code authorizedHistory} bean was measured to leave the whole
+     * unit suite green — one candidate remains, the context starts clean, and every caller can page every
+     * other caller's history. This is the assertion that makes that fail fast, in both run modes, since
+     * {@code UseCaseConfig} is profile-independent.
+     */
     @Test
     void theReadPortsResolveToTheAuthorisationDecorators() {
         assertThat(context.getBean(QueryBalanceUseCase.class)).isInstanceOf(AuthorizedUseCases.Balances.class);
