@@ -29,6 +29,22 @@ jobs:
         # generator and Cucumber's JUnit Platform engine are Maven-bound, not separate steps.
         run: ./mvnw -q verify
 
+      - name: "Unit test count — a green build that ran nothing is not green"
+        # `-q` suppresses surefire's summary, so the step above proves only "nothing failed".
+        # AGENTS.md trap 4: a pattern matching nothing exits 0. This turns that into a gate.
+        # Counts <testcase> elements, not testsuite@tests, because @Nested classes nest suites
+        # and double-count. Runs only on success, so the count is always paired with a green exit.
+        run: |
+          n=$(cat target/surefire-reports/*.xml 2>/dev/null | grep -c '<testcase ' || true)
+          echo "UNIT_TESTS=$n"
+          echo "### Unit tests: $n" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$n" -eq 0 ]; then echo "::error::surefire produced zero test cases"; exit 1; fi
+
+      - name: "Publish surefire XML"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: surefire-reports, path: target/surefire-reports/*.xml, if-no-files-found: error }
+
   integration:
     needs: gate
     runs-on: ubuntu-latest
@@ -36,7 +52,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: corretto, java-version: '25', cache: maven }
-      - name: "Stages 7-12 — integration suite against real Postgres/Redis/Kafka"
+      - name: "Stage 7 — integration suite against real Postgres/Redis/Kafka"
+        # Named for what it runs. Stages 8-12 (Python CLI, e2e, load, security scan, publish) are
+        # specified in spec §12.1 and do NOT exist yet — the old "Stages 7-12" label claimed them.
         run: ./mvnw -q verify -Pit
+
+      - name: "Integration test count — a green build that ran nothing is not green"
+        # `-Pit` adds failsafe (pom.xml profile `it`), so the IT counts are in failsafe-reports.
+        run: |
+          n=$(cat target/failsafe-reports/*.xml 2>/dev/null | grep -c '<testcase ' || true)
+          echo "INTEGRATION_TESTS=$n"
+          echo "### Integration tests: $n" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$n" -eq 0 ]; then echo "::error::failsafe produced zero test cases"; exit 1; fi
+
+      - name: "Publish failsafe XML"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: failsafe-reports, path: target/failsafe-reports/*.xml, if-no-files-found: error }
       - name: "resolve-drift placeholder"
         run: echo "python CLI drift job lands in Plan 4 (spec §12.1)"
