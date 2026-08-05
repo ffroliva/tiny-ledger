@@ -23,6 +23,38 @@
   can no longer stall the compliance trail.
 - Liquibase changeset `004` owning Modulith's `event_publication` table, with Modulith's own schema
   initializer switched off — one schema authority (spec §12).
+- **One error catalogue.** `ErrorCode` (all eleven spec §6.5 rows) and `TinyLedgerException` in
+  `shared`, framework-free; six `@ExceptionHandler` methods collapse to one. A completeness test pins
+  the catalogue against the spec table, so a dropped row is a red test rather than a silent hole.
+- **Spring Security, configured per profile rather than excluded in one.** `full` requires a JWT;
+  `standalone` stays contractually open. The 401 and the chain-level 403 carry the catalogued RFC 7807
+  body via `SecurityProblemHandler`, because both are written before `DispatcherServlet` and
+  `ErrorHandlingAdvice` never sees them.
+- **A real caller principal.** Resolved from the JWT subject, failing **closed** outside `standalone`,
+  and refusing a well-signed token that carries no `sub` — which would otherwise stamp `null` as an
+  account's owner.
+- **Ownership authorization on the projection-backed reads**, applied by a decorator at the port
+  boundary in the composition root. Writes and strong reads keep their in-service check, because that
+  one authorises against the rehydrated aggregate — the system of record — which a boundary check
+  cannot see. Absent answers 404, wrong-owner answers 403 (spec §6.5).
+- `x-fapi-interaction-id` echo-or-mint, ordered ahead of the security chain so the 401 and the
+  chain-level 403 are correlatable, and surfaced as the `traceId` on every problem response.
+- One `full` Spring test context for the whole integration suite, and a CI split into
+  `gate`/`unit`/`integration` — **the 26 integration tests were previously gated by nothing.**
+- `..shared..` fenced from frameworks alongside `..domain..`. ArchUnit checks *direct* dependencies,
+  and the domain now compiles against `shared.error`, so a domain-only rule would have stayed green
+  while a Spring import reached the domain's transitive compile path.
+
+### Security
+- **`full` refuses both auditor operations with 403 until the `ledger:auditor` role exists
+  (TEMPORARY).** `accountUid` is optional on the trail and `PostgresAuditTrail` builds `WHERE true`, so
+  once `full` became authenticated *any* valid token could page every account's id, amount and
+  reference — which also voids §6.5's "account UUIDs are unguessable" premise. Confirmed live before it
+  was closed. Ownership decoration cannot help: an audit trail is deliberately not owner-scoped.
+- **Closed a framework-contributed `/logout` route** present in both run modes and authorised by
+  nothing. Spring applies `logout(withDefaults())` unconditionally and, with CSRF disabled, matches
+  `GET`/`PUT`/`DELETE` too; `LogoutFilter` precedes `AuthorizationFilter`, so `full` answered an
+  unauthenticated `GET /logout` with a 302 to a page this API does not serve.
 
 ### Changed
 - **Spec v3.8 — truth alignment.** The spec and `docs/architecture.md` still promised the mechanism
@@ -50,3 +82,8 @@
   degrade to no-ops, and eviction no longer risks rolling back a money movement because a cache is
   down.
 - `as_of` no longer moves backwards when an `AccountOpened` event is replayed.
+- **A stray `IllegalArgumentException` no longer claims to be an invalid amount (CR12).** Every one
+  used to map to `400 /errors/invalid-amount`, so a malformed pagination cursor told the caller their
+  *amount* was wrong. Both request-path `Currency.getInstance` call sites are now typed through one
+  guard — the open-account path went through a bare JDK call, not `Money.of`, so patching only the
+  latter would have turned the very test that proves this into a 500.
