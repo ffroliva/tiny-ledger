@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.8
+**Version:** 3.9
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -496,7 +496,8 @@ composition root with constructor injection.
 Transaction demarcation is wiring too: `UseCaseConfig` wraps each command use case in a
 `TransactionalUseCaseDecorator` built on Spring's `TransactionTemplate`, so §4.3's promise — event
 append and publication-registry row committing together — holds without a single framework
-annotation entering the application layer (§9.2 forbids them there).
+annotation entering the application layer (§9.2 enforces this for the three Spring stereotype annotations; the
+rule here is the design rule, which is broader).
 
 ```java
 @Configuration
@@ -669,10 +670,24 @@ Keycloak as OAuth2/OIDC provider; the app is a resource server validating JWTs.
 | `ledger:writer` | Record movements on owned accounts |
 | `ledger:auditor` | Read the audit trail across all accounts; no writes |
 
-Authorisation wraps the use case, not only the controller — an **authorisation decorator** applied
-in the composition root (§4.5), the same pattern as transactions, because `@PreAuthorize` on an
-application service would put a framework annotation exactly where §9.2 forbids one. Ownership is
-checked against the JWT subject, inside that wrapper, before the use case runs (§4.1).
+Authorisation is a use-case concern, never a controller concern, applied in the composition root
+(§4.5) rather than by annotation — the application layer carries no Spring annotations (§4.5).
+
+**Every authorisation decision is made by the component that holds the state the decision needs.**
+That principle decides where a new operation's check belongs. It yields four sites, and **this list
+is closed — a fifth requires an ADR.**
+
+| The operation | Authorised | Because |
+|---|---|---|
+| Changes state, or reads at the aggregate's version (`?consistency=strong`) | In the service, against the rehydrated aggregate, before the idempotency lookup (§6.3) | The decision must be taken against the same state, at the same version, the command is applied to |
+| Reads a read model for one named account | A decorator wrapping the inbound port (§4.5) | The read model is the authority for a question the read model answers |
+| Returns a collection the caller sees only part of | The port takes the visibility scope as a parameter (`accountsOwnedBy`) — the scope *is* the authorisation | There is no set to decorate; widening it is a port-signature change |
+| Depends on role alone, with no account subject (`/audit/**`, `/accounts/*/events`) | The security filter chain in `config` | There is no subject to compare and no inbound port to decorate |
+
+Absent is never answered as unowned: an account that does not exist is §6.5's 404, whoever asks.
+
+No gate enforces the closure clause — it is a review obligation, not a build failure. `HexagonalRulesTest`
+constrains where code may live, not where a check may be made.
 
 #### Test users
 
@@ -876,6 +891,30 @@ so that every convention argument resolves to a citation rather than a taste.
 | `changesSince` sync endpoint | **Skip** | No sync consumer exists. YAGNI |
 | Categories / spaces sub-ledgers | **Skip** | Banking-app concept; needless path depth |
 | Request signing (`BearerAndSignature`) | **Skip** | Out of scope (§13) |
+
+### 7.2 Open Banking / FAPI 2.0 alignment
+
+Reference: UK Open Banking Read/Write API Standard v4.0.1 and FAPI 2.0 Security Profile (Final,
+Feb 2025), reviewed 2026-08-04.
+
+| OB convention | Verdict | Status | Why |
+|---|---|---|---|
+| `x-fapi-interaction-id` request/response correlation header | **Adopt** | Built | One filter; gives 2xx responses the correlation `traceId` only gives errors |
+| Unsigned amount + direction indicator (`CreditDebitIndicator`) | **Adopt** (already, as `direction` `IN`/`OUT`) | Built | Same idea, arrived at via Starling; record the mapping |
+| Keyset cursor pagination | **Adopt** (already conformant) | Built | OB leaves the pagination mechanism to the ASPSP |
+| Sender-constrained tokens (FAPI 2.0 §5.3.4) via DPoP | **Adopt** | Not built | Keycloak 26.4 client profile + Spring Security 6.5 auto-validation; the one real §6.4 gap |
+| `Links.Self` on list and item responses | **Adapt** | Not built | One field, good REST; the rest of the `Data`/`Meta` envelope is not worth the churn |
+| `Data`/`Meta` response envelope | **Diverge** | n/a | Named list keys (`{"transactions": […]}`) already extensible; wrapping buys nothing without an OB client |
+| `{Amount: "10.00", Currency}` decimal-string money | **Diverge, documented** | n/a | §2.1 — precision safety over conformance; the divergence is recorded, not accidental |
+| `x-idempotency-key` header, 24-hour window | **Diverge, documented** | n/a | §6.3 — the path-UID mechanism has no window and no second store to drift |
+| `OBErrorResponse1` error shape | **Diverge, documented** | n/a | §6.5 — RFC 7807 is an IETF standard with framework support; OB's code set does not describe this domain |
+| Unknown resource-id → 400 rather than 404 | **Diverge** | n/a | 404 on an unguessable UUID is better engineering (§6.5) |
+| `/open-banking/v4.0/aisp/…` URI structure | **Skip** | n/a | The `aisp` segment asserts a PSD2 role this app does not hold |
+| Account-access-consent / intent lifecycle, `Permissions` | **Skip** | n/a | No TPP, no PSU/TPP split, no delegated access to consent to |
+| Detached JWS message signing, trust anchor | **Skip** | n/a | Already out of scope (§13); needs a trust anchor a laptop does not have |
+| OB Directory, eIDAS/OBWAC/OBSEAL certificates, TPP onboarding | **Skip** | n/a | Ecosystem membership, not software |
+| FAPI 1.0 Advanced hybrid flow, JAR, JARM | **Skip** | n/a | Superseded by FAPI 2.0 for new work; conformance value is zero outside the OB ecosystem |
+| MI / availability / performance reporting | **Skip** | n/a | Regulated-entity obligation |
 
 ---
 
@@ -1386,6 +1425,23 @@ Tracked in the council review reports (`.superpowers/sdd/`) and §15's assumptio
 three rounds against this document; every confirmed finding is closed as of v3.3, and the report
 records the history. When an escalations section is non-empty, it is the canonical list.
 
+**Known divergences between this document and the code at v3.9.** Recorded here rather than left in
+Javadoc, because a reader checks the spec:
+
+| Gap | Spec says | Code does | Owner |
+|---|---|---|---|
+| `GET /api/v1/accounts/{accountUid}` for an account owned by someone else | 403 (§6.5, "wrong-owner access returns 403, not 404") | **404** — the controller filters by `accountsOwnedBy` and cannot distinguish absent from unowned | **Unassigned.** A wire-contract change; needs its own test and its own decision |
+| `GET /api/v1/accounts/{accountUid}/transactions` for an account that does not exist | 404 (§6.5) | **200 with an empty page** — the history service returns whatever the projection gives | **Unassigned.** As above |
+| `POST /api/v1/accounts` | §7 annotates it `ledger:writer` | Authorised by **authentication alone** — no role check exists anywhere in the codebase | The roles plan, which introduces role checks |
+| Both auditor operations in `full` | §7: `ledger:auditor` only | **403 to every caller.** A temporary denial: `accountUid` is optional on the trail, so once `full` became authenticated any valid token could page every account's id, amount and reference. Lifted by *replacing* the matchers with a `ledger:auditor` check, never by deleting them | The roles plan |
+| **Rate limiting** | §6.1 is a section on it; §6.5 lists the 429; §3's module table makes `platform` responsible for it; §12 describes an e2e test that rate-limits and confirms the 429 | **Nothing exists.** The only occurrence in `src/main` is `ErrorCode.RATE_LIMIT_EXCEEDED`, which has no producer | Unassigned — an abuse control, not a nicety |
+| **Token audience** | not specified | **Not validated.** Only `issuer-uri` is configured, so any token the realm issues — including one minted for a different client — is accepted | The Keycloak plan |
+| **`x-fapi-interaction-id`** | echoed per OB | Echoed **unvalidated and unbounded** into the response header and the MDC, so a newline-bearing value forges log lines. FAPI expects a UUID | The FAPI-hardening plan |
+| **`/error`** | §6.5: no internal identifiers cross the boundary | Boot's `BasicErrorController` is live — no exclusion, no override — and its body echoes the request `path` | Unassigned |
+
+No role check exists in `src/main` at v3.9. §6.4's role table and §7's per-endpoint annotations
+describe the intended model, not enforced behaviour. **Nor does any rate limiter**, despite §6.1.
+
 ## Revision history
 
 | Version | Date | Change |
@@ -1400,3 +1456,4 @@ records the history. When an escalations section is non-empty, it is the canonic
 | 3.6 | 2026-08-04 | Task 10 catalogue completion: §6.5 gains the 501 `/errors/not-available-in-standalone` row — §7 already mandated the standalone-501 behaviour for auditor operations; the error `type` the contract uses now has its catalogue entry so §6.5 stays the single authority |
 | 3.7 | 2026-08-04 | Migration tool selection update: user explicitly requested Liquibase changelogs for schema migrations instead of Flyway |
 | 3.8 | 2026-08-04 | Plan 2 close-out truth alignment (`/code-review` CR14): the spec still promised the mechanism ADR 0001 replaced. Kafka routing is a programmatic `EventExternalizationConfiguration` bean, not `@Externalized` on the events (§4.3, §2 tree, tech table, §4.3 division-of-labour, audit consumer note); the in-process legs (`balance`, `notification`) are plain synchronous `@EventListener` in **both** run modes and carry no publication row, so v3.5's "the annotation returns when full mode wires the registry" is retired rather than fulfilled; §9.7's trace-boundary count drops from three to two because the projection never leaves the publishing thread. No behaviour changed — the code was already this; only the spec was stale |
+| 3.9 | 2026-08-05 | Plan 3 close-out truth alignment: §6.4 claimed a single authorisation decorator while the code enforces at four sites, so the mechanism is restated principle-first — every decision is made by the component holding the state it needs — with the four sites enumerated and the list closed against a fifth; the claim that §9.2 forbids `@PreAuthorize` was false in §6.4 and §4.5 alike, since that rule names three stereotype annotations, and both now cite §4.5's design rule; eight known gaps recorded under *Open issues* — the `getAccount` 404-for-unowned and `/transactions` 200-for-absent divergences from §6.5, `POST /accounts` authorised by authentication alone, `full`'s temporary 403 on both auditor operations, and four controls the document describes but the code does not carry: no rate limiter despite §6.1, no `aud` validation, an unvalidated and unbounded `x-fapi-interaction-id`, and Boot's `/error` echoing the request path; new §7.2 Open Banking / FAPI 2.0 alignment table carrying per-row build status, because a verdict of Adopt is not a claim of conformance. No behaviour changed — only the document was stale |
