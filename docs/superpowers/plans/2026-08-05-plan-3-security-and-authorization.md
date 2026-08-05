@@ -258,11 +258,19 @@ git commit -m "refactor: collapse the error catalogue behind TinyLedgerException
 
 ### Task 2: Type the amount rule, then stop mapping bare `IllegalArgumentException`
 
-This one **does** change behaviour, which is why it is separate. Today `ErrorHandlingAdvice` maps every `IllegalArgumentException` to 400 `/errors/invalid-amount`, so a malformed pagination cursor tells the caller their *amount* is wrong (parked finding CR12). The mapping cannot simply be deleted: `Account` uses `IllegalArgumentException` as the amount-validation signal, so deleting it first would turn every malformed amount into a 500.
+This one **does** change behaviour, which is why it is separate. Today `ErrorHandlingAdvice` maps every `IllegalArgumentException` to 400 `/errors/invalid-amount`, so a malformed pagination cursor tells the caller their *amount* is wrong (parked finding CR12).
+
+**Council correction — read this before touching anything.** An earlier draft of this task claimed `Account`'s `IllegalArgumentException("amount must be positive")` was the mechanism behind the 400, and told the implementer to convert that throw and then delete the blanket mapping. **That was wrong, and following it would have turned a green test red and sent you to the wrong file.** Verified:
+
+- `docs/api/openapi.yaml` defines a **`MovementAmount`** schema separate from `Money`, with `minimum: 1`. The generator emits `@Min(1)`, so a zero or negative `minorUnits` is rejected by **bean validation** as a `MethodArgumentNotValidException` — which `malformed()` keeps handling. `LedgerControllerTest.negativeMinorUnitsIsBadRequestBeforeAnyServiceCall` asserts `verifyNoInteractions(recordMovement)`, proving the use case never runs. **`Account`'s guard is unreachable over HTTP.**
+- The `IllegalArgumentException` that genuinely reaches `malformed()` comes from **`Currency.getInstance(...)`** inside `LedgerApiMapper`. The OpenAPI pattern is `^[A-Z]{3}$`, which `"ZZZ"` satisfies, so bean validation passes it through and the JDK throws on the unknown ISO code. `LedgerControllerTest.unknownCurrencyCodeIsBadRequest` (line ~206) pins exactly this: `{"currency":"ZZZ"}` → **400 `/errors/invalid-amount`**, `verifyNoInteractions(openAccount)`.
+
+So the currency path — not the amount path — is what makes the blanket mapping load-bearing. Type **that** first, or removing the mapping turns a bad currency code into a 500.
 
 **Files:**
 - Create: `src/main/java/com/ffroliva/tinyledger/shared/error/InvalidAmountException.java`
-- Modify: `src/main/java/com/ffroliva/tinyledger/ledger/domain/Account.java` (the `amount must be positive` throw)
+- Modify: `src/main/java/com/ffroliva/tinyledger/shared/Money.java` (validate the currency code in `of`)
+- Modify: `src/main/java/com/ffroliva/tinyledger/ledger/domain/Account.java` (the `amount must be positive` throw — defence in depth for non-HTTP callers such as Plan 4's CLI, not the HTTP path)
 - Modify: `src/main/java/com/ffroliva/tinyledger/platform/ErrorHandlingAdvice.java`
 - Test: `src/test/java/com/ffroliva/tinyledger/ledger/adapter/in/web/LedgerControllerTest.java`
 
@@ -303,20 +311,37 @@ public class InvalidAmountException extends TinyLedgerException {
 }
 ```
 
-- [ ] **Step 4: Throw it from the domain rule**
+- [ ] **Step 4: Type the currency-code failure — this is the load-bearing one**
 
-In `Account.java`, replace the amount guard's `IllegalArgumentException` with `InvalidAmountException`. `shared.error` is framework-free, so `domainIsFrameworkFree` still holds — verify that by running `HexagonalRulesTest` in the next step rather than assuming it.
+In `Money.of`, wrap the JDK lookup so an unknown ISO code becomes a catalogued failure instead of a bare `IllegalArgumentException`:
+
+```java
+    public static Money of(String currencyCode, long minorUnits) {
+        try {
+            return new Money(Currency.getInstance(currencyCode), minorUnits);
+        } catch (IllegalArgumentException e) {
+            // §6.5: a well-formed but unknown ISO code (the OpenAPI pattern ^[A-Z]{3}$ admits "ZZZ",
+            // so bean validation passes it through and the JDK is what refuses it). Typed here rather
+            // than in the mapper so every caller — web, CLI, tests — gets the same catalogued answer.
+            throw new InvalidAmountException("unknown currency code: " + currencyCode);
+        }
+    }
+```
+
+`Money` is in `shared`, and `shared.error` is framework-free, so nothing about the ArchUnit rules changes — verify that in Step 6 rather than assuming it.
+
+- [ ] **Step 5: Convert the domain guard too, then remove the blanket mapping**
+
+In `Account.java`, replace the amount guard's `IllegalArgumentException` with `InvalidAmountException`. This one is **defence in depth**, not the HTTP path — `@Min(1)` on the generated `MovementAmount` already rejects a negative before the use case runs. It matters for Plan 4's CLI and for direct service callers.
 
 Leave `Account.java`'s `"empty stream"` `IllegalArgumentException` and its `IllegalStateException` **alone**: those are bug signals, not catalogued business errors, and they should surface as 500s.
 
-- [ ] **Step 5: Remove `IllegalArgumentException` from the 400 handler**
-
-In `ErrorHandlingAdvice.malformed()`, delete `IllegalArgumentException.class` from the `@ExceptionHandler({...})` list. Keep every other entry — those are Spring's own request-binding failures and are genuinely 400s.
+Then in `ErrorHandlingAdvice.malformed()`, delete `IllegalArgumentException.class` from the `@ExceptionHandler({...})` list. Keep every other entry — those are Spring's own request-binding failures and are genuinely 400s.
 
 - [ ] **Step 6: Run the affected suites**
 
 Run: `./mvnw -q test -Dtest='LedgerControllerTest+AccountTest+HexagonalRulesTest+MoneyTest'`
-Expected: PASS. If a test asserting 400 on a bad amount fails, the domain throw was missed — fix the throw, not the test.
+Expected: PASS, including **`unknownCurrencyCodeIsBadRequest` staying 400** — that test is the real proof of this task, because it is the one the blanket mapping was carrying. If it turns 500, Step 4 was missed or `Money.of` is not on that path; do **not** weaken the test.
 
 - [ ] **Step 7: Run both pipelines**
 
@@ -402,7 +427,14 @@ public class SecurityConfig {
                 .build();
     }
 
-    /** The production stack: every API call carries a JWT; roles are checked at the port boundary (§6.4). */
+    /**
+     * The production stack: every API call carries a JWT; ownership is checked at the port boundary (§6.4).
+     *
+     * <p>The decoder is built from {@code spring.security.oauth2.resourceserver.jwt.issuer-uri}, which
+     * {@link com.ffroliva.tinyledger.platform.FailClosedGuard} already treats as a full-mode marker — if
+     * that property is ever present while {@code standalone} is active, the guard refuses to start rather
+     * than run an unauthenticated ledger (spec §1). Setting it here is what makes that guard meaningful.
+     */
     @Bean
     @Profile("full")
     SecurityFilterChain fullChain(HttpSecurity http) throws Exception {
@@ -414,6 +446,16 @@ public class SecurityConfig {
     }
 }
 ```
+
+**Council fix (P0-2).** `.jwt(jwt -> {})` builds nothing on its own: Spring needs an issuer or a `JwtDecoder` bean, and an earlier draft of this task supplied neither. A real `full` boot would have failed at context startup, and **nothing in the suite would have caught it** — `SecurityConfigTest` activates only `standalone`, and it is verified that **no integration test makes an HTTP call** (all 26 are adapter-level). So also add to `src/main/resources/application-full.properties`:
+
+```properties
+# §6.4: the resource server's trust anchor. FailClosedGuard treats this key as a full-mode marker —
+# its presence under the standalone profile is a refusal to start, not a warning.
+spring.security.oauth2.resourceserver.jwt.issuer-uri=${LEDGER_ISSUER_URI:http://localhost:8081/realms/tiny-ledger}
+```
+
+That default points at the Keycloak service added to `docker-compose.yml` in the follow-up plan; the env var lets a real deployment override it. Tests never reach it, because Step 6's `full` test supplies a `JwtDecoder` bean directly.
 
 - [ ] **Step 4: Run the suite again**
 
@@ -536,16 +578,54 @@ class SecurityConfigTest {
 }
 ```
 
-- [ ] **Step 7: Run it**
+- [ ] **Step 7: Prove the `full` chain boots and actually refuses (council fix P0-2)**
 
-Run: `./mvnw -q test -Dtest=SecurityConfigTest`
-Expected: PASS.
+Add to `SecurityConfigTest` a nested class activating `full`. Without this, the profile that carries the entire security posture has **no test at all**:
 
-- [ ] **Step 8: Commit**
+```java
+    @Nested
+    @SpringBootTest(classes = TinyLedgerApplication.class)
+    @ActiveProfiles("full")
+    @Import(TrustTheTestKey.class)
+    class FullProfile {
+
+        @Autowired
+        private WebApplicationContext fullContext;
+
+        @Test // the context starting at all is half the assertion — .jwt(...) needs a decoder to exist
+        void anUnauthenticatedRequestIsRefused() throws Exception {
+            MockMvcBuilders.webAppContextSetup(fullContext)
+                    .apply(SecurityMockMvcConfigurers.springSecurity())
+                    .build()
+                    .perform(get("/api/v1/accounts"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test // and a valid token gets through, so the refusal above is not just "everything 401s"
+        void aValidTokenIsAccepted() throws Exception {
+            MockMvcBuilders.webAppContextSetup(fullContext)
+                    .apply(SecurityMockMvcConfigurers.springSecurity())
+                    .build()
+                    .perform(get("/api/v1/accounts").header("Authorization", "Bearer " + TestJwt.token("alice")))
+                    .andExpect(status().isOk());
+        }
+    }
+```
+
+The second test matters as much as the first: a chain that rejects *everything* would satisfy the 401 assertion while being entirely broken.
+
+This `full` context needs the infrastructure beans, so it will pull in Postgres/Redis/Kafka wiring. If it cannot start without containers, move this nested class into a new `SecurityConfigIT` extending `AbstractIntegrationTest` and run it under `-Pit` instead — **do not delete it and do not downgrade it to a slice test**, because a `@WebMvcTest` slice was proven unable to detect security misconfiguration in this repo. Record which of the two you used and why.
+
+- [ ] **Step 8: Run it**
+
+Run: `./mvnw -q test -Dtest=SecurityConfigTest` (or `./mvnw -q verify -Pit -Dit.test=SecurityConfigIT`)
+Expected: PASS, including both `full` cases.
+
+- [ ] **Step 9: Commit**
 
 ```bash
 ./mvnw -q spotless:apply
-git add pom.xml src/main/java/com/ffroliva/tinyledger/config/SecurityConfig.java src/test/java/com/ffroliva/tinyledger/testsupport/TestJwt.java src/test/java/com/ffroliva/tinyledger/config/SecurityConfigTest.java
+git add pom.xml src/main/java/com/ffroliva/tinyledger/config/SecurityConfig.java src/main/resources/application-full.properties src/test/java/com/ffroliva/tinyledger/testsupport/TestJwt.java src/test/java/com/ffroliva/tinyledger/config/SecurityConfigTest.java
 git commit -m "feat: add Spring Security, configured per profile rather than excluded in standalone"
 ```
 
@@ -629,13 +709,27 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
  * no use case ever sees a framework type. In {@code standalone} there is no authentication, and the
  * fixed principal is the documented contract rather than a fallback.
  */
-public final class CallerPrincipal {
+@Component
+public class CallerPrincipal {
 
-    private CallerPrincipal() {}
+    private static volatile boolean standalone;
+
+    CallerPrincipal(Environment environment) {
+        // Read once at startup rather than per request; the profile cannot change at runtime.
+        standalone = environment.matchesProfiles("standalone") || environment.getActiveProfiles().length == 0;
+    }
 
     public static String current() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth instanceof JwtAuthenticationToken jwt) return jwt.getToken().getSubject();
+        // Council fix (P1-1): fail CLOSED outside standalone. Returning the fixed principal whenever
+        // authentication is absent would turn a security misconfiguration into a *wrong answer* — the
+        // ownership check would then compare against whatever "local" happens to own — instead of a
+        // refusal. FailClosedGuard asserts the same principle for profile configuration; this is its
+        // per-request counterpart.
+        if (!standalone) {
+            throw new IllegalStateException("no authenticated principal outside the standalone profile");
+        }
         return AuthorizationConfig.STANDALONE_PRINCIPAL;
     }
 
@@ -723,9 +817,26 @@ public interface QueryHistoryUseCase {
 
 In `BalanceController`, pass `CallerPrincipal.current()` as the first argument to `queryBalance.balance(...)` and `queryHistory.history(...)`.
 
-- [ ] **Step 4: Update the existing tests' stubs**
+- [ ] **Step 4: Update the existing tests' stubs, and prove the caller actually arrives (council fix P1-3)**
 
 `BalanceControllerTest` stubs these ports with `any()` matchers in several places. Each `given(queryBalance.balance(any()))` becomes `given(queryBalance.balance(any(), any()))`, and likewise for `history`. This is a signature change, not a behaviour change — no assertion should need altering.
+
+But `any()` matchers mean **nothing in the suite would notice if the controller passed a literal `"local"`, an empty string, or `null` instead of `CallerPrincipal.current()`** — the services ignore the parameter by design, and `standalone`'s principal is always `"local"`, so every test would still pass while Task 6's decorator later authorises against the wrong value. Add one captor test:
+
+```java
+    @Test // the caller must be the resolved principal, not a literal — Task 6 authorises on this value
+    void theResolvedCallerIsPassedToTheQuery() throws Exception {
+        ArgumentCaptor<String> caller = ArgumentCaptor.forClass(String.class);
+        given(queryBalance.balance(any(), any())).willReturn(Optional.of(balanceView()));
+
+        mvc.perform(get("/api/v1/accounts/{a}/balance", ACCOUNT)).andExpect(status().isOk());
+
+        verify(queryBalance).balance(caller.capture(), any());
+        assertThat(caller.getValue()).isEqualTo("local");
+    }
+```
+
+Reuse whatever `balanceView()` fixture the class already has; if there is none, build a `BalanceView(new AccountId(ACCOUNT), Money.of("GBP", 5000), NOW, 3)` inline.
 
 - [ ] **Step 5: Run both pipelines**
 
@@ -743,6 +854,16 @@ git commit -m "feat: carry the caller into the balance and history queries (m2 s
 ---
 
 ### Task 6: The authorization decorator
+
+**Council fix (P0-1) — this task moves ALL ownership checks to the boundary, not just the read ones.** An earlier draft decorated only `QueryBalanceUseCase` and `QueryHistoryUseCase`. But `RecordMovementService.java:61` and `StrongBalanceService.java:28` **already check ownership in-service**:
+
+```java
+if (!account.owner().equals(caller)) throw new OwnershipException(caller, accountId);
+```
+
+Shipping the draft would have left one §6.4 rule enforced in two different places permanently — writes inside the service, reads outside it — which is precisely the spec-versus-code drift the Plan 2 close-out spent a docs pass correcting (CR14). The user chose **option (a)**: one mechanism at the port boundary, matching what §6.4 already promises.
+
+So this task also **moves** the two in-service checks into decorators. Concretely: delete the `if (!account.owner().equals(caller))` line from `RecordMovementService` and `StrongBalanceService`, add `Movements` and `StrongBalance` decorators alongside the `Balances` and `History` ones below, and update `RecordMovementServiceTest` and `StrongBalanceServiceTest` — those currently assert the service throws `OwnershipException`, and after this it does not. **Move those assertions into `AuthorizedUseCasesTest` rather than deleting them**; losing them would drop real coverage. Note §6.3 ordering while you do it: the ownership check must still run *before* the idempotency lookup, so the authorization decorator must sit **outside** the transactional one in the wiring order.
 
 Mirrors `TransactionalUseCases` exactly: package-private decorator classes in `config`, wired in the composition root, so `application` gains no framework annotation. **Throws `OwnershipException`, never Spring's `AccessDeniedException`** — measured on 2026-08-05, a Spring `AccessDeniedException` thrown from inside a controller invocation is claimed by `ErrorHandlingAdvice`'s catch-all and returned as an **opaque 500**, in all three observation modes, because `@ExceptionHandler` resolves it before `ExceptionTranslationFilter` can. `OwnershipException` returns 403 `/errors/forbidden` and was verified to keep doing so with Security on the classpath.
 
@@ -922,21 +1043,31 @@ Add the `org.springframework.context.annotation.Primary` import. Note this is th
 Run: `./mvnw -q verify` then `./mvnw -q verify -Pit`
 Expected: exit 0 and exit 0. Existing tests keep passing because `standalone`'s fixed principal `"local"` owns the accounts those tests create.
 
-- [ ] **Step 7: Add a Cucumber scenario for the refusal**
+- [ ] **Step 7: Prove the decorator is actually IN THE REQUEST PATH (council fix P0-3)**
 
-`src/test/resources/features/authorization.feature`, tagged `@standalone` so it runs in plain `verify`:
+`AuthorizedUseCasesTest` constructs the decorator directly, so it passes whether or not the decorator is wired. **If the `@Primary` wiring is wrong — annotation forgotten, wrong bean injected — the controller calls the undecorated service, no authorization happens at all, and that unit test still goes green.** An earlier draft's only wiring proof was a Cucumber scenario carrying an escape hatch reading "if `standalone` cannot express two different callers, convert this to a `BalanceControllerTest` case instead" — and `standalone` has exactly **one** fixed principal (`AuthorizationConfig.STANDALONE_PRINCIPAL`), so that hatch was certain to trigger, and a controller-slice test stubs the port and exercises the mock rather than the wiring. The proof would have deleted itself.
 
-```gherkin
-@standalone
-Feature: Ownership is enforced at the port boundary
+Add to the `FullProfile` nested class created in Task 3 Step 7 — that context has the real object graph *and* the real filter chain, so this one test closes both gaps:
 
-  Scenario: a caller cannot read a balance on an account they do not own
-    Given an account "ACC-1" owned by "alice" with 5000 minor units
-    When "mallory" requests the balance of "ACC-1"
-    Then the response is 403 with type "/errors/forbidden"
+```java
+        @Test // §6.4: the decorator is wired, not merely written — mallory holds a valid token and is
+        // still refused, which no unit test on AuthorizedUseCases could establish
+        void aValidTokenForTheWrongOwnerIsForbidden() throws Exception {
+            UUID alicesAccount = openAnAccountAs("alice");
+
+            MockMvcBuilders.webAppContextSetup(fullContext)
+                    .apply(SecurityMockMvcConfigurers.springSecurity())
+                    .build()
+                    .perform(get("/api/v1/accounts/{a}/balance", alicesAccount)
+                            .header("Authorization", "Bearer " + TestJwt.token("mallory")))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.type").value("/errors/forbidden"));
+        }
 ```
 
-Implement the three steps in the existing `cucumber` glue package, following the idiom already used there. If `standalone` cannot express two different callers (it has one fixed principal), **convert this to a `BalanceControllerTest` case instead** rather than forcing the scenario — and record why in the commit message.
+Implement `openAnAccountAs(String owner)` as a helper that POSTs `/api/v1/accounts` with that owner's token and returns the created `accountUid`. **Verify this test fails if you remove `@Primary` from the decorator beans** — that is the specific defect it exists to catch — and report that red→green explicitly.
+
+Also add its positive twin: alice reading her own balance succeeds. A test that only asserts the refusal would pass against a system that refuses everyone.
 
 - [ ] **Step 8: Commit**
 
@@ -1056,20 +1187,72 @@ public class FapiInteractionIdFilter extends OncePerRequestFilter {
 Run: `./mvnw -q test -Dtest=FapiInteractionIdFilterTest`
 Expected: PASS, 2 tests.
 
-- [ ] **Step 5: Run both pipelines**
+- [ ] **Step 5: Prove the filter is registered and that it does its job (council fix P1-4)**
+
+The two tests above call `filter.doFilter(...)` directly, so **removing `@Component` — and with it the filter from the chain entirely — would break neither.** And the filter's stated purpose is to populate the MDC `traceId` that `ErrorHandlingAdvice.traced()` attaches to problem responses; nothing yet asserts a `traceId` ever reaches a response. The feature could be wholly inert and green.
+
+Add to `BalanceControllerTest` (a slice is sufficient here — unlike security, filter registration is visible at that level):
+
+```java
+    @Test // the filter is in the chain, not merely written
+    void everyResponseCarriesAnInteractionId() throws Exception {
+        given(queryAccounts.accountsOwnedBy(any())).willReturn(List.of());
+
+        mvc.perform(get("/api/v1/accounts"))
+                .andExpect(status().isOk())
+                .andExpect(header().exists("x-fapi-interaction-id"));
+    }
+
+    @Test // §6.5/§6.6: and it reaches the problem body, which is the reason the filter exists
+    void aProblemResponseCarriesTheTraceId() throws Exception {
+        given(queryBalance.balance(any(), any())).willThrow(new RuntimeException("boom"));
+
+        mvc.perform(get("/api/v1/accounts/{a}/balance", ACCOUNT))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.traceId").exists());
+    }
+```
+
+If the slice does not register the filter, promote both to the `full` `@SpringBootTest` from Task 3 Step 7 rather than dropping them.
+
+- [ ] **Step 6: Run both pipelines**
 
 Run: `./mvnw -q verify` then `./mvnw -q verify -Pit`
 Expected: exit 0 and exit 0.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 ./mvnw -q spotless:apply
-git add src/main/java/com/ffroliva/tinyledger/platform/FapiInteractionIdFilter.java src/test/java/com/ffroliva/tinyledger/platform/FapiInteractionIdFilterTest.java
+git add src/main/java/com/ffroliva/tinyledger/platform/FapiInteractionIdFilter.java src/test/java/com/ffroliva/tinyledger/platform/FapiInteractionIdFilterTest.java src/test/java/com/ffroliva/tinyledger/balance/adapter/in/web/BalanceControllerTest.java
 git commit -m "feat: echo-or-mint x-fapi-interaction-id and expose it as the MDC traceId"
 ```
 
 ---
+
+## Council audit — lineage
+
+This plan was revised on 2026-08-05 after a council review. All P0 and P1 findings are **folded into the
+tasks above rather than listed separately** — they are the spec now, not an appendix. Findings, method and
+the false positives kept for auditability: `.claude/audits/2026-08-05/council-plan3-orchestrator.md`.
+
+What the review changed, so a reader can see which parts of this plan are load-bearing corrections:
+
+| Finding | Task | What was wrong |
+|---|---|---|
+| **P0-1** | 6 | Decorating only the read ports would have left §6.4 enforced in two places permanently. User chose option (a): all five use cases authorise at the boundary; the two in-service checks move out. |
+| **P0-2** | 3 | `.jwt(jwt -> {})` with no issuer and no decoder — `full` would not have booted, and neither suite could see it, since no IT makes an HTTP call. |
+| **P0-3** | 6 | The only proof the decorator was *wired* was a test the plan pre-authorised deleting, and `standalone`'s single principal guaranteed that hatch would trigger. |
+| **P1-1** | 4 | `CallerPrincipal` failed **open**, returning the fixed principal whenever authentication was absent — in a codebase with a `FailClosedGuard` asserting the opposite. |
+| **P1-3** | 5 | `any()` stubs meant a hardcoded caller would have passed every test, and Task 6 authorises on that value. |
+| **P1-4** | 7 | Both filter tests called `doFilter` directly, so deleting `@Component` broke nothing, and no test asserted `traceId` ever reached a response. |
+| **Task 2 rewrite** | 2 | The original rationale was factually wrong: `@Min(1)` on `MovementAmount` makes `Account`'s guard unreachable over HTTP, and the `IllegalArgumentException` the blanket mapping actually carries comes from `Currency.getInstance` on a well-formed-but-unknown code. |
+
+**Caveat on the review itself:** the four independent advisors (security-auditor, staff-reviewer,
+code-architect, silent-failure-hunter) all terminated on API 529 before reporting. The findings above are
+an orchestrator pass across the same four lenses — weaker, because one reviewer has correlated blind
+spots, which is the reason the multi-agent pattern exists. The advisors are to be re-run against **this
+revised plan**; anything they add lands here as a further revision.
 
 ## Follow-up plans, named so they are not forgotten
 
