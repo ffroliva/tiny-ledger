@@ -5,7 +5,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with: { distribution: corretto, java-version: '25', cache: maven }
       - name: "Stage 1 — lint & format"
         run: ./mvnw -q spotless:check
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with: { distribution: corretto, java-version: '25', cache: maven }
       - name: "Stages 2-3 — compile, unit, JaCoCo gates, architecture"
         # Stages 4-5 (OpenAPI contract generation, @standalone Cucumber) run inside verify — the
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with: { distribution: corretto, java-version: '25', cache: maven }
       - name: "Stages 7-12 — integration suite against real Postgres/Redis/Kafka"
         run: ./mvnw -q verify -Pit
