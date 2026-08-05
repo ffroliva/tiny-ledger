@@ -37,9 +37,8 @@ import tools.jackson.databind.ObjectMapper;
  * <em>is</em> {@code standalone} — and §6.5's 501 is the honest answer rather than a profile check smuggled
  * into a controller.
  *
- * <p>§6.4's {@code ledger:auditor} check is the composition root's authorisation decorator, which arrives
- * with Keycloak; until then this controller enforces exactly what the rest of the API does — nothing —
- * rather than inventing a second, parallel mechanism.
+ * <p>§6.4 row 4: these routes depend on role alone, with no account subject to compare, so they are
+ * authorised by the security filter chain in {@code config} — not by a decorator. See SecurityConfig.
  */
 @RestController
 public class AuditController implements AuditApi {

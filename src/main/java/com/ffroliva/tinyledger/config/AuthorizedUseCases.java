@@ -25,12 +25,10 @@ import java.util.Optional;
  * check on the write path cannot tell absent from unowned before the stream is loaded. §6.3's
  * authorise-before-idempotency is an ordering <em>inside</em> that service, which it already satisfies.
  *
- * <p><strong>The spec does not yet say this.</strong> {@code docs/spec.md:672-675} still describes a single
- * authorisation decorator wrapping <em>every</em> use case in the composition root, with no split — so the
- * document and this code disagree, and the document is the one that is wrong. The spec is frozen at v3.8
- * for this plan, so §6.4 <strong>must be amended in the Plan 3 spec revision</strong> to describe the split
- * and its reasons. Until it is, this comment is the only honest record of the divergence; leaving the
- * disagreement undocumented is the CR14 mechanism AGENTS.md warns about.
+ * <p><strong>The spec records this split.</strong> §6.4 states the principle — every authorisation
+ * decision is made by the component that holds the state the decision needs — and enumerates the four
+ * enforcement sites, of which this decorator is one. The list is closed there against a fifth. No gate
+ * enforces that closure; it is a review obligation, and §6.4 says so plainly.
  *
  * <p>It throws {@link OwnershipException}, never Spring's {@code AccessDeniedException}. Measured
  * 2026-08-05: a Spring denial thrown from inside a controller invocation is claimed by
