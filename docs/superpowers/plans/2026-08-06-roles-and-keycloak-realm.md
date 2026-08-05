@@ -42,7 +42,9 @@ Consequence: the realm **pins each user's `id`**, so `sub` is deterministic and 
 - `src/test/java/com/ffroliva/tinyledger/testsupport/AbstractIntegrationTest.java` — Keycloak container; `issuer-uri` points at it; `public-key-location` removed.
 - `docs/spec.md` — v3.10, landing in the same commit as the code (Task 5).
 
-**Not touched:** `src/test/java/.../testsupport/TestJwt.java` stays. `@WebMvcTest` slices still mint local tokens; only ITs move to the container.
+**Migration surface — measured, not assumed.** `grep` for `TestJwt` across `src/test` returns exactly three files: `TestJwt` itself, `AbstractIntegrationTest` (2 refs — the blank `ISSUER` and `public-key-location`, both deleted in Task 2), and **`SecurityConfigIT` (9 refs)**. `SecurityConfigIT` is also the **only** IT that uses `MockMvc`; every other IT is adapter-level and never presents a token. **No `@WebMvcTest` slice uses `TestJwt`.**
+
+So the whole migration is one file. `TestJwt` is **kept, not deleted** — it has exactly one job left: minting the foreign token that Task 2's `aTokenThisIssuerDidNotMintIsRefused` proves is now rejected. That single remaining use is what makes the decoder move falsifiable, so do not "clean it up".
 
 ---
 
