@@ -496,8 +496,9 @@ composition root with constructor injection.
 Transaction demarcation is wiring too: `UseCaseConfig` wraps each command use case in a
 `TransactionalUseCaseDecorator` built on Spring's `TransactionTemplate`, so §4.3's promise — event
 append and publication-registry row committing together — holds without a single framework
-annotation entering the application layer (§9.2 enforces this for the three Spring stereotype annotations; the
-rule here is the design rule, which is broader).
+annotation entering the application layer (§9.2 enforces this for the three annotations its ArchUnit
+rule names — `@Service`, `@Component`, `@Transactional`; the rule here is the design rule, which is
+broader).
 
 ```java
 @Configuration
@@ -670,8 +671,9 @@ Keycloak as OAuth2/OIDC provider; the app is a resource server validating JWTs.
 | `ledger:writer` | Record movements on owned accounts |
 | `ledger:auditor` | Read the audit trail across all accounts; no writes |
 
-Authorisation is a use-case concern, never a controller concern, applied in the composition root
-(§4.5) rather than by annotation — the application layer carries no Spring annotations (§4.5).
+Authorisation is never an annotation on an application class — the application layer carries no
+Spring annotations (§4.5). Where each decision *is* made follows from the principle below, not from
+a single mechanism.
 
 **Every authorisation decision is made by the component that holds the state the decision needs.**
 That principle decides where a new operation's check belongs. It yields four sites, and **this list
@@ -691,9 +693,10 @@ constrains where code may live, not where a check may be made.
 
 #### Test users
 
-Provisioned by `docker/keycloak/realm-tiny-ledger.json`, imported on container start. The realm file
-is committed; these are fixtures, not credentials — passwords are `dev-only` throughout and the realm
-is never deployed anywhere but a laptop and CI.
+To be provisioned by `docker/keycloak/realm-tiny-ledger.json`, imported on container start — fixtures,
+not credentials: passwords are `dev-only` throughout and the realm is never deployed anywhere but a
+laptop and CI. **Not built at v3.9** — neither the realm file nor a Keycloak service exists yet; the
+table below is the intended fixture set, not a description of the tree.
 
 | User | Roles | Owns | Exists to prove |
 |---|---|---|---|
@@ -911,7 +914,7 @@ Feb 2025), reviewed 2026-08-04.
 | Unknown resource-id → 400 rather than 404 | **Diverge** | n/a | 404 on an unguessable UUID is better engineering (§6.5) |
 | `/open-banking/v4.0/aisp/…` URI structure | **Skip** | n/a | The `aisp` segment asserts a PSD2 role this app does not hold |
 | Account-access-consent / intent lifecycle, `Permissions` | **Skip** | n/a | No TPP, no PSU/TPP split, no delegated access to consent to |
-| Detached JWS message signing, trust anchor | **Skip** | n/a | Already out of scope (§13); needs a trust anchor a laptop does not have |
+| Detached JWS message signing, trust anchor | **Skip** | n/a | Out of scope — needs a trust anchor a laptop does not have |
 | OB Directory, eIDAS/OBWAC/OBSEAL certificates, TPP onboarding | **Skip** | n/a | Ecosystem membership, not software |
 | FAPI 1.0 Advanced hybrid flow, JAR, JARM | **Skip** | n/a | Superseded by FAPI 2.0 for new work; conformance value is zero outside the OB ecosystem |
 | MI / availability / performance reporting | **Skip** | n/a | Regulated-entity obligation |
@@ -1434,10 +1437,11 @@ Javadoc, because a reader checks the spec:
 | `GET /api/v1/accounts/{accountUid}/transactions` for an account that does not exist | 404 (§6.5) | **200 with an empty page** — the history service returns whatever the projection gives | **Unassigned.** As above |
 | `POST /api/v1/accounts` | §7 annotates it `ledger:writer` | Authorised by **authentication alone** — no role check exists anywhere in the codebase | The roles plan, which introduces role checks |
 | Both auditor operations in `full` | §7: `ledger:auditor` only | **403 to every caller.** A temporary denial: `accountUid` is optional on the trail, so once `full` became authenticated any valid token could page every account's id, amount and reference. Lifted by *replacing* the matchers with a `ledger:auditor` check, never by deleting them | The roles plan |
-| **Rate limiting** | §6.1 is a section on it; §6.5 lists the 429; §3's module table makes `platform` responsible for it; §12 describes an e2e test that rate-limits and confirms the 429 | **Nothing exists.** The only occurrence in `src/main` is `ErrorCode.RATE_LIMIT_EXCEEDED`, which has no producer | Unassigned — an abuse control, not a nicety |
+| **Rate limiting** | §6.1 is a section on it; §6.5 lists the 429; §3's module table makes `platform` responsible for it; §9.6 describes an e2e test that rate-limits and confirms the 429 | **Nothing exists.** The only occurrence in `src/main` is `ErrorCode.RATE_LIMIT_EXCEEDED`, which has no producer | Unassigned — an abuse control, not a nicety |
 | **Token audience** | not specified | **Not validated.** Only `issuer-uri` is configured, so any token the realm issues — including one minted for a different client — is accepted | The Keycloak plan |
 | **`x-fapi-interaction-id`** | echoed per OB | Echoed **unvalidated and unbounded** into the response header and the MDC, so a newline-bearing value forges log lines. FAPI expects a UUID | The FAPI-hardening plan |
 | **`/error`** | §6.5: no internal identifiers cross the boundary | Boot's `BasicErrorController` is live — no exclusion, no override — and its body echoes the request `path` | Unassigned |
+| **The Keycloak realm and its test users** | §6.4 provisions five users and their roles from a committed `docker/keycloak/realm-tiny-ledger.json` | **Neither exists.** No `docker/keycloak/` directory, no realm file, and no Keycloak service in `docker/docker-compose.yml`; every IT authenticates through the `public-key-location` decoder branch instead | The roles plan |
 
 No role check exists in `src/main` at v3.9. §6.4's role table and §7's per-endpoint annotations
 describe the intended model, not enforced behaviour. **Nor does any rate limiter**, despite §6.1.
