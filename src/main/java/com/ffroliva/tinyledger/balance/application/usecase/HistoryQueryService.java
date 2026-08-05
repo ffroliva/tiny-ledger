@@ -14,7 +14,9 @@ public class HistoryQueryService implements QueryHistoryUseCase {
     }
 
     @Override
-    public HistoryPage history(AccountId accountId, HistoryQuery query) {
+    public HistoryPage history(String caller, AccountId accountId, HistoryQuery query) {
+        // The caller is checked by the authorisation decorator at the port boundary (§6.4), not here —
+        // this service answers the question, it does not decide who may ask it.
         return projection.history(accountId, query);
     }
 }

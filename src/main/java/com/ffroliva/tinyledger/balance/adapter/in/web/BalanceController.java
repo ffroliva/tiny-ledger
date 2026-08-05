@@ -72,7 +72,7 @@ public class BalanceController implements BalanceApi {
     @Override // the parameterless mapping; ?consistency=strong is routed to the ledger module instead
     public ResponseEntity<Balance> getBalance(UUID accountUid, String consistency) {
         BalanceView view = queryBalance
-                .balance(new com.ffroliva.tinyledger.shared.AccountId(accountUid))
+                .balance(callerPrincipal.current(), new com.ffroliva.tinyledger.shared.AccountId(accountUid))
                 .orElseThrow(BalanceController::accountNotFound);
         return ResponseEntity.ok(
                 new Balance(view.accountId().value(), money(view.amount()), at(view.asOf()), view.streamVersion()));
@@ -112,6 +112,7 @@ public class BalanceController implements BalanceApi {
                     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
                     OffsetDateTime maxTransactionTimestamp) {
         HistoryPage page = queryHistory.history(
+                callerPrincipal.current(),
                 new com.ffroliva.tinyledger.shared.AccountId(accountUid),
                 new HistoryQuery(cursor, limit, instant(minTransactionTimestamp), instant(maxTransactionTimestamp)));
         TransactionList body = new TransactionList(

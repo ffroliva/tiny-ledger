@@ -18,7 +18,9 @@ public class BalanceQueryService implements QueryBalanceUseCase {
     }
 
     @Override
-    public Optional<BalanceView> balance(AccountId accountId) {
+    public Optional<BalanceView> balance(String caller, AccountId accountId) {
+        // The caller is checked by the authorisation decorator at the port boundary (§6.4), not here —
+        // this service answers the question, it does not decide who may ask it.
         Optional<BalanceView> cached = cache.get(accountId);
         if (cached.isPresent()) return cached;
         Optional<BalanceView> projected = projection.balance(accountId);
