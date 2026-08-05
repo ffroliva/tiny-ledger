@@ -35,10 +35,11 @@ and **whose account it was**. This revision adds one role and one field, and not
 
 ## 2. Design summary
 
-**D1 — `ledger:admin` widens the ownership term, never the role term.** The decorator's rule
-becomes *operation role* **AND** (*subject is owner* **OR** *caller holds `ledger:admin`*). The
-admin role grants no operation on its own: an admin who is to record movements holds
-`ledger:writer` as well. *Rejected: a superuser role that short-circuits the decorator.* One
+**D1 — `ledger:admin` widens the ownership term, never the role term.** **[repaired]** The
+authorisation rule at every §6.4 site becomes *operation role* **AND** (*subject is owner* **OR**
+*caller holds `ledger:admin`*). The admin role grants no operation on its own: an admin who is to
+record movements holds `ledger:writer` as well. *Rejected: a superuser role that short-circuits the
+ownership comparison.* One
 `if (admin) return;` at the top is smaller code and deletes two boundaries at once — it cannot
 express "may move money on any account but may not read the compliance trail", and every positive
 scenario stays green while it does so. The conjunctive form keeps the audit trail out of reach
@@ -103,7 +104,7 @@ needs the event stream, which the web layer does not have.
 not above the record. He holds `ledger:writer`, `ledger:reader`, `ledger:admin`, and owns no
 account of his own — which also proves the admin path needs none.
 
-**D7 — pre-v3.9 events are read, not rewritten.** **[repaired]** Events are immutable and there is
+**D7 — pre-cutover events are read, not rewritten.** **[repaired]** Events are immutable and there is
 no backfill. Absence reads as `actor = owner` only for events whose `occurredAt` precedes the
 cutover instant recorded when this lands. After it, absence is a defect and the trail reports
 `unknown`, never the owner.
@@ -233,8 +234,9 @@ implementing plan needs to write this edit against the real four-site table.
 **[repaired]** The original edit here rewrote the document's *correct* phrase — "the use case
 compares the two" — into "the decorator compares the two," which contradicts v3.9's §6.4: three of
 the four enforcement sites are not a decorator at all (`RecordMovementService` and
-`StrongBalanceService` compare in-service; the collection endpoint compares nothing, by D8). The
-original phrase is restored below; only the admin clause is added to it.
+`StrongBalanceService` compare in-service; the collection endpoint compares nothing, by D8; and the
+auditor routes are decided by the filter chain in `config`). The original phrase is restored below;
+only the admin clause is added to it.
 
 **Current:**
 
@@ -251,8 +253,8 @@ original phrase is restored below; only the admin clause is added to it.
 > they hold `ledger:admin`. Every event the command then emits records that caller as its `actor`
 > (§2.3), so an admin-performed movement carries both halves of the answer an investigation needs —
 > *who acted* and *whose account it was* — on the same immutable row, and the audit trail surfaces
-> the pair (§7). `mallory`'s N7 is a test of the comparison, not of a role; `trent`'s P9 and N13 are
-> tests that the admin clause widened that comparison and nothing else.
+> the pair (§7). `mallory`'s N7 is a test of the comparison, not of a role; `trent`'s P9 and N13–N18
+> are tests that the admin clause widened that comparison and nothing else.
 
 ### 3.8 §6.5 Error handling — the 403 row
 
@@ -308,11 +310,11 @@ him, and §11's CLI resolves `--account ACC-001` to an `accountUid` **through th
 runs the whole catalogue through the CLI's client. Neither obvious fix works — giving `trent` an
 account lets him resolve *his own*, not `alice`'s, and widening `GET /accounts` for admin is
 forbidden (D8). **P9 references the deterministic `accountUid` directly, not the account name.**
-§6.4 already pins `ACC-001`…`ACC-900` to deterministic UUIDs via the realm file and seed script "so
-scenarios can reference them". No realm change, no CLI change, and N12 continues to hold for
-`trent`.
+§6.4 already provides for `ACC-001`…`ACC-900` being pinned to deterministic UUIDs via the realm file
+and seed script "so scenarios can reference them" — not built yet at v3.9, but the intended
+mechanism. No realm change, no CLI change, and N12 continues to hold for `trent`.
 
-**Add negative rows, after N12: [repaired — split across both auditor routes, four rows added]**
+**Add negative rows, after N12: [repaired — N13 split into N13/N14 across both auditor routes; four further negatives added]**
 
 > | N13 | `trent` (admin) requests `GET /api/v1/audit/entries` | `403`. `ledger:admin` widens ownership, not roles: the trail belongs to `ledger:auditor`, and the principal who may move money on any account is not the one who reviews it |
 > | N14 | `trent` (admin) requests `GET /api/v1/accounts/{accountUid}/events` | `403`, same reason as N13. `SecurityConfig` denies both auditor routes with a single matcher; a fix that split the routes and covered only `/audit/**` would pass N13 while an admin still reads the raw event stream on the other route |
@@ -320,6 +322,10 @@ scenarios can reference them". No realm change, no CLI change, and N12 continues
 > | N16 | `trent` requests `GET /api/v1/accounts` | Only accounts he owns. Proves D8 |
 > | N17 | `mallory` (writer, no admin) attempts a cross-account write | 403. Proves the widening is gated on the role rather than always-on |
 > | N18 | An event written after the cutover with no `actor` | Reported as `unknown`, never as the owner |
+
+**[repaired] N18 cannot be driven through the HTTP API**, which §9.3 requires of catalogue scenarios
+— no endpoint writes an event without stamping `actor`. It needs a non-BDD home (a repository-level
+test), and the implementing plan must place it before adopting this catalogue.
 
 **[repaired] §5's ID-set gap.** §5's `Requirement IDs` sentence hardcodes the catalogue's membership
 as `(P0…P8, N1…N12, E1…E9)`; P9 and N13–N18 fall outside that literal set the moment they exist. The
@@ -386,18 +392,18 @@ visible only where an admin reaches something an admin should not have. N13–N1
 
 | Surface | Change |
 |---|---|
-| `docs/api/openapi.yaml` — `AuditEntry` | One **optional** property `actor` (`type: string`), *not* added to `required`. Description: the issuing principal; equal to `owner` for owner-initiated movements, different for on-behalf-of; absent on pre-v3.9 entries, where it reads as the owner (§15.9). Additive and backward-compatible for generated clients |
+| `docs/api/openapi.yaml` — `AuditEntry` **[repaired]** | One **optional** property `actor` (`type: string`), *not* added to `required`. Description: the issuing principal; equal to `owner` for owner-initiated movements, different for on-behalf-of; absent on pre-cutover entries, where it reads as the owner (§15.9); after the cutover, absence is a defect and the trail reports `unknown`. Additive and backward-compatible for generated clients |
 | `docs/api/openapi.yaml` — everything else | Unchanged. No new path, no new parameter, no new response, no change to `Transaction`, `Balance` or any error response |
 | Event store schema | **No DDL.** `actor` lives inside the existing `payload` JSONB of `events`; the table already has `metadata` and needs neither. Zero migration on the system of record |
 | `audit_entries` | New changeset `004-add-audit-actor.sql`: `ALTER TABLE audit_entries ADD COLUMN actor VARCHAR(255);` — **nullable by design** (§15.9), no backfill, no index. An `actor` filter on the trail is one parameter and one index the day an investigation needs it (open question 2) |
-| Existing events | Read, never rewritten. A payload without `actor` deserialises to absent and is interpreted as `actor = owner`. The audit trail rebuild (E8) reproduces exactly the same reading, so a full replay after this change is stable |
+| Existing events **[repaired]** | Read, never rewritten. A payload without `actor` deserialises to absent; absence is read as `actor = owner` only where `occurredAt` precedes the cutover instant, and as `unknown` after it. The audit trail rebuild (E8) applies the same cutover comparison, and a post-cutover event with no `actor` is a fault E8 must surface |
 | `docker/keycloak/realm-tiny-ledger.json` | New realm role `ledger:admin`; new user `trent` with `ledger:writer`, `ledger:reader`, `ledger:admin`, no seeded account, password `dev-only` like the rest |
 | Authorisation (§4.5 composition root) **[repaired]** | Not one clause in one predicate — there is no shared predicate and no command decorator. The admin clause lands at **three** comparison sites: `AuthorizedUseCases.requireOwner` (the read decorator wrapping `QueryBalanceUseCase`/`QueryHistoryUseCase`), `RecordMovementService`, and `StrongBalanceService`, each compared independently. The collection endpoint (`GET /api/v1/accounts`) is excluded by D8. `requireOwner` is `private static` in `config`, and the cycle rule (`HexagonalRulesTest`) forbids `ledger.application` importing `config`, so a genuinely shared predicate would have to be a new type in `shared`. The role check and §4.1's ordering are untouched |
 | Use cases | The command use cases already receive the caller principal; they now pass it to the aggregate, which stamps it on each emitted event |
 | Cucumber (§9.3) **[repaired]** | `authorisation.feature` gains P9 and N13–N18, all `@full` |
 | pytest-bdd (§9.6) **[repaired]** | Re-runs all of them against the composed stack; no new step vocabulary beyond an actor assertion on the audit trail |
 | Integration (§9.4) | The step-8 security IT gains the admin cases: admin-with-writer succeeds cross-account, admin-without-writer is refused, admin is refused on the auditor endpoints |
-| Unit | Predicate tests for the widened ownership rule; a use-case test asserting emitted events carry the caller as `actor`; **an event-deserialisation test on a legacy payload with no `actor`**, which is the only executable statement of §15.9 |
+| Unit **[repaired]** | Predicate tests for the widened ownership rule; a use-case test asserting emitted events carry the caller as `actor`; **an event-deserialisation test on a legacy payload with no `actor`**; and, since N18 cannot run as BDD, the repository-level post-cutover-absence test that is now the only executable statement of §15.9's post-cutover half |
 | ArchUnit / Modulith | Unchanged. No new module, no new dependency, no framework annotation anywhere new |
 | `standalone` | Unchanged. It has a fixed local principal and no roles; `actor` is recorded there too and always equals the owner |
 
