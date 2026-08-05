@@ -39,7 +39,7 @@ class LedgerEventsListenerTest {
                 openAccount.open(new OpenAccount("local", "ACC-001", GBP)).accountId();
         recordMovement.deposit(new Deposit("local", account, UUID.randomUUID(), new Money(GBP, 10_000), "rent"));
 
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(queryBalance.balance(account))
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(queryBalance.balance("local", account))
                 .hasValueSatisfying(view -> assertThat(view.amount()).isEqualTo(new Money(GBP, 10_000))));
     }
 }

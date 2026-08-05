@@ -1,9 +1,13 @@
 package com.ffroliva.tinyledger.balance.adapter.in.web;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -32,6 +36,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -83,7 +88,7 @@ class BalanceControllerTest {
 
     @Test // §4.4: the parameterless mapping is balance's — the projection read
     void plainBalanceReadIsServedByTheProjection() throws Exception {
-        given(queryBalance.balance(new AccountId(ACCOUNT)))
+        given(queryBalance.balance(anyString(), eq(new AccountId(ACCOUNT))))
                 .willReturn(Optional.of(new BalanceView(new AccountId(ACCOUNT), Money.of("GBP", 8000), NOW, 3)));
 
         mvc.perform(get("/api/v1/accounts/{a}/balance", ACCOUNT))
@@ -111,16 +116,31 @@ class BalanceControllerTest {
 
     @Test // §6.5
     void unknownAccountBalanceIsNotFound() throws Exception {
-        given(queryBalance.balance(any())).willReturn(Optional.empty());
+        given(queryBalance.balance(any(), any())).willReturn(Optional.empty());
 
         mvc.perform(get("/api/v1/accounts/{a}/balance", ACCOUNT))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.type").value("/errors/account-not-found"));
     }
 
+    @Test // §6.4: the caller must be the resolved principal, not a literal — Task 6 authorises on this value
+    void theResolvedCallerIsPassedToTheQuery() throws Exception {
+        // "captain-nemo" is a value nothing in the system can produce: standalone always resolves "local",
+        // so a controller that hardcoded the principal would still satisfy every other test in this class.
+        given(callerPrincipal.current()).willReturn("captain-nemo");
+        given(queryBalance.balance(any(), any()))
+                .willReturn(Optional.of(new BalanceView(new AccountId(ACCOUNT), Money.of("GBP", 5000), NOW, 3)));
+        ArgumentCaptor<String> caller = ArgumentCaptor.forClass(String.class);
+
+        mvc.perform(get("/api/v1/accounts/{a}/balance", ACCOUNT)).andExpect(status().isOk());
+
+        verify(queryBalance).balance(caller.capture(), any());
+        assertThat(caller.getValue()).isEqualTo("captain-nemo");
+    }
+
     @Test // §7: links.next is a URL — same path, the cursor as a query parameter
     void transactionFeedCarriesTheNextPageUrl() throws Exception {
-        given(queryHistory.history(any(), any())).willReturn(new HistoryPage(List.of(transaction()), CURSOR));
+        given(queryHistory.history(any(), any(), any())).willReturn(new HistoryPage(List.of(transaction()), CURSOR));
 
         mvc.perform(get("/api/v1/accounts/{a}/transactions", ACCOUNT))
                 .andExpect(status().isOk())
@@ -135,7 +155,7 @@ class BalanceControllerTest {
 
     @Test // §7: the next page must repeat the caller's window, not silently widen it
     void transactionFeedNextPageUrlKeepsTheLimitAndTheFilters() throws Exception {
-        given(queryHistory.history(any(), any())).willReturn(new HistoryPage(List.of(transaction()), CURSOR));
+        given(queryHistory.history(any(), any(), any())).willReturn(new HistoryPage(List.of(transaction()), CURSOR));
 
         mvc.perform(get("/api/v1/accounts/{a}/transactions", ACCOUNT)
                         .param("limit", "25")
@@ -152,7 +172,7 @@ class BalanceControllerTest {
 
     @Test // §7: absent once the feed is exhausted
     void exhaustedFeedHasNoNextLink() throws Exception {
-        given(queryHistory.history(any(), any())).willReturn(new HistoryPage(List.of(transaction()), null));
+        given(queryHistory.history(any(), any(), any())).willReturn(new HistoryPage(List.of(transaction()), null));
 
         mvc.perform(get("/api/v1/accounts/{a}/transactions", ACCOUNT))
                 .andExpect(status().isOk())
