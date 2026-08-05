@@ -28,6 +28,12 @@ unless the spec says otherwise (§9.2b).
 
 Both must be green before any commit. `spotless:check` runs inside `verify`.
 
+**Run `-Pit` in CI, not locally.** The integration suite starts real containers and is the slowest
+thing in this repository, and only one Maven build may run in a tree at a time — so a local `-Pit` run
+blocks all other work for its duration. Push the branch and read the result instead:
+`gh run watch` / `gh run view --log-failed`. Run it locally only to debug a failure CI has already
+found. Keep running `./mvnw -q verify` locally: it is fast and starts no containers.
+
 - **`verify` starting a container is a bug**, not a slow test. The split is load-bearing: it is what
   lets CI run the unit job on a runner with no Docker (ADR 0003).
 - **Never run two Maven builds in the same tree.** They corrupt `jacoco.exec` and produce a failure
@@ -105,7 +111,9 @@ profile boundary is a startup failure here by design, not a style issue.
 
 - Commit per logical change, with explicit pathspecs. **Never `git add -A`** — another agent may have
   uncommitted work in the tree.
-- Never push. Never merge without being asked; integration is the user's decision.
+- **Push freely to `origin`; that is how the heavy suite runs.** The remote is
+  `github.com/ffroliva/tiny-ledger`, **private**. Pushing a working branch is the normal workflow, not
+  a publication event. **Never merge without being asked** — integration is still the user's decision.
 - Business refusals are **return values** (`MovementResult`), not exceptions. Exceptions are for
   catalogued errors (§6.5) and for bugs.
 - Errors are RFC 7807 problem details. `type` is the machine-readable contract; keep it stable.
