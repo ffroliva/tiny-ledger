@@ -16,8 +16,8 @@ import com.ffroliva.tinyledger.balance.application.port.in.QueryAccountsUseCase;
 import com.ffroliva.tinyledger.balance.application.port.in.QueryBalanceUseCase;
 import com.ffroliva.tinyledger.balance.application.port.in.QueryHistoryUseCase;
 import com.ffroliva.tinyledger.balance.application.port.in.TransactionView;
-import com.ffroliva.tinyledger.config.AuthorizationConfig;
 import com.ffroliva.tinyledger.ledger.domain.MovementType;
+import com.ffroliva.tinyledger.platform.CallerPrincipal;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.net.URI;
@@ -50,19 +50,23 @@ import org.springframework.web.util.UriComponentsBuilder;
 @RestController
 public class BalanceController implements BalanceApi {
 
-    private static final String CALLER = AuthorizationConfig.STANDALONE_PRINCIPAL;
     private static final String JSON = "application/json";
     private static final String PROBLEM_JSON = "application/problem+json";
 
     private final QueryBalanceUseCase queryBalance;
     private final QueryHistoryUseCase queryHistory;
     private final QueryAccountsUseCase queryAccounts;
+    private final CallerPrincipal callerPrincipal;
 
     public BalanceController(
-            QueryBalanceUseCase queryBalance, QueryHistoryUseCase queryHistory, QueryAccountsUseCase queryAccounts) {
+            QueryBalanceUseCase queryBalance,
+            QueryHistoryUseCase queryHistory,
+            QueryAccountsUseCase queryAccounts,
+            CallerPrincipal callerPrincipal) {
         this.queryBalance = queryBalance;
         this.queryHistory = queryHistory;
         this.queryAccounts = queryAccounts;
+        this.callerPrincipal = callerPrincipal;
     }
 
     @Override // the parameterless mapping; ?consistency=strong is routed to the ledger module instead
@@ -78,7 +82,7 @@ public class BalanceController implements BalanceApi {
             path = "/api/v1/accounts",
             produces = {JSON, PROBLEM_JSON})
     public ResponseEntity<AccountList> listAccounts() {
-        return ResponseEntity.ok(new AccountList(queryAccounts.accountsOwnedBy(CALLER).stream()
+        return ResponseEntity.ok(new AccountList(queryAccounts.accountsOwnedBy(callerPrincipal.current()).stream()
                 .map(BalanceController::account)
                 .toList()));
     }
@@ -87,7 +91,7 @@ public class BalanceController implements BalanceApi {
             path = "/api/v1/accounts/{accountUid}",
             produces = {JSON, PROBLEM_JSON})
     public ResponseEntity<Account> getAccount(@PathVariable UUID accountUid) {
-        return ResponseEntity.ok(queryAccounts.accountsOwnedBy(CALLER).stream()
+        return ResponseEntity.ok(queryAccounts.accountsOwnedBy(callerPrincipal.current()).stream()
                 .filter(view -> view.accountId().value().equals(accountUid))
                 .findFirst()
                 .map(BalanceController::account)
