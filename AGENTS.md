@@ -39,7 +39,9 @@ Both must be green before any commit. `spotless:check` runs inside `verify`.
 Note what it does **not** say: the `application` rule bans three *annotations*, not Spring dependencies.
 "The test passes" and "the design is right" are different claims.
 
-- `..domain..` depends on no framework.
+- `..domain..` **and `..shared..`** depend on no framework. `shared` is in the rule because ArchUnit checks
+  *direct* dependencies: the domain imports `shared`, so a Spring import there would reach the domain's
+  compile path while a domain-only rule stayed green.
 - `..application..` carries no `@Service` / `@Component` / `@Transactional`.
 - Only `..config..` and `..adapter.out..` may touch outbound adapters.
 - `@Configuration` lives only in `config` (the composition root) and `platform` (framework guards).
