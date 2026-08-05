@@ -35,35 +35,40 @@ and **whose account it was**. This revision adds one role and one field, and not
 
 ## 2. Design summary
 
-**D1 — `ledger:admin` widens the ownership term, never the role term.** **[repaired]** At the two
-§6.4 sites that compare a caller against an account's owner — the in-service check against the
-rehydrated aggregate, and the decorator wrapping the read-model ports — the authorisation rule
-becomes *operation role* **AND** (*subject is owner* **OR** *caller holds `ledger:admin`*). The
-other two sites are untouched: the collection endpoint carries its scope in the port signature and
-D8 forbids widening it, and the auditor routes turn on role alone with no subject to compare, which
-D2 keeps admin out of. The admin role grants no operation on its own: an admin who is to record
-movements holds `ledger:writer` as well. *Rejected: a superuser role that short-circuits the
-ownership comparison.* One
+**D1 — `ledger:admin` widens the ownership term for change operations only, never for reads, and
+never the role term.** **[repaired]** §6.4's four enforcement sites are really five comparison
+points: the in-service site is two classes sharing one mechanism, `RecordMovementService` for
+writes and `StrongBalanceService` for the strong read (`?consistency=strong`). Exactly one of the
+five widens — the ownership comparison in `RecordMovementService` alone becomes *operation role*
+**AND** (*subject is owner* **OR** *caller holds `ledger:admin`*) — and the other four stay
+owner-only. `StrongBalanceService` and the decorator wrapping the read-model ports
+(`AuthorizedUseCases`) are reads, excluded because the motivation is acting, not browsing; the
+collection endpoint carries its scope in the port signature and D8 forbids widening it; the auditor
+routes turn on role alone with no subject to compare, which D2 keeps admin out of. The admin role
+grants no operation on its own: an admin who is to record movements holds `ledger:writer` as well.
+*Rejected: a superuser role that short-circuits the ownership comparison.* One
 `if (admin) return;` at the top is smaller code and deletes two boundaries at once — it cannot
 express "may move money on any account but may not read the compliance trail", and every positive
 scenario stays green while it does so. The conjunctive form keeps the audit trail out of reach
 through the ordinary `ledger:auditor` role check, with no exception clause to write.
 
 **D2 — admin is not an auditor.** **[repaired]** Reading the audit trail and the raw event stream
-stays `ledger:auditor`-only. What separation of duties withholds is **attribution, not the
-record**: widening `ledger:reader` for admin already hands over every account's transactions and
-balances — that *is* the record — so the trail's exclusive value once admin exists is the `actor`
+stays `ledger:auditor`-only — now the trail's only route to another account's records, since admin
+no longer widens `ledger:reader` at all (D1): an admin's grant covers moving money on an account
+they do not own and nothing about reading it, so if `ledger:admin` also opened the trail, that would
+be the one place an admin could see every account's transactions and balances, plus the `actor`
 field an ordinary reader never sees. The principal who may move money on any account must not also
 be the principal positioned to confirm who moved it, or the trail stops proving anything about that
 principal in particular. *The alternative — admin implies auditor, for operational convenience —
 was rejected:* an investigator with an admin's write scope is a conflict of interest the ledger
 would then be unable to detect. `dave` reviews; `trent` acts.
 
-**[repaired]** **OPEN — requires a product decision before implementation.** Should `ledger:admin`
-widen the ownership term for *reads* at all, or only for change operations? Widening reads lets an
-operator browse every customer's balances and transactions; the stated motivation (fraud response,
-court order) is about *acting*. Narrowing admin to change operations only is a tighter posture and
-departs from D1's uniform widening. Not decided.
+**[repaired] DECIDED 2026-08-05 by the product owner: `ledger:admin` widens the ownership term for
+*change operations only*, never for reads.** An admin may move money on an account they do not own;
+they may not read its balance or transactions. The motivation — fraud response, a court order — is
+about *acting*, and widening reads would let an operator browse every customer's financial history
+for no stated need. This is a deliberate departure from D1 as originally proposed, which widened
+reads and change operations alike.
 
 **D3 — the acting principal is recorded on the event.** **[repaired]** `LedgerEvent` gains an
 `actor()` accessor beside `accountId`, `version` and `occurredAt`; the three movement events carry
@@ -101,8 +106,8 @@ in which a back-office console mints a scoped, audited, time-boxed on-behalf-of 
 production answer, recorded as the upgrade path in §13 and built nowhere here. *Rejected: a
 separate `/api/v1/admin/...` endpoint tree* — a second copy of every write path, with a second
 copy of every invariant behind it, to express one clause of one predicate. *Rejected, again:
-`@PreAuthorize` on controllers* — council-closed (§6.4, §9.2), and the ownership half of the rule
-needs the event stream, which the web layer does not have.
+`@PreAuthorize` on controllers* — council-closed on §4.5's design rule, and because the ownership
+half of the rule needs the event stream, which no annotation can reach.
 
 **D6 — `trent` is the test user.** The classic cast's trusted arbitrator: authorised, and still
 not above the record. He holds `ledger:writer`, `ledger:reader`, `ledger:admin`, and owns no
@@ -192,7 +197,7 @@ Ordering is untouched: authorise, then idempotency, then apply.
 
 **Add one row, after `ledger:auditor`:**
 
-> | `ledger:admin` | Widen `ledger:reader` / `ledger:writer` to **any** account, acting on behalf of its owner. Grants no operation on its own, and no access to the audit trail |
+> | `ledger:admin` | Widen `ledger:writer` to **any** account for change operations, acting on behalf of its owner; never widens `ledger:reader` — reads, including `?consistency=strong`, stay owner-scoped. Grants no operation on its own, and no access to the audit trail |
 
 ### 3.5 §6.4 Security — the authorisation paragraph
 
@@ -201,8 +206,10 @@ Ordering is untouched: authorise, then idempotency, then apply.
 authorisation decision is made by the component that holds the state the decision needs"* — and a
 four-row table of enforcement sites, explicitly closed against a fifth (§6.4). The admin clause has
 to be reasoned about against every site in that table, not confined to one wrapper — and D1/D8 (§2)
-already establish that it widens ownership at only two of the four, leaving the collection endpoint
-and the auditor routes untouched. So the exact replacement text below must not be applied as
+already establish that it widens ownership at only one of the five comparison points
+(`RecordMovementService`, change operations only), leaving the read-model decorator,
+`StrongBalanceService`'s strong read, the collection endpoint and the auditor routes untouched. So
+the exact replacement text below must not be applied as
 written; it is retained only as a record of what was originally proposed. The implementing plan
 needs to write this edit against the real four-site table.
 
@@ -255,12 +262,14 @@ only the admin clause is added to it.
 
 > **The ownership mechanism, end to end:** `AccountOpened` records the `owner` (§2.3), so ownership
 > is a fact of the event stream, not sidecar state; every command and query carries the caller
-> principal (§2.4); the use case compares the two, and where they differ admits the caller only if
-> they hold `ledger:admin`. Every event the command then emits records that caller as its `actor`
+> principal (§2.4); the use case compares the two. For a command — `RecordMovementService` alone —
+> that comparison admits the caller if they hold `ledger:admin`; every query's comparison,
+> `StrongBalanceService`'s strong read included, is untouched, because admin widens change
+> operations only, never reads. Every event a command then emits records the caller as its `actor`
 > (§2.3), so an admin-performed movement carries both halves of the answer an investigation needs —
 > *who acted* and *whose account it was* — on the same immutable row, and the audit trail surfaces
 > the pair (§7). `mallory`'s N7 is a test of the comparison, not of a role; `trent`'s P9 and N13–N18
-> are tests that the admin clause widened that comparison and nothing else.
+> are tests that the admin clause widened the write comparison, and only the write comparison.
 
 ### 3.8 §6.5 Error handling — the 403 row
 
@@ -270,7 +279,7 @@ only the admin clause is added to it.
 
 **Replace with:**
 
-> | Forbidden — wrong role, or wrong owner without `ledger:admin` | 403 | `/errors/forbidden` |
+> | Forbidden — wrong role, or (on a change operation) wrong owner without `ledger:admin` | 403 | `/errors/forbidden` |
 
 ### 3.9 §7 API
 
@@ -308,7 +317,7 @@ staleness markers…":**
 
 **Add one positive row, after P8: [repaired]**
 
-> | P9 | `trent` (admin) deposits 100.00 into `alice`'s account, addressed by its `accountUid` — not the `ACC-001` name, then reads its balance | `201`; balance 100.00; `MoneyDeposited` on the stream carrying `actor=trent` while the stream's `owner` stays `alice`; the audit entry for that version reports the same `actor`; the balance read (also by `accountUid`) returns `200` — an admin's scope covers reads as well as writes, and the movement is attributable to the person, not merely to "an admin" |
+> | P9 | `trent` (admin) deposits 100.00 into `alice`'s account, addressed by its `accountUid` — not the `ACC-001` name | `201`; balance 100.00; `MoneyDeposited` on the stream carrying `actor=trent` while the stream's `owner` stays `alice`; the audit entry for that version reports the same `actor` — the movement is attributable to the person, not merely to "an admin". `trent`'s own read of that balance is refused: `403`, same as any non-owner's — admin widens change operations only, never reads |
 
 **[repaired] Why P9 addresses the account by `accountUid`, not by name.** As originally written, P9
 could not execute: `trent` owns no account (D6), so `GET /api/v1/accounts` returns an empty list for
@@ -385,7 +394,7 @@ visible only where an admin reaches something an admin should not have. N13–N1
 
 **Add one row: [repaired — version/date cells released (see Status block above); ownership-widening clause corrected to match D1/D8]**
 
-> | TBD | TBD | Admin on-behalf-of, landing with step 8: `ledger:admin` widens the ownership term at the two §6.4 sites that compare a caller against an account's owner, for reads and change operations, without widening the role term and without widening the account collection (D8); every event records the acting principal as `actor` (§2.3/§2.4/§4.1) and the audit entry surfaces it (§7); admin is not an auditor — separation of duties kept; test user `trent`, scenarios P9/N13–N18, error row (§6.5), assumptions 8–9, delegation protocols declared a non-goal (§13) |
+> | TBD | TBD | Admin on-behalf-of, landing with step 8: `ledger:admin` widens the ownership term at one comparison point — `RecordMovementService`'s in-service check — for change operations only, never for reads, whether the read-model decorator, `StrongBalanceService`'s strong read, or the account collection (D8), and never the role term; every event records the acting principal as `actor` (§2.3/§2.4/§4.1) and the audit entry surfaces it (§7); admin is not an auditor — separation of duties kept; test user `trent`, scenarios P9/N13–N18, error row (§6.5), assumptions 8–9, delegation protocols declared a non-goal (§13) |
 >
 > Both cells are placeholders: the version and date belong to the plan that applies this proposal to
 > `docs/spec.md`, not to this proposal. Pinning a number here would only reserve one a later plan may
@@ -404,7 +413,7 @@ visible only where an admin reaches something an admin should not have. N13–N1
 | `audit_entries` | New changeset `004-add-audit-actor.sql`: `ALTER TABLE audit_entries ADD COLUMN actor VARCHAR(255);` — **nullable by design** (§15.9), no backfill, no index. An `actor` filter on the trail is one parameter and one index the day an investigation needs it (open question 2) |
 | Existing events **[repaired]** | Read, never rewritten. A payload without `actor` deserialises to absent; absence is read as `actor = owner` only where `occurredAt` precedes the cutover instant, and as `unknown` after it. The audit trail rebuild (E8) applies the same cutover comparison, and a post-cutover event with no `actor` is a fault E8 must surface |
 | `docker/keycloak/realm-tiny-ledger.json` | New realm role `ledger:admin`; new user `trent` with `ledger:writer`, `ledger:reader`, `ledger:admin`, no seeded account, password `dev-only` like the rest |
-| Authorisation (§4.5 composition root) **[repaired]** | Not one clause in one predicate — there is no shared predicate and no command decorator. The admin clause lands at **three** comparison sites: `AuthorizedUseCases.requireOwner` (the read decorator wrapping `QueryBalanceUseCase`/`QueryHistoryUseCase`), `RecordMovementService`, and `StrongBalanceService`, each compared independently. The collection endpoint (`GET /api/v1/accounts`) is excluded by D8. `requireOwner` is `private static` in `config`, and the cycle rule (`HexagonalRulesTest`) forbids `ledger.application` importing `config`, so a genuinely shared predicate would have to be a new type in `shared`. The role check and §4.1's ordering are untouched |
+| Authorisation (§4.5 composition root) **[repaired]** | Not one clause in one predicate, and not three sites either — the admin clause lands at **one** comparison point, `RecordMovementService`'s in-service ownership check, widened for change operations only. `AuthorizedUseCases.requireOwner` (the read decorator wrapping `QueryBalanceUseCase`/`QueryHistoryUseCase`) and `StrongBalanceService` are unchanged: admin does not widen reads, eventually-consistent or strong. The collection endpoint (`GET /api/v1/accounts`) is excluded by D8. The role check and §4.1's ordering are untouched |
 | Use cases | The command use cases already receive the caller principal; they now pass it to the aggregate, which stamps it on each emitted event |
 | Cucumber (§9.3) **[repaired]** | `authorisation.feature` gains P9 and N13–N18, all `@full` |
 | pytest-bdd (§9.6) **[repaired]** | Re-runs all of them against the composed stack; no new step vocabulary beyond an actor assertion on the audit trail |
