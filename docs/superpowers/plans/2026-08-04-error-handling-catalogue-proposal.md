@@ -138,6 +138,7 @@ with `clean` so the generator re-emits into the new packages.
    concerns? (Leaning: absorb — they are catalogue rows in §6.5 like any other.)
 2. Should the `messageKey` default from the enum constant name (`ACCOUNT_NOT_FOUND` →
    `problem.account-not-found`) rather than being declared, to remove a second thing to keep in sync?
-3. Does `LedgerApplication` become `TinyLedgerApplication` in the same naming pass? (Leaning: yes —
-   once the package is `tinyledger` and the supertype is `TinyLedgerException`, the bootstrap class is
-   the last holdout.)
+3. ~~Does the bootstrap class get renamed in the same naming pass?~~ **Answered 2026-08-05: yes, done.**
+   It is now `TinyLedgerApplication`, renamed ahead of this proposal as a standalone mechanical commit —
+   the package was already `tinyledger` and the planned supertype is `TinyLedgerException`, so the
+   bootstrap class was the last holdout.

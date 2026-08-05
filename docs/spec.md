@@ -144,7 +144,7 @@ identity (§6.3) — and an optional free-text `reference` that travels to the f
 
 One deployable, one Maven module, package-per-application-module under
 `com.ffroliva.tinyledger`. Boundaries are verified at build time by
-`ApplicationModules.of(LedgerApplication.class).verify()`.
+`ApplicationModules.of(TinyLedgerApplication.class).verify()`.
 
 **Four application modules, one open kernel, one non-module platform package.**
 
