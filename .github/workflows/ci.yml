@@ -1,7 +1,7 @@
 name: ci
 on: [push, pull_request]
 jobs:
-  build:
+  gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -9,14 +9,34 @@ jobs:
         with: { distribution: corretto, java-version: '25', cache: maven }
       - name: "Stage 1 — lint & format"
         run: ./mvnw -q spotless:check
-      # Stages 4-5 (OpenAPI contract generation, @standalone Cucumber) run inside verify below —
-      # the generator and Cucumber's JUnit Platform engine are Maven-bound, not separate steps.
-      - name: "Stages 2-3 — compile, unit, JaCoCo gates, architecture"
-        run: ./mvnw -q verify
       - name: "Stage 6 — docs governance"
         # SUBFAILED-line parsing assumes pytest's plain short-summary wording; only verified against
         # the pytest version pinned in this repo, not proven stable across OS/pytest releases.
         run: python scripts/ci/check_docs_governance.py
-      # stages 7-12 join in Plans 2-4.
+
+  unit:
+    needs: gate
+    # No Docker required: `verify` starts zero containers **by construction** — surefire's *IT.java
+    # exclusion (pom.xml) keeps the containerised suites out — not because any gate asserts it.
+    # AGENTS.md: if you state a rule, say which gate enforces it, or say plainly that none does.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: corretto, java-version: '25', cache: maven }
+      - name: "Stages 2-3 — compile, unit, JaCoCo gates, architecture"
+        # Stages 4-5 (OpenAPI contract generation, @standalone Cucumber) run inside verify — the
+        # generator and Cucumber's JUnit Platform engine are Maven-bound, not separate steps.
+        run: ./mvnw -q verify
+
+  integration:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: corretto, java-version: '25', cache: maven }
+      - name: "Stages 7-12 — integration suite against real Postgres/Redis/Kafka"
+        run: ./mvnw -q verify -Pit
       - name: "resolve-drift placeholder"
         run: echo "python CLI drift job lands in Plan 4 (spec §12.1)"
