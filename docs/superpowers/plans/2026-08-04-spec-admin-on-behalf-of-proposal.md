@@ -295,7 +295,7 @@ visible only where an admin reaches something an admin should not have. N13 is t
 
 | Surface | Change |
 |---|---|
-| `docs/api/openapi.yaml` — `AuditEntry` | One **optional** property `actor` (`type: string`), *not* added to `required`. Description: the issuing principal; equal to `owner` for owner-initiated movements, different for on-behalf-of; absent on pre-v3.8 entries, where it reads as the owner (§15.9). Additive and backward-compatible for generated clients |
+| `docs/api/openapi.yaml` — `AuditEntry` | One **optional** property `actor` (`type: string`), *not* added to `required`. Description: the issuing principal; equal to `owner` for owner-initiated movements, different for on-behalf-of; absent on pre-v3.9 entries, where it reads as the owner (§15.9). Additive and backward-compatible for generated clients |
 | `docs/api/openapi.yaml` — everything else | Unchanged. No new path, no new parameter, no new response, no change to `Transaction`, `Balance` or any error response |
 | Event store schema | **No DDL.** `actor` lives inside the existing `payload` JSONB of `events`; the table already has `metadata` and needs neither. Zero migration on the system of record |
 | `audit_entries` | New changeset `004-add-audit-actor.sql`: `ALTER TABLE audit_entries ADD COLUMN actor VARCHAR(255);` — **nullable by design** (§15.9), no backfill, no index. An `actor` filter on the trail is one parameter and one index the day an investigation needs it (open question 2) |
