@@ -60,7 +60,7 @@ fault. There is a test for exactly that (§9.2b).
 **The question: what talks to what, and how are the boundaries actually enforced?**
 
 Four business modules over one open kernel, verified at build time by
-`ApplicationModules.of(LedgerApplication.class).verify()`. Closed modules communicate **only** by
+`ApplicationModules.of(TinyLedgerApplication.class).verify()`. Closed modules communicate **only** by
 domain events — there are no direct service calls between them.
 
 ```mermaid
