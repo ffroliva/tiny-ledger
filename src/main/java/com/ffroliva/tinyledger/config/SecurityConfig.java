@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 
@@ -22,6 +23,17 @@ import org.springframework.security.web.SecurityFilterChain;
  * and no browser surface at all (no springdoc, no swagger-ui, no static resources). The stateless
  * declaration is the guard: if anyone later introduces cookie authentication or a UI, it is this line
  * that has to change, which forces the CSRF question back into the open instead of leaving a hole.
+ *
+ * <p>Both chains disable logout, and that is a fix rather than tidying. {@code HttpSecurityConfiguration}
+ * applies {@code logout(withDefaults())} to every {@code HttpSecurity} unconditionally, and because CSRF is
+ * disabled above, {@code LogoutConfigurer#createLogoutRequestMatcher} sees a null {@code CsrfConfigurer} and
+ * ORs {@code GET}/{@code PUT}/{@code DELETE} in beside {@code POST}. {@code LogoutFilter} runs ahead of
+ * {@code AuthorizationFilter}, so {@code full} answered an <em>unauthenticated</em> {@code GET /logout} with
+ * {@code 302 → /login?logout} — a page this API does not serve — instead of the catalogued 401. The route is
+ * in neither {@code openapi.yaml} nor {@code ErrorCode}: a session-based route on a stateless bearer API,
+ * contributed by the framework and authorised by nothing. Measured over HTTP, not inferred:
+ * {@code SecurityConfigTest#logoutIsNotARouteThisApiServes} failed {@code expected:<404> but was:<302>}
+ * before these two lines.
  */
 @Configuration
 public class SecurityConfig {
@@ -31,6 +43,7 @@ public class SecurityConfig {
     @Profile("standalone")
     SecurityFilterChain standaloneChain(HttpSecurity http) throws Exception {
         return http.csrf(csrf -> csrf.disable())
+                .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
                 .build();
@@ -56,6 +69,7 @@ public class SecurityConfig {
     @Profile("full")
     SecurityFilterChain fullChain(HttpSecurity http, SecurityProblemHandler problems) throws Exception {
         return http.csrf(csrf -> csrf.disable())
+                .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.requestMatchers("/api/v1/audit/**", "/api/v1/accounts/*/events")
                         // TEMPORARY (§7): both auditor operations are `ledger:auditor`-only and the role does
