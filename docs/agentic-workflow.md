@@ -184,6 +184,9 @@ Kept deliberately, because a process document that only records successes is mar
 | The minimalism skill argued hard against building this platform at all. | Overruled deliberately — §6. It was right about the brief and wrong about the goal. |
 | A Plan 2 implementation agent was still running when its session was closed. It kept working, finished all eleven assigned fixes, ran its own test suites — and then had no orchestrator left to report to. The work sat committed but unreviewed and unrecorded until the next session went looking for it. | **Lesson: an agent's output is only as durable as the process that collects it.** A replacement agent dispatched into the same repository detected the collision from file timestamps, refused to edit anything, and aborted — which is the behaviour you want, and it happened because the dispatch brief named the hazard. The recovery was to review the orphan's diff on its own merits, since its reasoning was gone and only its diff could be audited. |
 | That same orphaned wave wrote a dead-letter test that subscribed to `ledger.events.DLT` while Spring Kafka 4 publishes to `<topic>-dlt` by default. Its own test would have failed on a 60-second timeout. | Caught twice independently — by the orphan itself on a later run, and by a reviewer that decompiled `spring-kafka-4.1.0.jar` to confirm the constant. **Lesson: "the framework's default is X" is a claim about a jar, not a memory.** The destination is now named explicitly rather than inherited. |
+| Plan 3: **a reviewer rewrote git history while an implementer held the same tree.** It ran a cherry-pick chain and an amend off a `git status` reading ten minutes stale, overwriting a commit message. It then diagnosed the damage as message-only, and recovered with `cherry-pick --quit` + `reset --soft` — deliberately **not** `--abort`, which hard-resets and would have destroyed the implementer's uncommitted work. | Nothing was lost; verified independently. **The cause was the orchestrator's prompt, not the reviewer's judgement**: the council advisor briefs said "report only", the per-task reviewer briefs said "you may run `git`" — which reads as licensing git *writes*. Two agents then shared one tree with only a Maven-level exclusion between them. **Lesson: a reviewer that cannot write also cannot waste effort undoing or redoing.** It happened a second time for a narrower reason: a constraint added to *new* dispatches does not reach an agent resumed under its *old* prompt. |
+| Plan 3: two commit subjects arrived as `@ feat: …`. A PowerShell here-string (`@'…'@`) was used in the Bash tool, which parses it as a literal `@`, a quoted body, and a trailing `@` — git folded the bare `@` line into the subject. | Root cause established by reproduction, not inference; hooks and git config ruled out. Repaired by cherry-pick with `git diff` against a backup proving the trees byte-identical, so only metadata changed. **The orchestrator had this in its own `git log --oneline` output and did not flag it** — a reviewer did. |
+| Plan 3: a build failed early, and the **stale `failsafe-reports` XML from the previous green run reported 7/7 passing.** | Counting tests from XML is what AGENTS.md trap 3 requires — but it is only sound **paired with that run's exit code**. On its own it can report a green that never happened. |
 
 ---
 
@@ -242,6 +245,37 @@ pass over spec §6–§7, not wholesale.
 
 ---
 
+**Decision (Plan 3): complete the error catalogue rather than ship the plan's headline goal half-true.**
+
+The plan's stated aim was "every error comes from one catalogue". The council found that the two most
+frequent `full` responses — a 401 on every unauthenticated call, and the 403 on the denied auditor
+routes — are written by the security chain *before* `DispatcherServlet`, so `ErrorHandlingAdvice`
+never sees them and both carried Spring's default shape. `ErrorCode` was also two rows short of spec
+§6.5. The cheap option was to assert status only and record the divergence.
+
+Overruled: the catalogue was completed to all eleven rows and a `SecurityProblemHandler` was
+registered on the chain. The decision paid for itself immediately — with that handler unwired, the
+status-only test **still passes** while the body test fails. Asserting status alone would have shipped
+an uncatalogued 401 green, on the branch whose entire purpose was the opposite.
+
+**Decision (Plan 3): ship a temporary denial rather than an unenforced role.** Spec §7 makes the two
+auditor operations `ledger:auditor`-only, but roles need the Keycloak realm. Once Task 3 made `full`
+authenticated, *any* valid token had full auditor power over every customer's trail — which also voids
+§6.5's "account UUIDs are unguessable" premise, since the trail hands them out. Rather than fake a
+role check or leave the hole, `full` now refuses both operations outright. The exposure was confirmed
+live before it was closed: both new tests failed `expected:<403> but was:<200>` on an ordinary token.
+The stopgap is named in the code, in both profiles' tests, in the OpenAPI descriptions, and in the
+follow-up's opening scope — five places, because a denial that outlives its reason becomes a mystery.
+
+**Decision (Plan 3): absent must not read as unowned.** The authorization decorator originally scanned
+the caller's accounts and refused anything absent from the list — making an unknown account a 403 where
+§6.5 requires 404, and contradicting the plan's own argument for keeping writes in-service. Corrected
+to a single-account lookup: absent returns and lets the delegate answer 404, only a real account with a
+different owner is refused. It cost nothing — the port method already existed and `AccountView` already
+carried the owner — and it removed an owner-wide scan from every balance and history read.
+
+---
+
 ## 7. Phase record — Plan 2 (full persistence)
 
 What the pipeline in §2 actually produced on the second plan, gates and all. Numbers are from the
@@ -267,6 +301,76 @@ the two run modes disagreed about which transactions fall inside a filter.
 
 ---
 
+## 7b. Phase record — Plan 3 (security and authorization)
+
+Same pipeline, third plan. Numbers are from the session ledger and from build runs the orchestrator
+executed itself with `clean`, not from implementer reports.
+
+| Stage | Outcome |
+|---|---|
+| Council | Two of four advisors had died on API 529 during Plan 3's review and never saw the **revised** plan. Re-running them was the session's first decision. They returned **13 P0-class findings** |
+| Plan revision | Every P0/P1 folded into the task text before a line of code — the plan is the spec, not an appendix. Seven commits on this branch are documentation recording *why* the plan changed |
+| Implementation | 8 tasks (0, 1, 2, 3, 4, 5, 6, 6b, 7), one commit per task, explicit pathspecs |
+| Per-task reviews | 8 accepted. **4 required a fix loop**, all closed in one round each |
+| Whole-branch review | MERGE WITH FIXES — **0 critical**, 4 important. One fix wave closed them |
+| Verification | `clean verify` exit 0, **148** tests, **zero** containers; `clean verify -Pit` exit 0, **36** ITs; `missCount = 1` |
+| Test growth | 123 → 148 unit, 26 → 36 integration |
+
+**What the council bought, concretely.** Three of its findings would have shipped: Task 0 did not
+compile as written, Task 2 patched a function its own proof test never reaches, and the 401/403 would
+have sat outside the error catalogue the plan existed to build. The sharpest finding — that the
+history decorator had no coverage in any form — was later reproduced exactly: deleting the
+`authorizedHistory` bean left the unit suite at **140/0/0 green with a clean Spring context** while an
+unprivileged caller was served another customer's entire transaction feed. Both original unit tests
+and both original wiring proofs exercised the *balance* decorator only.
+
+**The pattern that dominated this phase: reasoned framework claims were wrong; measured ones were
+right.** Twelve times, without exception in either direction.
+
+| Claim, reasoned | What measurement found |
+|---|---|
+| `ProblemDetail.type` defaults to `about:blank`, so `doesNotExist()` cannot pass | True in Spring 6, **false in Spring 7** — the field has no initialiser, so the node is absent entirely |
+| `public-key-location` beats `issuer-uri` | It does not, and it fails **lazily** — the context starts clean and only a real token discovers it |
+| Blanking the issuer is enough to disable its validator | It is not — the validator is added on `!= null`, not `hasText` |
+| `spring-security-test` secures the `@WebMvcTest` slices | Right mechanism, wrong artifact — the class lives in `spring-boot-security-test`, which is not on the classpath |
+| `-q` suppresses the forked test JVM's log body | It suppresses Maven's own `[INFO]` lines only |
+
+Twice the wrong answer was the orchestrator's, correcting a right one. The discipline that emerged:
+**where a brief states a framework behaviour, trust the measurement over the claim, and say so.**
+
+**Four evidence methods that proved worthless, and the rule that replaced them.** This phase kept
+producing checks that could not fail:
+
+1. Grepping surefire **XML** for container evidence — it embeds the classpath, so testcontainers jar
+   names always match and the grep can never come back empty.
+2. Grepping surefire **`.txt`** instead — `pom.xml` declares no `maven-surefire-plugin`, so
+   `redirectTestOutputToFile` is false and those files hold no log output at all.
+3. A glob for `MockMvcSecurity*` returning nothing while `SecurityMockMvcAutoConfiguration` existed —
+   Boot 4 renamed it. The control term validated the *search*, not the *pattern*.
+4. `-Dtest='A+B+C'` exiting **0** having run nothing — `+` is not a surefire separator, and
+   `failIfNoSpecifiedTests=false` turns "nothing matched" into BUILD SUCCESS. **A red→green proof can
+   pass its red step having executed no tests**, which is the most dangerous shape of all, because the
+   red step is the half nobody re-checks.
+
+`AGENTS.md` trap 7 says to prove a search works by running it against a term you know is present.
+That is necessary and **not sufficient**. The rule that actually holds: *a control term must be the
+same kind of content as the thing you are hunting, in the same search space* — and the strongest form
+is **differential**: run the identical pattern over a case that must score hits and one that must
+score zero. Zero containers is now evidenced that way (0 on `verify`, 18 on `-Pit`, control non-zero
+in both), which proves both that the pattern matches and that the zero is an absence.
+
+**What the whole-branch review caught that eight per-task reviews could not.** The best of the four
+was `/logout`: an inbound route in **both** run modes, authorised by nothing, contributed by the
+framework rather than written by anyone. `HttpSecurityConfiguration` applies `logout(withDefaults())`
+unconditionally, and because CSRF is disabled, `LogoutConfigurer` adds `GET`/`PUT`/`DELETE` beside
+`POST`. `LogoutFilter` precedes `AuthorizationFilter`, so `full` answered an unauthenticated
+`GET /logout` with a 302 to a page this API does not serve, instead of the catalogued 401. Task 3
+added Spring Security; Task 6b audited the matchers *it wrote*; **nobody audited what the framework
+contributed for free.** That is a defect no task-scoped review can see, and the argument for keeping a
+whole-branch pass even when every task is green.
+
+---
+
 ## 8. How to audit any of this
 
 | Question | Where to look |
@@ -275,5 +379,5 @@ the two run modes disagreed about which transactions fall inside a filter.
 | What was decided, and why? | `docs/spec.md` and `docs/adr/` |
 | In what order was it built? | `docs/superpowers/plans/*.md`, and the commit history — one commit per task, each landing only after its review was accepted |
 | Was each step reviewed? | The per-task ledger, review packages and reviewer reports live under `.superpowers/sdd/<plan>/`, which is **session-local and gitignored** — deliberately, it is working state. What survives in the repo is §7 above, the commit messages, and this document |
-| Does it do what it claims? | `./mvnw verify` — unit, architecture, BDD, use-case (starts no containers); `./mvnw verify -Pit` — the 24 integration tests against real Postgres, Redis and Kafka; then `docker compose up` for the `full` stack |
+| Does it do what it claims? | `./mvnw verify` — unit, architecture, BDD, use-case (starts no containers); `./mvnw verify -Pit` — the 36 integration tests against real Postgres, Redis and Kafka; then `docker compose up` for the `full` stack |
 | What was left out on purpose? | `docs/spec.md` §13 non-goals and §15 assumptions |

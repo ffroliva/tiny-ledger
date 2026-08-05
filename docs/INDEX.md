@@ -31,7 +31,7 @@ Quadrants are Diátaxis, per spec §8.5.
 
 | Plan | State |
 |---|---|
-| `superpowers/plans/2026-08-05-plan-3-security-and-authorization.md` | Planned, council-reviewed, not started |
+| `superpowers/plans/2026-08-05-plan-3-security-and-authorization.md` | **Delivered (Plan 3)** — council-reviewed three times; the third round's 13 P0s are folded into the task text, so the plan reads as executed rather than as first drafted |
 | `superpowers/plans/2026-08-05-plan-3-research.md` | Research input to the above |
 | `superpowers/plans/2026-08-04-error-handling-catalogue-proposal.md` | Approved, folded into Plan 3 |
 | `superpowers/plans/2026-08-04-spec-admin-on-behalf-of-proposal.md` | Approved, targets spec v3.9, not yet applied |
