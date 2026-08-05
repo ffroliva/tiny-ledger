@@ -112,7 +112,6 @@ public class PostgresEventStore implements EventStorePort {
     @Override
     public Optional<LedgerEvent> findByMovementUid(UUID movementUid) {
         String sql = "SELECT event_type, payload FROM events WHERE client_movement_uid = ?";
-        List<LedgerEvent> results = jdbcTemplate.query(sql, eventRowMapper(), movementUid);
-        return results.isEmpty() ? Optional.empty() : Optional.of(results.getFirst());
+        return jdbcTemplate.query(sql, eventRowMapper(), movementUid).stream().findFirst();
     }
 }
