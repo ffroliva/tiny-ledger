@@ -519,7 +519,7 @@ Add to `LedgerControllerTest`:
 
         deposit()
                 .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.type").value(not("/errors/invalid-amount")));
+                .andExpect(content().string(not(containsString("/errors/invalid-amount"))));
     }
 
     @Test // the movement path's own unknown-code guard — Money.of, the sibling of toCommand's
@@ -535,11 +535,22 @@ Add to `LedgerControllerTest`:
     }
 ```
 
-**`doesNotExist()` cannot pass** — `ProblemDetail.type` defaults to `URI.create("about:blank")` and is never
-null, and `@JsonInclude(NON_EMPTY)` does not suppress a non-null `URI`. The repo's own 500 test
-(`LedgerControllerTest:231-239`) asserts `$.detail` and `$.status` and conspicuously never `$.type` — that is
-the evidence. `not(...)` is `org.hamcrest.Matchers.not`; add the static import. It also states what the test
-is actually about: the 500 must not *claim to be an invalid amount*.
+**Assert on the body, not on `$.type` — and the reason is worth reading, because two earlier answers here
+were wrong.** A council round said `doesNotExist()` could not pass because `ProblemDetail.type` defaults to
+`about:blank`; that was folded into this plan and is **false on this stack**. Measured during execution and
+then confirmed from bytecode: this is Spring Framework 7.0.8, where `ProblemDetail` has no `BLANK_TYPE`
+constant, `private URI type` has no initialiser, and `ProblemDetail.forStatus(int)` sets only the status — so
+`type` is **null** on a 500 and `ProblemDetailJacksonMixin`'s `@JsonInclude(NON_EMPTY)` drops the node
+entirely. A `jsonPath("$.type")` assertion of any kind therefore throws `PathNotFoundException`.
+
+Asserting the whole body is both robust to that and strictly stronger — it fails if the URI appears
+*anywhere*, not only at `$.type` — and it is the idiom the repo already uses three tests below in
+`unexpectedFailureLeaksNothing`. `not(...)` and `containsString(...)` are `org.hamcrest.Matchers`; add the
+static imports.
+
+The general lesson, since this plan has now been bitten by it twice: a claim about framework behaviour is
+worth exactly as much as the measurement behind it. Both the original text and its "correction" were
+reasoned rather than run.
 
 The second test is the one that keeps `Money.of`'s new guard honest. Match its request shape to the existing
 `deposit()` helper at `LedgerControllerTest:255` — reuse the same path variables and HTTP method rather than
@@ -614,7 +625,7 @@ Then in `ErrorHandlingAdvice.malformed()`, delete `IllegalArgumentException.clas
 
 - [ ] **Step 6: Run the affected suites**
 
-Run: `./mvnw -q test -Dtest='LedgerControllerTest+AccountTest+HexagonalRulesTest+MoneyTest'`
+Run: `./mvnw -q test -Dtest='LedgerControllerTest,AccountTest,HexagonalRulesTest,MoneyTest'` — **commas, not `+`.** Surefire reads `+` as part of a pattern, not as a separator, and answers "No tests matching pattern", which reads like a passing run to anyone skimming.
 Expected: PASS, including **`unknownCurrencyCodeIsBadRequest` staying 400** — that test is the real proof of this task, because it is the one the blanket mapping was carrying. If it turns 500, Step 4 was missed or `Money.of` is not on that path; do **not** weaken the test.
 
 - [ ] **Step 7: Run both pipelines**
