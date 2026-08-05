@@ -59,10 +59,15 @@ until they bite.
    references here are *string literals* an IDE rename does not touch: `@AnalyzeClasses`, the
    `slices().matching(...)` cycle rule, two `api.generated..` fence strings, and `CucumberTest`'s glue
    package. Run `git grep -nE '\bOldName\b' -- ':!target'` and require empty output.
-3. **Count tests from surefire XML, not the `.txt` reports.** `.txt` reports `Tests run: 0` for
-   `@Nested` classes and undercounts the real total.
+3. **Count tests from surefire XML, not the `.txt` reports** — and only ever **paired with that run's
+   exit code**. `.txt` reports `Tests run: 0` for `@Nested` classes and undercounts. But a build that
+   fails early leaves the *previous* run's XML on disk, where it reports passing: a count without its
+   exit code can describe a green that never happened.
 4. **A test that would pass with its fix reverted is not coverage.** Before adding one, revert the
-   production change and watch it fail. Several tests here were written that could not fail.
+   production change and watch it fail. Several tests here were written that could not fail. **Check
+   the red run actually executed the test it names** — `-Dtest` takes commas, and a pattern that matches
+   nothing exits **0**, because `failIfNoSpecifiedTests` defaults to false. A red→green proof can pass
+   its red step having run nothing at all.
 5. **`@SpringBootTest` caches by merged configuration.** An extra `@Import`, `@TestPropertySource` or
    `@DynamicPropertySource` forks a whole new context — new beans, new Kafka consumers. Extend
    `AbstractIntegrationTest`; forking needs a written reason (ADR 0003, CR13).
@@ -73,6 +78,21 @@ until they bite.
    `find` with compound predicates returned "no results" here, and the file it was looking for existed.
    Before concluding something is absent, prove the search itself works: run it against a term you know
    is present.
+
+   **That is necessary and not sufficient, and this repository has now paid for the difference three
+   more times.** A control term must be the **same kind of content as the thing you are hunting, in the
+   same search space** — otherwise it validates your tooling and licenses a false negative:
+   - A glob for `MockMvcSecurity*` came back empty while `SecurityMockMvcAutoConfiguration` existed;
+     Boot 4 renamed it. The control proved the *search ran*, not that the *pattern matched*.
+   - A container grep over surefire `.txt` "passed" its control because `cucumber` appears in a **class
+     name** on the summary line — while those files contain no log output at all, so the hunt could
+     never have found anything.
+   - Grepping surefire **XML** for container evidence can never come back empty: it embeds the
+     classpath, so testcontainers jar names always match.
+
+   **The strongest form is differential**: run the identical pattern over a case that must score hits
+   and one that must score zero. Zero containers under `verify` is evidenced that way — 0 there, 18
+   under `-Pit` — which proves both that the pattern matches and that the zero is an absence.
 
 ## Configuration
 
