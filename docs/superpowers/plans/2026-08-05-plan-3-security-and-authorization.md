@@ -667,24 +667,32 @@ In `pom.xml`, beside `spring-boot-starter-web`:
     <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-test</artifactId><scope>test</scope></dependency>
 ```
 
-**Round 3: the measurement above does not cover `spring-security-test`, and that dependency changes the
-slices.** The experiment measured `spring-boot-starter-security` alone, and concluded "`@WebMvcTest` does
-not wire the security filter chain". That conclusion is conditional, not structural: Boot applies the chain
-to MockMvc through `MockMvcSecurityConfiguration`, which is `@ConditionalOnClass(SecurityMockMvcConfigurers)` —
-and `SecurityMockMvcConfigurers` ships in `spring-security-test`, which this step adds permanently. Once it
-is on the test classpath the slices get Boot's **default** chain (`anyRequest().authenticated()` + CSRF),
-because `SecurityConfig` is a `@Configuration` in `config` and is not one of `WebMvcTypeExcludeFilter`'s
-include types, so the profile-scoped chains never load in a slice.
+**Round 3 predicted that adding `spring-security-test` would secure all the `@WebMvcTest` slices. It does
+not — but the reason is not the one first measured, and the difference matters.**
 
-**Decide it now rather than at the tripwire.** Add `@AutoConfigureMockMvc(addFilters = false)` to the three
-slice classes — `LedgerControllerTest`, `BalanceControllerTest`, `AuditControllerTest` — in this same step.
-That preserves exactly what those 38 slice tests exist to check (controller mapping, validation, error
-translation) and is consistent with this plan's own finding that a slice is structurally incapable of
-testing security anyway: the real security coverage is `SecurityConfigIT` in Step 7. Do **not** instead
-`@Import(SecurityConfig.class)` into the slices — that would make 38 controller tests depend on the security
-posture and turn every future chain change into a 38-test failure.
+The first answer during execution was "no such auto-configuration class exists in Boot 4.1". That was a
+false negative: the search was control-validated but the **glob** was not. Boot 4 renamed the class, so a
+scan for `MockMvcSecurity*` missed
+`org.springframework.boot.security.test.autoconfigure.webmvc.SecurityMockMvcAutoConfiguration`, which exists
+and ships its own `AutoConfigureMockMvc.imports` (`SecurityAutoConfiguration`,
+`ServletWebSecurityAutoConfiguration`, `SecurityMockMvcAutoConfiguration`) plus a `WebMvcTest.includes`
+listing `SecurityFilterChain`. The predicted mechanism is entirely real.
 
-Add those three files to this task's Files list and its commit pathspec.
+**It is dormant because that class lives in a different artifact.** `spring-security-test` (Spring Security)
+is not `spring-boot-security-test` (Boot), and nothing in the declared graph pulls the latter — verified
+against the poms of `spring-boot-starter-test`, `spring-boot-test-autoconfigure`,
+`spring-boot-starter-security`, `spring-boot-security`, `spring-boot-starter-oauth2-resource-server` and
+`spring-boot-webmvc-test`. So all **40** slice tests pass untouched.
+
+Do **not** add `@AutoConfigureMockMvc(addFilters = false)`: today it is a no-op, and an annotation that does
+nothing is worse than none, because the next reader assumes it is load-bearing. Leave `LedgerControllerTest`,
+`BalanceControllerTest` and `AuditControllerTest` alone here. (Task 4 modifies them for a different, real
+reason.)
+
+**The day `spring-boot-security-test` appears on the classpath — directly or pulled transitively by an
+upgrade — every slice test 401s at once.** That is the symptom; this note is the diagnosis. The fix is the
+`addFilters = false` above, and the reason it is written down rather than applied is that an unnecessary
+guard hides the day the guard becomes necessary.
 
 - [ ] **Step 2: Run the suite to see the documented failure**
 
@@ -828,10 +836,15 @@ public class SecurityProblemHandler implements AuthenticationEntryPoint, AccessD
 }
 ```
 
-Note `.authenticationEntryPoint(problems)` is set **both** inside `oauth2ResourceServer` and on
-`exceptionHandling`: the resource-server DSL installs its own `BearerTokenAuthenticationEntryPoint` that
-otherwise wins for bearer-token failures. Setting only the outer one is a common and silent mistake — the
-401 keeps its empty body while the 403 looks fixed.
+`ObjectMapper` here is **Jackson 3** — `tools.jackson.databind.ObjectMapper`, not
+`com.fasterxml.jackson.databind`. Boot 4.1 ships Jackson 3, and the old coordinates will not resolve.
+
+On the doubled entry point: it is set both inside `oauth2ResourceServer` and on `exceptionHandling` because
+the resource-server DSL installs its own `BearerTokenAuthenticationEntryPoint`, which on earlier versions
+won for bearer-token failures. **Measured on Spring Security 7: the inner one is redundant** — deleting it
+left all three `full` ITs green. It is retained as explicit placement, and this note is the reason; if you
+are trimming, this is a safe line to delete, and the `theRefusalCarriesTheCataloguedProblem` test is what
+will tell you if that ever stops being true.
 
 **Council fix (P0-2).** `.jwt(jwt -> {})` builds nothing on its own: Spring needs an issuer or a `JwtDecoder` bean, and an earlier draft of this task supplied neither. A real `full` boot would have failed at context startup, and **nothing in the suite would have caught it** — `SecurityConfigTest` activates only `standalone`, and it is verified that **no integration test makes an HTTP call** (all 26 are adapter-level). So also add to `src/main/resources/application-full.properties`:
 
@@ -891,14 +904,20 @@ Because that lives on the shared base class, every IT gets an identical cache ke
 context. These are test-only keys for a repository with no remote; label them as such in a
 `src/test/resources/README` line so nobody mistakes them for a secret.
 
-**One thing to settle empirically, not by assumption:** `application-full.properties` also sets
-`jwt.issuer-uri`, and Boot's decoder auto-configuration keys off both properties. Whether
-`public-key-location` cleanly wins, or the issuer condition also fires and yields two candidate decoders, is
-a framework detail this plan does **not** assert. Establish it by running the suite; if they conflict, resolve
-it in whatever way keeps the property on `AbstractIntegrationTest` and the context count at one — overriding
-`issuer-uri` to empty in the same `@DynamicPropertySource` is the obvious first try. **Record which you did
-and why.** Then re-run Task 0 Step 2's `missCount` check and confirm it still reports **1**: this task is the
-most likely place in the plan to silently re-fork the context.
+**The decoder-vs-issuer question, settled by measurement during execution.** `public-key-location` does
+**not** win. With `issuer-uri` set, Boot's `IssuerUriCondition` matches and the context gets a
+`SupplierJwtDecoder` aimed at the absent Keycloak — which resolves **lazily**, so the context starts fine and
+only a test that presents a real token discovers it. That is why `aValidTokenIsAccepted` matters: without it
+the suite would have gone green against a decoder that could never decode.
+
+Blanking `issuer-uri` in the `@DynamicPropertySource` was necessary but **not sufficient**: Boot's
+`JwtDecoderConfiguration#getValidator` adds a `JwtIssuerValidator` on a `!= null` check, not `hasText` (read
+from bytecode), so an empty issuer still installs a validator that every token then fails. The working
+arrangement is a single shared constant — `TestJwt.ISSUER` — used both for the property and for the `iss`
+claim of every minted token, so the validator is satisfied by construction.
+
+Both properties live on `AbstractIntegrationTest`. Then re-run Task 0 Step 2's `missCount` check and confirm
+it still reports **1**: this task is the most likely place in the plan to silently re-fork the context.
 
 ```java
 public final class TestJwt {
