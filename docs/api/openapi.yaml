@@ -303,6 +303,9 @@ paths:
       description: |
         The account's events in stream order. Requires `ledger:auditor` (§6.4).
         `full` profile only — `standalone` answers `501` (§7).
+        **Temporarily unavailable in `full`:** the `ledger:auditor` role does not exist yet, so `full`
+        answers every caller — auditor or not — with `403`, because without the role any token had the
+        whole cross-account trail. This is lifted when the role check lands.
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
@@ -328,6 +331,10 @@ paths:
       description: |
         The compliance trail across all accounts, filterable by account and time range. Requires
         `ledger:auditor` (§6.4). `full` profile only — `standalone` answers `501` (§7).
+        **Temporarily unavailable in `full`:** the `ledger:auditor` role does not exist yet, so `full`
+        answers every caller — auditor or not — with `403`, because `accountUid` is optional here and
+        without the role any token could page every account's id, amount and reference. This is lifted
+        when the role check lands.
       parameters:
         - name: accountUid
           in: query

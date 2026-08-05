@@ -51,8 +51,9 @@ class SecurityConfigIT extends AbstractIntegrationTest {
 
     /**
      * Task 7's ordering fix, and the only test in the suite that can see it. A 401 is written by the security
-     * chain, which registers at {@code SecurityProperties.DEFAULT_FILTER_ORDER = -100}; a plain
-     * {@code @Component Filter} registers at {@code Ordered.LOWEST_PRECEDENCE}. Measured: dropping
+     * chain, which registers at {@code SecurityFilterProperties.DEFAULT_FILTER_ORDER = -100} (Boot 4.1's home
+     * for that constant); a plain {@code @Component Filter} registers at
+     * {@code Ordered.LOWEST_PRECEDENCE}. Measured: dropping
      * {@code @Order(HIGHEST_PRECEDENCE)} from {@link com.ffroliva.tinyledger.platform.FapiInteractionIdFilter}
      * fails this on the header — the filter never ran, so there was no {@code traceId} in the MDC either.
      * Asserting the header and the body carry the <em>same</em> value is the point: two {@code exists()} checks

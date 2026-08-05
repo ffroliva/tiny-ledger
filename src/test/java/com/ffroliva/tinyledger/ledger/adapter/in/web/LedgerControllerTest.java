@@ -252,13 +252,14 @@ class LedgerControllerTest {
 
     /**
      * §6.5/§6.6: the correlating id. This used to hand-stuff the MDC to stand in for a tracer that did not
-     * exist yet; Task 7's {@code FapiInteractionIdFilter} is that tracer, and it sets the MDC per request —
-     * measured: the hand-stuffed value lost to the filter's minted UUID and this test went red. So the id now
-     * arrives the way a caller actually supplies it, and the header must carry the same value as the body:
-     * two independent {@code exists()} checks would be satisfied by two unrelated ids.
+     * exist yet, and was named {@code ...WhenTracingIsPresent} for that conditional; Task 7's
+     * {@code FapiInteractionIdFilter} is that tracer, it sets the MDC on every request, and the condition is
+     * now unconditionally true — measured: the hand-stuffed value lost to the filter's minted UUID and this
+     * test went red. So the id arrives the way a caller actually supplies it, and the header must carry the
+     * same value as the body: two independent {@code exists()} checks would be satisfied by two unrelated ids.
      */
     @Test
-    void problemBodiesCarryTheTraceIdWhenTracingIsPresent() throws Exception {
+    void problemBodiesCarryTheInteractionId() throws Exception {
         given(recordMovement.deposit(any())).willThrow(new IdempotencyConflictException(MOVEMENT));
 
         mvc.perform(put("/api/v1/accounts/{a}/deposits/{d}", ACCOUNT, MOVEMENT)

@@ -20,7 +20,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
  *
  * <p>{@code @Order(HIGHEST_PRECEDENCE)} is load-bearing, not tidiness. A {@code @Component Filter} registers at
  * {@code Ordered.LOWEST_PRECEDENCE}, while {@code springSecurityFilterChain} registers at
- * {@code SecurityProperties.DEFAULT_FILTER_ORDER = -100}. Without it every 401 and every chain-level
+ * {@code SecurityFilterProperties.DEFAULT_FILTER_ORDER = -100} (Boot 4.1 moved that constant off
+ * {@code SecurityProperties}, which now holds only {@code getUser()} — verified against the jar). Without it
+ * every 401 and every chain-level
  * {@code denyAll()} 403 is written by the security chain <em>before</em> this filter runs — no header, and an
  * empty MDC for {@link SecurityProblemHandler} to read — so the claim above would be false for exactly the
  * error responses FAPI requires the header on. Measured: removing the annotation turns
