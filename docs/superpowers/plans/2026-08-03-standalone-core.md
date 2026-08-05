@@ -41,7 +41,7 @@ pom.xml · mvnw · .mvn/ · .editorconfig · .gitattributes
 docs/ (scaffold: INDEX.md, CHANGELOG.md, tutorial/, how-to/, api/openapi.yaml, governance-baseline.md)
 scripts/ci/check_docs_governance.py
 src/main/java/com/ffroliva/tinyledger/
-  LedgerApplication.java
+  TinyLedgerApplication.java
   shared/  Money, AccountId, CurrencyMismatchException, package-info (OPEN module)
   ledger/  package-info · domain/{LedgerEvent,AccountOpened,MoneyDeposited,MoneyWithdrawn,
            MovementRejected,Account,MovementType,policy/OverdraftPolicy}
@@ -178,7 +178,7 @@ git commit -m "docs: Diátaxis scaffold and governance baseline (spec §14 step 
 **Files:**
 - Create: `pom.xml`, Maven wrapper (`mvn wrapper:wrapper -Dmaven=3.9.9` or copy from dr-jskill assets), `.editorconfig`, `.gitattributes` (from `.claude/skills/dr-jskill/assets/`)
 - Create: `.github/workflows/ci.yml` (spec §14 step 1 — CI from the skeleton onward)
-- Create: `src/main/java/com/ffroliva/tinyledger/LedgerApplication.java`
+- Create: `src/main/java/com/ffroliva/tinyledger/TinyLedgerApplication.java`
 - Create: `package-info.java` for `shared` (open), `ledger`, `balance`, `audit`, `notification`
 - Test: `src/test/java/com/ffroliva/tinyledger/architecture/ModulithTest.java`
 
@@ -264,7 +264,7 @@ git commit -m "docs: Diátaxis scaffold and governance baseline (spec §14 step 
 
 - [ ] **Step 2: Write the application class and module markers**
 
-`LedgerApplication.java`:
+`TinyLedgerApplication.java`:
 ```java
 package com.ffroliva.tinyledger;
 
@@ -274,9 +274,9 @@ import org.springframework.modulith.Modulithic;
 
 @Modulithic(sharedModules = "shared")
 @SpringBootApplication
-public class LedgerApplication {
+public class TinyLedgerApplication {
     public static void main(String[] args) {
-        SpringApplication.run(LedgerApplication.class, args);
+        SpringApplication.run(TinyLedgerApplication.class, args);
     }
 }
 ```
@@ -299,14 +299,14 @@ package com.ffroliva.tinyledger.ledger;
 ```java
 package com.ffroliva.tinyledger.architecture;
 
-import com.ffroliva.tinyledger.LedgerApplication;
+import com.ffroliva.tinyledger.TinyLedgerApplication;
 import org.junit.jupiter.api.Test;
 import org.springframework.modulith.core.ApplicationModules;
 
 class ModulithTest {
     @Test
     void modularStructureIsValid() {
-        ApplicationModules.of(LedgerApplication.class).verify();
+        ApplicationModules.of(TinyLedgerApplication.class).verify();
     }
 }
 ```

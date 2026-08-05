@@ -6,8 +6,8 @@ import org.springframework.modulith.Modulithic;
 
 @Modulithic(sharedModules = "shared")
 @SpringBootApplication
-public class LedgerApplication {
+public class TinyLedgerApplication {
     public static void main(String[] args) {
-        SpringApplication.run(LedgerApplication.class, args);
+        SpringApplication.run(TinyLedgerApplication.class, args);
     }
 }

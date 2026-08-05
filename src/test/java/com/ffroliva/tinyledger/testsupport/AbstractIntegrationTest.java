@@ -1,6 +1,6 @@
 package com.ffroliva.tinyledger.testsupport;
 
-import com.ffroliva.tinyledger.LedgerApplication;
+import com.ffroliva.tinyledger.TinyLedgerApplication;
 import com.redis.testcontainers.RedisContainer;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
@@ -10,7 +10,7 @@ import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
-@SpringBootTest(classes = LedgerApplication.class)
+@SpringBootTest(classes = TinyLedgerApplication.class)
 @ActiveProfiles("full")
 public abstract class AbstractIntegrationTest {
 

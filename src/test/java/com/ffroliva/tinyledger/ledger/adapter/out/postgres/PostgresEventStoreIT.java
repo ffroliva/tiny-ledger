@@ -1,6 +1,6 @@
 package com.ffroliva.tinyledger.ledger.adapter.out.postgres;
 
-import com.ffroliva.tinyledger.LedgerApplication;
+import com.ffroliva.tinyledger.TinyLedgerApplication;
 import com.ffroliva.tinyledger.contract.EventStoreContract;
 import com.ffroliva.tinyledger.ledger.application.port.out.EventStorePort;
 import com.ffroliva.tinyledger.testsupport.AbstractIntegrationTest;
@@ -12,7 +12,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-@SpringBootTest(classes = LedgerApplication.class)
+@SpringBootTest(classes = TinyLedgerApplication.class)
 @ActiveProfiles("full")
 public class PostgresEventStoreIT extends EventStoreContract {
 
