@@ -214,6 +214,31 @@ class LedgerControllerTest {
         verifyNoInteractions(openAccount);
     }
 
+    @Test // CR12: an IllegalArgumentException that is not about an amount must not claim to be
+    void anUnrelatedIllegalArgumentIsNotReportedAsAnInvalidAmount() throws Exception {
+        given(recordMovement.deposit(any())).willThrow(new IllegalArgumentException("Invalid UUID string: nope"));
+
+        // The brief expected `jsonPath("$.type").value(not(...))`, but this Spring version suppresses the
+        // default `about:blank` type entirely, so a 500 body has no `$.type` node and jsonPath cannot match
+        // an absent path. Asserting on the body — the repo's own idiom in unexpectedFailureLeaksNothing —
+        // states the same thing and holds whether or not `type` is serialised.
+        deposit()
+                .andExpect(status().isInternalServerError())
+                .andExpect(content().string(not(containsString("/errors/invalid-amount"))));
+    }
+
+    @Test // the movement path's own unknown-code guard — Money.of, the sibling of toCommand's
+    void anUnknownCurrencyCodeOnAMovementIsBadRequest() throws Exception {
+        mvc.perform(put("/api/v1/accounts/{a}/deposits/{d}", ACCOUNT, MOVEMENT)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"amount":{"currency":"ZZZ","minorUnits":100}}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.type").value("/errors/invalid-amount"));
+
+        verifyNoInteractions(recordMovement);
+    }
+
     @Test // §6.5/§6.6: the correlating id, whenever a tracer has put one in the MDC
     void problemBodiesCarryTheTraceIdWhenTracingIsPresent() throws Exception {
         given(recordMovement.deposit(any())).willThrow(new IdempotencyConflictException(MOVEMENT));
