@@ -16,7 +16,6 @@ import java.net.URI;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.Currency;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.ErrorResponseException;
@@ -31,7 +30,8 @@ final class LedgerApiMapper {
     private LedgerApiMapper() {}
 
     static OpenAccount toCommand(OpenAccountRequest request, String caller) {
-        return new OpenAccount(caller, request.getName(), Currency.getInstance(request.getCurrency()));
+        return new OpenAccount(
+                caller, request.getName(), com.ffroliva.tinyledger.shared.Money.currencyOf(request.getCurrency()));
     }
 
     static Account toAccount(OpenedAccount opened, OpenAccountRequest request, String caller) {

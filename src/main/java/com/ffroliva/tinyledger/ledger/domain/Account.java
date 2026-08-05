@@ -6,6 +6,7 @@ import com.ffroliva.tinyledger.ledger.application.port.in.Withdraw;
 import com.ffroliva.tinyledger.ledger.domain.policy.OverdraftPolicy;
 import com.ffroliva.tinyledger.shared.AccountId;
 import com.ffroliva.tinyledger.shared.Money;
+import com.ffroliva.tinyledger.shared.error.InvalidAmountException;
 import java.time.Instant;
 import java.util.Currency;
 import java.util.List;
@@ -92,7 +93,7 @@ public final class Account {
     }
 
     private static void requirePositive(Money amount) {
-        if (!amount.isPositive()) throw new IllegalArgumentException("amount must be positive");
+        if (!amount.isPositive()) throw new InvalidAmountException("amount must be positive");
     }
 
     public AccountId id() {
