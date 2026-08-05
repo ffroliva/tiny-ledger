@@ -54,6 +54,101 @@
 
 ---
 
+### Task 0: One integration context, and a CI that actually runs the integration tests
+
+Do this **first**. Every later task adds tests, and adding them to the wrong test topology gets more
+expensive with each one. Rationale in full: `docs/adr/0003-test-topology-and-ci-parallelisation.md`.
+
+**Files:**
+- Modify: `src/test/java/com/ffroliva/tinyledger/contract/EventStoreContract.java` (class → interface with default methods)
+- Modify: `src/test/java/com/ffroliva/tinyledger/ledger/adapter/out/postgres/PostgresEventStoreIT.java`
+- Modify: `src/test/java/com/ffroliva/tinyledger/testsupport/AbstractIntegrationTest.java`
+- Modify: `.github/workflows/ci.yml`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: a single `full` Spring context shared by every integration test; a CI workflow with a
+  Docker-free unit job and a containerised integration job running in parallel.
+
+- [ ] **Step 1: Collapse the second `full` context**
+
+`PostgresEventStoreIT` cannot extend `AbstractIntegrationTest` because it already extends
+`EventStoreContract`, so it re-declares `@DynamicPropertySource` — and that second property source is a
+**different context cache key**, giving the `full` profile two contexts. CR13 (a second
+`AuditKafkaListener` competing for partitions in the `tiny-ledger-audit` group) was that fork's symptom;
+`spring.kafka.listener.auto-startup=false` was the workaround.
+
+Convert `EventStoreContract` from an abstract class to an **interface with default test methods**, then
+make `PostgresEventStoreIT extends AbstractIntegrationTest implements EventStoreContract` and delete its
+`@SpringBootTest`, `@ActiveProfiles` and `@DynamicPropertySource` entirely. Keep the `auto-startup=false`
+property **only if** it is still needed once there is one context — with a single context there is a
+single listener, so it should become unnecessary. If you delete it, run the full IT suite three times
+and confirm `KafkaAuditModuleIT` is stable before concluding it was.
+
+- [ ] **Step 2: Verify the context count actually dropped**
+
+Run: `./mvnw -q verify -Pit -Dspring.test.context.cache.maxSize=1`
+
+Expected: exit 0, 26 ITs. Forcing the cache to hold one context makes a surviving fork obvious — with two
+contexts the suite thrashes, reloading on every class switch, and the run gets dramatically slower or
+fails. This is the falsifiable check; a plain green run proves nothing about the count.
+
+- [ ] **Step 3: Split CI by infrastructure need**
+
+`.github/workflows/ci.yml` today is a single job that runs `spotless:check`, `./mvnw -q verify` and the
+docs-governance script — and **never runs `-Pit`**. The 26 integration tests are gated by nothing, so the
+standing assumption that "CI covers anything missed locally" is currently false.
+
+Replace it with three jobs. `gate` runs the second-scale checks and both others depend on it, so a
+formatting slip never burns container minutes. `unit` needs no Docker — `verify` is asserted to start zero
+containers. `integration` is the only job paying for the stack, and runs in parallel with `unit`:
+
+```yaml
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: corretto, java-version: '25', cache: maven }
+      - run: ./mvnw -q spotless:check
+      - run: python scripts/ci/check_docs_governance.py
+
+  unit:
+    needs: gate
+    runs-on: ubuntu-latest   # no Docker required — `verify` starts zero containers by design
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: corretto, java-version: '25', cache: maven }
+      - run: ./mvnw -q verify
+
+  integration:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: corretto, java-version: '25', cache: maven }
+      - run: ./mvnw -q verify -Pit
+```
+
+**Do not shard `integration` further.** CI bills per minute summed across runners, and each shard re-pays
+checkout, Maven resolution, code generation, compilation, image pull and container start — for this stack
+the container start alone dominates. A second shard only pays for itself if it removes more execution time
+than that fixed cost, which the current 26-test suite does not. Revisit against the arithmetic in ADR 0003
+when the integration suite grows, not before.
+
+- [ ] **Step 4: Commit**
+
+```bash
+./mvnw -q spotless:apply
+git add src/test/java/com/ffroliva/tinyledger/contract/EventStoreContract.java src/test/java/com/ffroliva/tinyledger/ledger/adapter/out/postgres/PostgresEventStoreIT.java src/test/java/com/ffroliva/tinyledger/testsupport/AbstractIntegrationTest.java .github/workflows/ci.yml docs/adr/0003-test-topology-and-ci-parallelisation.md
+git commit -m "test: one full-profile context, and a CI that actually runs the integration suite"
+```
+
+---
+
 ### Task 1: The error catalogue — `ErrorCode` and `TinyLedgerException`
 
 Pure refactor. **No observable behaviour change**: every status and `type` stays exactly as it is today, which is why the existing controller tests are the safety net. If any of them needs editing, the task is wrong.
