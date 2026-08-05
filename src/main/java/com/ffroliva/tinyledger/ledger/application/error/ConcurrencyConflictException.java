@@ -1,14 +1,21 @@
 package com.ffroliva.tinyledger.ledger.application.error;
 
 import com.ffroliva.tinyledger.shared.AccountId;
+import com.ffroliva.tinyledger.shared.error.ErrorCode;
+import com.ffroliva.tinyledger.shared.error.TinyLedgerException;
 
-public class ConcurrencyConflictException extends RuntimeException {
+public class ConcurrencyConflictException extends TinyLedgerException {
     private final AccountId accountId;
     private final long expectedVersion;
     private final long currentVersion;
 
     public ConcurrencyConflictException(AccountId accountId, long expectedVersion, long currentVersion) {
-        super("stream %s at version %d, expected %d".formatted(accountId.value(), currentVersion, expectedVersion));
+        super(
+                ErrorCode.VERSION_CONFLICT,
+                "stream %s at version %d, expected %d".formatted(accountId.value(), currentVersion, expectedVersion),
+                accountId.value(),
+                currentVersion,
+                expectedVersion);
         this.accountId = accountId;
         this.expectedVersion = expectedVersion;
         this.currentVersion = currentVersion;
