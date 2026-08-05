@@ -414,7 +414,13 @@ public abstract class TinyLedgerException extends RuntimeException {
 
 - [ ] **Step 6: Make the six existing exceptions extend it**
 
-Each keeps its current constructor signature and message so nothing else changes. `OwnershipException` for example:
+Each keeps its current constructor signature and message so nothing else changes.
+
+**The snippet below is shape-only, and the prose governs where they disagree.** As executed, it was found to
+differ from the real `OwnershipException` in two ways — it shortens the message ("does not own" where the
+file says "does not own account") and omits the class's existing fields and accessors. Preserve what is in
+the file: change **only** the `extends` clause and the `super(...)` call, and pass the existing values
+through as `args(...)`.
 
 ```java
 package com.ffroliva.tinyledger.ledger.application.error;
