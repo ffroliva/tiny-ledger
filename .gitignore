@@ -15,3 +15,9 @@ docs/source/
 .pytest_cache/
 .serena/
 __pycache__/
+
+# Keys never land by accident. These two are deliberate, test-only and labelled in
+# src/test/resources/README; anything else has to be un-ignored on purpose too.
+*.pem
+!src/test/resources/test-jwt-private.pem
+!src/test/resources/test-jwt-public.pem
