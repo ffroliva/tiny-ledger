@@ -1344,7 +1344,11 @@ Reuse whatever `balanceView()` fixture the class already has; if there is none, 
 - [ ] **Step 5: Run both pipelines**
 
 Run: `./mvnw -q verify` then `./mvnw -q verify -Pit`
-Expected: exit 0 with **132** tests (131 after Task 4, plus this task's captor test), and exit 0 with 29 ITs.
+Expected: exit 0 with **135** tests (133 after Task 4, plus this task's two captor tests), and exit 0 with 29 ITs. Task 4 landed at 133 rather than the 131 predicted, because it added a null-subject test in its fix round — carry the measured number, not this plan's arithmetic.
+
+**Two captor tests, not one.** `balance` and `listTransactions` both pass `callerPrincipal.current()`, and the history tests all stub with `any()`, so a hardcoded literal on the history path would go unnoticed exactly as it would on the balance path. Task 6 decorates **both** ports, so it authorises on both values. Cover both, each asserting the sentinel.
+
+**Zero-container evidence — use the differential check.** Grepping the surefire `.txt` files proves nothing here (`pom.xml` declares no `maven-surefire-plugin`, so `redirectTestOutputToFile` is false and they hold no log output), and grepping the XML proves nothing either (it embeds the classpath, so testcontainers jar names always match). Capture the whole build's console output and run the same container pattern over both a `verify` capture and a `-Pit` capture: the `-Pit` one must score hits and the `verify` one zero. That is what proves the pattern matches container starts *and* that its zero is an absence rather than a blind spot.
 
 - [ ] **Step 6: Commit**
 
