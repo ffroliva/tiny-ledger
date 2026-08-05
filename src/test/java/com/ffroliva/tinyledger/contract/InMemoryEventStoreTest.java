@@ -3,11 +3,11 @@ package com.ffroliva.tinyledger.contract;
 import com.ffroliva.tinyledger.ledger.adapter.out.inmemory.InMemoryEventStore;
 import com.ffroliva.tinyledger.ledger.application.port.out.EventStorePort;
 
-class InMemoryEventStoreTest extends EventStoreContract {
+class InMemoryEventStoreTest implements EventStoreContract {
     private final InMemoryEventStore store = new InMemoryEventStore();
 
     @Override
-    protected EventStorePort store() {
+    public EventStorePort store() {
         return store;
     }
 }

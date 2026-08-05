@@ -11,11 +11,11 @@ import java.util.*;
 import java.util.concurrent.*;
 import org.junit.jupiter.api.Test;
 
-public abstract class EventStoreContract {
-    protected abstract EventStorePort store();
+public interface EventStoreContract {
+    EventStorePort store();
 
-    private static final Instant T = Instant.parse("2026-08-03T12:00:00Z");
-    private static final Currency GBP = Currency.getInstance("GBP");
+    Instant T = Instant.parse("2026-08-03T12:00:00Z");
+    Currency GBP = Currency.getInstance("GBP");
 
     private AccountId newStream(EventStorePort store) {
         AccountId id = AccountId.random();
@@ -29,7 +29,7 @@ public abstract class EventStoreContract {
     }
 
     @Test
-    void appendsAndReadsInOrder() {
+    default void appendsAndReadsInOrder() {
         EventStorePort store = store();
         AccountId id = newStream(store);
         store.append(id, 1, List.of(deposit(id, 2, UUID.randomUUID())));
@@ -37,7 +37,7 @@ public abstract class EventStoreContract {
     }
 
     @Test
-    void rejectsStaleExpectedVersion() {
+    default void rejectsStaleExpectedVersion() {
         EventStorePort store = store();
         AccountId id = newStream(store);
         assertThatThrownBy(() -> store.append(id, 0, List.of(deposit(id, 2, UUID.randomUUID()))))
@@ -45,7 +45,7 @@ public abstract class EventStoreContract {
     }
 
     @Test
-    void movementUidIsGloballyUnique() {
+    default void movementUidIsGloballyUnique() {
         EventStorePort store = store();
         AccountId a = newStream(store);
         AccountId b = newStream(store);
@@ -57,7 +57,7 @@ public abstract class EventStoreContract {
     }
 
     @Test
-    void concurrentAppendsYieldExactlyOneWinner() throws Exception {
+    default void concurrentAppendsYieldExactlyOneWinner() throws Exception {
         EventStorePort store = store();
         AccountId id = newStream(store);
         int writers = 10;
