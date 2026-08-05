@@ -67,6 +67,17 @@ class HexagonalRulesTest {
             .dependOnClassesThat()
             .resideInAPackage("com.ffroliva.tinyledger.api.generated..");
 
+    @ArchTest // §3/§4.5: composition lives in one place. `config` is the composition root and the only
+    // place the two run modes are assembled (§1); `platform` holds the two framework-level guards
+    // (ErrorHandlingAdvice, FailClosedGuard). A @Configuration inside a business module would make
+    // Spring wiring part of a closed Modulith module and scatter the profile story across the codebase,
+    // so that "what does `full` wire?" stops having a single answer.
+    static final ArchRule onlyCompositionPackagesDeclareConfiguration = noClasses()
+            .that()
+            .resideOutsideOfPackages("..config..", "..platform..")
+            .should()
+            .beAnnotatedWith("org.springframework.context.annotation.Configuration");
+
     @ArchTest // §3.1: time and identity arrive through ports
     static final ArchRule domainNeverCallsNowOrRandomUuid = noClasses()
             .that()
