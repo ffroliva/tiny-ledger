@@ -1117,7 +1117,8 @@ Fix: **move the constant to `shared`**, the open kernel every slice may depend o
 
 **Interfaces:**
 - Consumes: `TestJwt` from Task 3.
-- Produces: `CallerPrincipal.current()` → `String`; `CallerPrincipal.roles()` → `Set<String>`.
+- Produces: `CallerPrincipal.current()` → `String`. **Not `roles()`** — an earlier draft specified it and it was removed during execution. Nothing in this plan consumes it: Task 6 is ownership-only, Task 6b denies the auditor endpoints *because* roles do not exist, and role checks belong to the follow-up plan that brings the Keycloak realm. The deciding argument is not YAGNI but that shipping it would freeze an **unvalidated claim shape** behind a green test — it read a flat `"roles"` list, whereas Keycloak nests them under `realm_access.roles`. A passing test asserting the wrong shape is worse than no test, because the follow-up plan would trust it.
+- **`current()` must reject a blank subject, not just an absent token.** The default validator chain checks timestamps and issuer, **not** `sub`, so a well-signed token with no subject yields `null` — which would flow into `open()`, `deposit()` and `accountsOwnedBy()` as the owner Task 6 authorises on, and every later subject-less token would match that same `null` owner. Treat a null-or-blank subject as "no principal" and fall through to the same guard: refuse in `full`, fixed principal in `standalone`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1225,13 +1226,8 @@ public class CallerPrincipal {
         return StandalonePrincipal.NAME;
     }
 
-    /** Instance, not static — see the shape note above; a static sibling forces the guard's deletion. */
-    public Set<String> roles() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (!(auth instanceof JwtAuthenticationToken jwt)) return Set.of();
-        List<String> roles = jwt.getToken().getClaimAsStringList("roles");
-        return roles == null ? Set.of() : new LinkedHashSet<>(roles);
-    }
+    // No roles() — see the Interfaces note above. It has no consumer in this plan, and shipping it would
+    // pin a claim shape (flat "roles") that the Keycloak realm does not use (realm_access.roles).
 }
 ```
 
