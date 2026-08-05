@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 
 import com.ffroliva.tinyledger.ledger.application.port.in.*;
 import com.ffroliva.tinyledger.shared.*;
+import com.ffroliva.tinyledger.shared.error.InvalidAmountException;
 import java.time.Instant;
 import java.util.*;
 import org.junit.jupiter.api.Test;
@@ -112,7 +113,7 @@ class AccountTest {
         Account account = openedWith(5_000);
         assertThatThrownBy(() -> account.deposit(
                         new Deposit("alice", account.id(), UUID.randomUUID(), new Money(GBP, 0), null), T))
-                .isInstanceOf(IllegalArgumentException.class); // defence in depth; the boundary 400s first (§4.6)
+                .isInstanceOf(InvalidAmountException.class); // defence in depth; the boundary 400s first (§4.6)
     }
 
     @Test

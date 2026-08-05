@@ -48,8 +48,7 @@ public class ErrorHandlingAdvice {
         HttpMessageNotReadableException.class,
         HandlerMethodValidationException.class,
         MethodArgumentTypeMismatchException.class,
-        ConstraintViolationException.class,
-        IllegalArgumentException.class
+        ConstraintViolationException.class
     })
     ResponseEntity<ProblemDetail> malformed() {
         return problem(HttpStatus.BAD_REQUEST, "/errors/invalid-amount", "Invalid amount");
