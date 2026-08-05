@@ -1,12 +1,14 @@
 package com.ffroliva.tinyledger.ledger.application.error;
 
 import com.ffroliva.tinyledger.shared.AccountId;
+import com.ffroliva.tinyledger.shared.error.ErrorCode;
+import com.ffroliva.tinyledger.shared.error.TinyLedgerException;
 
-public class AccountNotFoundException extends RuntimeException {
+public class AccountNotFoundException extends TinyLedgerException {
     private final AccountId accountId;
 
     public AccountNotFoundException(AccountId accountId) {
-        super("account not found: " + accountId.value());
+        super(ErrorCode.ACCOUNT_NOT_FOUND, "account not found: " + accountId.value(), accountId.value());
         this.accountId = accountId;
     }
 

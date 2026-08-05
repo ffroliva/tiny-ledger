@@ -1,7 +1,14 @@
 package com.ffroliva.tinyledger.shared;
 
-public class CurrencyMismatchException extends RuntimeException {
+import com.ffroliva.tinyledger.shared.error.ErrorCode;
+import com.ffroliva.tinyledger.shared.error.TinyLedgerException;
+
+public class CurrencyMismatchException extends TinyLedgerException {
     public CurrencyMismatchException(String expected, String actual) {
-        super("currency mismatch: expected %s, got %s".formatted(expected, actual));
+        super(
+                ErrorCode.CURRENCY_MISMATCH,
+                "currency mismatch: expected %s, got %s".formatted(expected, actual),
+                expected,
+                actual);
     }
 }

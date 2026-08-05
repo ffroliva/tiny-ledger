@@ -1,10 +1,7 @@
 package com.ffroliva.tinyledger.platform;
 
-import com.ffroliva.tinyledger.ledger.application.error.AccountNotFoundException;
-import com.ffroliva.tinyledger.ledger.application.error.ConcurrencyConflictException;
-import com.ffroliva.tinyledger.ledger.application.error.IdempotencyConflictException;
-import com.ffroliva.tinyledger.ledger.application.error.OwnershipException;
-import com.ffroliva.tinyledger.shared.CurrencyMismatchException;
+import com.ffroliva.tinyledger.shared.error.ErrorCode;
+import com.ffroliva.tinyledger.shared.error.TinyLedgerException;
 import jakarta.validation.ConstraintViolationException;
 import java.net.URI;
 import org.slf4j.Logger;
@@ -58,29 +55,11 @@ public class ErrorHandlingAdvice {
         return problem(HttpStatus.BAD_REQUEST, "/errors/invalid-amount", "Invalid amount");
     }
 
-    @ExceptionHandler(CurrencyMismatchException.class)
-    ResponseEntity<ProblemDetail> currencyMismatch() {
-        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "/errors/currency-mismatch", "Currency mismatch");
-    }
-
-    @ExceptionHandler(AccountNotFoundException.class)
-    ResponseEntity<ProblemDetail> accountNotFound() {
-        return problem(HttpStatus.NOT_FOUND, "/errors/account-not-found", "Account not found");
-    }
-
-    @ExceptionHandler(OwnershipException.class)
-    ResponseEntity<ProblemDetail> forbidden() {
-        return problem(HttpStatus.FORBIDDEN, "/errors/forbidden", "Forbidden");
-    }
-
-    @ExceptionHandler(IdempotencyConflictException.class)
-    ResponseEntity<ProblemDetail> idempotencyConflict() {
-        return problem(HttpStatus.CONFLICT, "/errors/idempotency-conflict", "Idempotency conflict");
-    }
-
-    @ExceptionHandler(ConcurrencyConflictException.class)
-    ResponseEntity<ProblemDetail> versionConflict() {
-        return problem(HttpStatus.CONFLICT, "/errors/version-conflict", "Version conflict");
+    /** §6.5: one catalogue, one translation. The code carries status, type and title. */
+    @ExceptionHandler(TinyLedgerException.class)
+    ResponseEntity<ProblemDetail> catalogued(TinyLedgerException exception) {
+        ErrorCode code = exception.code();
+        return problem(HttpStatus.valueOf(code.status()), code.type(), code.title());
     }
 
     /**
