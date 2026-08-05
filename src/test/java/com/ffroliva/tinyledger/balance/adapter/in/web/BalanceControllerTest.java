@@ -144,7 +144,7 @@ class BalanceControllerTest {
 
     @Test // §6.4: the same for history — Task 6 decorates both ports, so both call sites need proving
     void theResolvedCallerIsPassedToTheHistoryQuery() throws Exception {
-        // The three feed tests above stub with any(), so a hardcoded literal here would go unnoticed too.
+        // The three feed tests below stub with any(), so a hardcoded literal here would go unnoticed too.
         given(queryHistory.history(any(), any(), any())).willReturn(new HistoryPage(List.of(transaction()), null));
         ArgumentCaptor<String> caller = ArgumentCaptor.forClass(String.class);
 
