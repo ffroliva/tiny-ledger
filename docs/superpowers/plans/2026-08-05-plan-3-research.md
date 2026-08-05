@@ -226,18 +226,39 @@ requires exactly one `DPoP` header, and builds the token with
 
 Five consequences, in descending order of how much they will hurt.
 
-**(a) Enabling DPoP does not disable Bearer. [inferred — needs a test to prove]**
-`OAuth2ResourceServerConfigurer.configure(H)` always adds `BearerTokenAuthenticationFilter`, and
-*additionally* runs the DPoP configurer when one is present. The bearer converter matches `Bearer`,
-the DPoP converter matches `DPoP`, and nothing on the bearer path inspects `cnf`. So a token that
-Keycloak issued DPoP-bound, stolen and replayed as **`Authorization: Bearer <same token>`**, looks
-like an ordinary valid JWT and authenticates. Sender-constraining is defeated by changing one word in
-a header. This is not a Spring bug — RFC 9449 §7.1 only governs the DPoP scheme — but it does mean
-"Keycloak issues bound tokens + Spring validates proofs" is **not** a complete implementation of FAPI
-2.0 §5.3.4's "shall support and verify sender-constrained access tokens". A concrete mitigation is
-one `OAuth2TokenValidator<Jwt>` on the bearer path that rejects any token carrying `cnf.jkt`, or not
-configuring bearer resolution at all in `full`. Marked inferred because I have read the wiring but
-not run the request.
+**(a) ~~Enabling DPoP does not disable Bearer.~~ REFUTED BY OBSERVATION, 2026-08-05.**
+This section originally claimed — marked `[inferred]`, from reading the wiring without issuing a
+request — that `OAuth2ResourceServerConfigurer.configure(H)` always adds
+`BearerTokenAuthenticationFilter`, that nothing on the bearer path inspects `cnf`, and that a
+DPoP-bound token replayed as `Authorization: Bearer <same token>` would therefore authenticate as an
+ordinary JWT. **It does not.** Measured on the resolved stack (Spring Boot 4.1.0 →
+**Spring Security 7.1.0**), in an isolated worktree, across a full container and a `@WebMvcTest` slice:
+
+| Request | Observed |
+|---|---|
+| `cnf.jkt`-bound token as `Authorization: Bearer`, no proof header | **401** `invalid_token` |
+| the same token **unbound** (control) | **200**, authenticated |
+| bound token as `Bearer` with DPoP **not configured at all** | **401** |
+| `cnf.x5t#S256` | **401** — "Unable to obtain X509Certificate" |
+| `cnf={}` (empty) | **200** |
+
+The bearer path refuses `cnf`-bound tokens **whether or not DPoP is configured**, and the
+`x5t#S256` result shows it is actively resolving the binding method rather than rejecting `cnf`
+wholesale — it keys on *recognised* binding methods, not on the claim's presence. Localised by
+observation: `NimbusJwtDecoder.decode()` and `JwtAuthenticationProvider.authenticate()` both accept
+the bound token in isolation; the refusal happens at the web layer.
+
+Consequences for Plan 3: the one-word downgrade attack does not exist on this version, so no bearer-path
+`cnf` validator is needed — the mitigation once proposed here is **redundant**. And "do not configure
+bearer resolution at all" is **not expressible as removal**: `BearerTokenAuthenticationFilter` remained
+in the chain under every configuration tried; `bearerTokenResolver(request -> null)` is the way to
+refuse the scheme if that is ever wanted.
+
+**Still unverified, and it is now the live risk instead:** no successful DPoP request was ever made —
+no valid proof was minted — so every DPoP-scheme result above is "proof missing → 401". That the
+platform *refuses the wrong thing* is established; that it *accepts the right thing* is not. Plan 3
+must prove the DPoP happy path end to end before treating sender-constraining as working. Full detail
+and method: `.superpowers/sdd/2026-08-05-overnight/authz-error-mapping-experiment.md`.
 
 **(b) `htu` is exact-match against `getRequestURL()`, which is what the container sees.**
 Behind a TLS-terminating proxy, or in compose where the app is reached on a different host/port than
@@ -619,16 +640,32 @@ stamps the wrong principal). Worth an explicit decision rather than an accident.
   which is exactly the sort of thing `FailClosedGuard` was written to guard against. The converse
   guard (§1: nothing refuses to start `full` without an issuer-uri) becomes worth having at the same
   time.
-- **`ErrorHandlingAdvice`'s catch-all will swallow `AccessDeniedException` into a 500. [inferred]**
-  The advice is `@Order(Ordered.HIGHEST_PRECEDENCE)` with `@ExceptionHandler(Exception.class)`
-  (`ErrorHandlingAdvice.java:37,93`). An `AccessDeniedException` thrown from inside a controller
-  invocation is resolved by MVC's `HandlerExceptionResolver` chain *before*
-  `ExceptionTranslationFilter` in the security chain can translate it — so it matches
-  `unexpected(Exception)` and becomes a 500, not the §6.5 403. Whereas the existing
-  `OwnershipException` handler (line 71) already produces `403 /errors/forbidden` correctly. That
-  asymmetry argues for the decorator throwing this codebase's own exception types rather than
-  Spring's — one error path, no new handler, and the §6.5 catalogue stays the single authority.
-  Marked inferred: resolver ordering is worth proving with a test rather than reasoning about.
+- **`ErrorHandlingAdvice`'s catch-all swallows `AccessDeniedException` into a 500. CONFIRMED BY
+  OBSERVATION, 2026-08-05** — measured on Spring Security 7.1.0 across three observation modes (full
+  container with the default chain, full container with an explicit `permitAll` chain proving
+  `ExceptionTranslationFilter` is present, and a `@WebMvcTest` slice). All three agreed:
+
+  | Thrown from inside the use case | Status | Body |
+  |---|---|---|
+  | `AccessDeniedException` | **500** | opaque, no `type`/`detail` |
+  | `AuthorizationDeniedException` (exists in 7.1.0, extends the above) | **500** | opaque — no distinct mapping |
+  | `@PreAuthorize` denial, method security enabled | **500** | opaque |
+  | `OwnershipException` | **403** | full, `type=/errors/forbidden` |
+
+  The advice logged `"unhandled exception at the API boundary"` exactly 12 times — 4 scenarios × 3
+  modes — so it is demonstrably the advice claiming these, inside `DispatcherServlet`, before
+  `ExceptionTranslationFilter` can see them. **`@Order(Ordered.HIGHEST_PRECEDENCE)` is NOT load-bearing
+  for this**: removing it changed nothing. (It was not re-checked against the validation-400s it may
+  exist to protect, so leave it in place.)
+
+  **Design consequence, now evidence-backed rather than argued:** the authorization decorator must throw
+  this codebase's own exception types, never Spring's. `OwnershipException` already maps to
+  `403 /errors/forbidden`, and it keeps working with Security on the classpath. Throwing Spring's
+  `AccessDeniedException` from a port decorator would return an opaque **500** to a correctly-denied
+  request — a denial indistinguishable from a server fault, which is both a usability defect and an
+  information-disclosure oddity in the wrong direction. This also means the error-catalogue work
+  (`TinyLedgerException` + `ErrorCode`, with a `FORBIDDEN` code) belongs **with or before** the authz
+  work, not after it.
 
 ---
 
@@ -709,11 +746,14 @@ the body section named.
 
 **DPoP specifics**
 
-4. **Does the resource server refuse plain `Bearer` in `full`?** If not, the sender-constraint is
-   defeated by rewriting one header (§3.2a). Options: reject any bearer-path token carrying
-   `cnf.jkt`; do not configure bearer resolution at all in `full`; or accept both schemes and
-   document the gap. Trade-off: the third is the smallest diff and also the one that makes the DPoP
-   work decorative.
+4. ~~**Does the resource server refuse plain `Bearer` in `full`?**~~ **ANSWERED BY OBSERVATION,
+   2026-08-05: yes, it already does.** Spring Security 7.1.0 returns 401 for a `cnf`-bound token
+   presented on the bearer path, with or without DPoP configured (§3.2a). No decision needed and no
+   mitigation to build. **The replacement question, which is now the real one:** does the DPoP *happy
+   path* work end to end? The experiment never minted a valid proof, so only the refusal is proven,
+   not the acceptance. Plan 3 needs a positive test with a real proof before sender-constraining can be
+   called working — and until that exists, "bound tokens are refused everywhere" is indistinguishable
+   from "sender-constraining works".
 5. **Is the forwarded-header strategy on?** `htu` is compared by exact equality against
    `request.getRequestURL()`. Off behind a TLS-terminating proxy, every DPoP request 401s; on without
    a trusted proxy, clients can spoof past §6.1's per-IP bucket. Both spec sections have to agree on
@@ -805,12 +845,15 @@ the body section named.
 
 **Where I think the real difficulty is** — and none of the three is on the review's list:
 
-1. **The Bearer downgrade (§3.2a, Q4).** Everything else in the DPoP work can be perfect and the
-   sender-constraint still be worth nothing, because the resource server accepts the same token under
-   a different scheme. It is one validator to fix and one test to prove, and it is completely
-   invisible in a green suite that only ever sends `Authorization: DPoP`. This is the item I would
-   want a `mallory`-grade negative scenario for: *valid bound token, correct role, correct owner,
-   wrong scheme* — the token-binding analogue of what `mallory` does for ownership.
+1. ~~**The Bearer downgrade (§3.2a, Q4).**~~ **REFUTED 2026-08-05** — Spring Security 7.1.0 already
+   401s a `cnf`-bound token on the bearer path, with or without DPoP configured, so there is no
+   validator to write. **What replaces it as the top risk is the mirror image:** the experiment proved
+   only that bound tokens are *refused* on the wrong scheme, never that they are *accepted* on the
+   right one, because no valid DPoP proof was ever minted. Until a positive end-to-end DPoP test
+   exists, "sender-constraining works" and "bound tokens are rejected everywhere, so DPoP is broken"
+   produce an identical green suite. The `mallory`-grade negative is still worth having as a
+   regression guard — *valid bound token, correct role, correct owner, wrong scheme* — but it must be
+   paired with a positive, or it passes for the wrong reason.
 2. **`full_scope_disabled` (§2.2).** The FAPI profile turns off automatic realm-role inclusion. The
    symptom is every authorisation test failing at once, and the cause looks exactly like a broken
    decorator. Expect to lose an afternoon to it if nobody has read the executor list first — which
