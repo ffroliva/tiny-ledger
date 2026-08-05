@@ -2,7 +2,10 @@
 
 **Status:** APPROVED by the product owner 2026-08-04 — pending application at Plan 3 planning
 (one spec revision pass together with the §7.2 Open Banking alignment table). Open questions 1 and 2
-both closed as proposed (feed silent; no trail actor-filter yet). **Target spec version:** 3.8 (current: 3.7).
+both closed as proposed (feed silent; no trail actor-filter yet). **Target spec version:** 3.9 (current: 3.8).
+**Renumbered 2026-08-05:** this proposal originally targeted 3.8, but the Plan 2 close-out consumed that
+number for the CR14 truth-alignment pass (Kafka routing is programmatic; the in-process legs are
+synchronous `@EventListener` in both run modes). Nothing about the content changed — only the number.
 **Applies with:** Plan 3 — Keycloak + RBAC, §14 implementation order step 8. Nothing here is
 buildable before auth exists, and nothing in it changes the `standalone` contract.
 **Author:** spec-revision pass, 2026-08-04.
@@ -71,7 +74,7 @@ needs the event stream, which the web layer does not have.
 not above the record. He holds `ledger:writer`, `ledger:reader`, `ledger:admin`, and owns no
 account of his own — which also proves the admin path needs none.
 
-**D7 — pre-v3.8 events are read, not rewritten.** Events are immutable and there is no backfill.
+**D7 — pre-v3.9 events are read, not rewritten.** Events are immutable and there is no backfill.
 An event whose payload has no `actor` was written when the only principal permitted to write to a
 stream was its owner, so absence reads as `actor = owner` — an exact inference, not a default.
 
@@ -276,7 +279,7 @@ visible only where an admin reaches something an admin should not have. N13 is t
 >    the same endpoints, and the operation is "on behalf of" the owner purely because it targets that
 >    owner's account. There is no impersonation header, no delegation token and no token exchange
 >    (§13). Account *opening* has no on-behalf-of form — an account has no owner until it exists.
-> 9. An event or audit entry with no `actor` predates v3.8, when the only principal permitted to
+> 9. An event or audit entry with no `actor` predates v3.9, when the only principal permitted to
 >    write to a stream was its owner; absence therefore reads as `actor = owner`. Events are
 >    immutable and there is no backfill — the inference is exact, not a default.
 
@@ -284,7 +287,7 @@ visible only where an admin reaches something an admin should not have. N13 is t
 
 **Add one row:**
 
-> | 3.8 | 2026-08-04 | Admin on-behalf-of, landing with step 8: `ledger:admin` widens the ownership term for reads and change operations on any account without widening the role term (§6.4); every event records the acting principal as `actor` (§2.3/§2.4/§4.1) and the audit entry surfaces it (§7); admin is not an auditor — separation of duties kept; test user `trent`, scenarios P9/N13, error row (§6.5), assumptions 8–9, delegation protocols declared a non-goal (§13) |
+> | 3.9 | 2026-08-05 | Admin on-behalf-of, landing with step 8: `ledger:admin` widens the ownership term for reads and change operations on any account without widening the role term (§6.4); every event records the acting principal as `actor` (§2.3/§2.4/§4.1) and the audit entry surfaces it (§7); admin is not an auditor — separation of duties kept; test user `trent`, scenarios P9/N13, error row (§6.5), assumptions 8–9, delegation protocols declared a non-goal (§13) |
 
 ---
 
