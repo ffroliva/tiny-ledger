@@ -3,7 +3,6 @@ package com.ffroliva.tinyledger.platform;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
@@ -26,25 +25,33 @@ class CallerPrincipalTest {
 
     @Test // §6.4: the caller is the JWT subject when there is one
     void theSubjectOfTheAuthenticatedJwtIsTheCaller() {
-        Jwt jwt = Jwt.withTokenValue("t")
-                .header("alg", "none")
-                .subject("alice")
-                .claim("roles", List.of("ledger:writer"))
-                .build();
+        Jwt jwt = Jwt.withTokenValue("t").header("alg", "none").subject("alice").build();
         SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
 
         assertThat(under("full").current()).isEqualTo("alice");
-        assertThat(under("full").roles()).containsExactly("ledger:writer");
     }
 
     @Test // standalone has no authentication at all, and the fixed principal is the contract
     void withNoAuthenticationTheCallerIsTheStandalonePrincipal() {
         assertThat(under("standalone").current()).isEqualTo("local");
-        assertThat(under("standalone").roles()).isEmpty();
     }
 
     @Test // the fail-closed half: outside standalone, a missing principal is a refusal, not a default
     void withNoAuthenticationOutsideStandaloneItRefuses() {
         assertThatThrownBy(() -> under("full").current()).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test // JwtValidators validates iss and the timestamps, never sub — a subject-less token is authenticated
+    void anAuthenticatedTokenWithNoSubjectIsNotAPrincipal() {
+        SecurityContextHolder.getContext()
+                .setAuthentication(new JwtAuthenticationToken(Jwt.withTokenValue("t")
+                        .header("alg", "none")
+                        .claim("scope", "read")
+                        .build()));
+
+        // null must not become the owner stamped on an account: every subject-less token would then
+        // share one principal. It takes the same path as no authentication at all.
+        assertThatThrownBy(() -> under("full").current()).isInstanceOf(IllegalStateException.class);
+        assertThat(under("standalone").current()).isEqualTo("local");
     }
 }
