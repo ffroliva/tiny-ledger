@@ -81,9 +81,16 @@ class BalanceControllerTest {
     @MockitoBean
     private CallerPrincipal callerPrincipal;
 
+    /**
+     * "captain-nemo" is a value nothing in the system can produce: {@code standalone} always resolves
+     * "local", so every stub in this class that expected that literal was satisfied by a controller which
+     * hardcoded the principal instead of resolving it. The sentinel is what makes {@code listAccounts},
+     * {@code getAccount} and the strong read fail if they stop passing {@code callerPrincipal.current()} —
+     * and {@code accountsOwnedBy(caller)} is itself an authorization filter (§6.4/N12), not just a query.
+     */
     @BeforeEach
     void caller() {
-        given(callerPrincipal.current()).willReturn("local");
+        given(callerPrincipal.current()).willReturn("captain-nemo");
     }
 
     @Test // §4.4: the parameterless mapping is balance's — the projection read
@@ -103,7 +110,7 @@ class BalanceControllerTest {
 
     @Test // §4.4: the params-qualified mapping wins and lands in the ledger module
     void strongBalanceReadIsServedByTheAggregate() throws Exception {
-        given(strongBalance.strongBalance("local", new AccountId(ACCOUNT)))
+        given(strongBalance.strongBalance("captain-nemo", new AccountId(ACCOUNT)))
                 .willReturn(new StrongBalance(new AccountId(ACCOUNT), Money.of("GBP", 9500), NOW, 4));
 
         mvc.perform(get("/api/v1/accounts/{a}/balance", ACCOUNT).param("consistency", "strong"))
@@ -125,9 +132,6 @@ class BalanceControllerTest {
 
     @Test // §6.4: the caller must be the resolved principal, not a literal — Task 6 authorises on this value
     void theResolvedCallerIsPassedToTheQuery() throws Exception {
-        // "captain-nemo" is a value nothing in the system can produce: standalone always resolves "local",
-        // so a controller that hardcoded the principal would still satisfy every other test in this class.
-        given(callerPrincipal.current()).willReturn("captain-nemo");
         given(queryBalance.balance(any(), any()))
                 .willReturn(Optional.of(new BalanceView(new AccountId(ACCOUNT), Money.of("GBP", 5000), NOW, 3)));
         ArgumentCaptor<String> caller = ArgumentCaptor.forClass(String.class);
@@ -141,7 +145,6 @@ class BalanceControllerTest {
     @Test // §6.4: the same for history — Task 6 decorates both ports, so both call sites need proving
     void theResolvedCallerIsPassedToTheHistoryQuery() throws Exception {
         // The three feed tests above stub with any(), so a hardcoded literal here would go unnoticed too.
-        given(callerPrincipal.current()).willReturn("captain-nemo");
         given(queryHistory.history(any(), any(), any())).willReturn(new HistoryPage(List.of(transaction()), null));
         ArgumentCaptor<String> caller = ArgumentCaptor.forClass(String.class);
 
@@ -212,19 +215,21 @@ class BalanceControllerTest {
 
     @Test // §7/N12: the caller's own accounts
     void listsTheCallersOwnAccounts() throws Exception {
-        given(queryAccounts.accountsOwnedBy("local")).willReturn(List.of(account()));
+        given(queryAccounts.accountsOwnedBy("captain-nemo")).willReturn(List.of(account()));
 
         mvc.perform(get("/api/v1/accounts"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accounts[0].accountUid").value(ACCOUNT.toString()))
                 .andExpect(jsonPath("$.accounts[0].name").value("ACC-001"))
                 .andExpect(jsonPath("$.accounts[0].currency").value("GBP"))
+                // Deliberately NOT the caller: `owner` must be mapped from the view, not echoed from the
+                // principal, and only a fixture owner that differs from the caller can tell the two apart.
                 .andExpect(jsonPath("$.accounts[0].owner").value("local"));
     }
 
     @Test // §7
     void readsAccountMetadata() throws Exception {
-        given(queryAccounts.accountsOwnedBy("local")).willReturn(List.of(account()));
+        given(queryAccounts.accountsOwnedBy("captain-nemo")).willReturn(List.of(account()));
 
         mvc.perform(get("/api/v1/accounts/{a}", ACCOUNT))
                 .andExpect(status().isOk())
@@ -234,7 +239,7 @@ class BalanceControllerTest {
 
     @Test // §6.5
     void unknownAccountMetadataIsNotFound() throws Exception {
-        given(queryAccounts.accountsOwnedBy("local")).willReturn(List.of());
+        given(queryAccounts.accountsOwnedBy("captain-nemo")).willReturn(List.of());
 
         mvc.perform(get("/api/v1/accounts/{a}", ACCOUNT))
                 .andExpect(status().isNotFound())

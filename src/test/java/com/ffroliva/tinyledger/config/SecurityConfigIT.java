@@ -1,14 +1,18 @@
 package com.ffroliva.tinyledger.config;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ffroliva.tinyledger.testsupport.AbstractIntegrationTest;
 import com.ffroliva.tinyledger.testsupport.TestJwt;
+import com.jayway.jsonpath.JsonPath;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -49,5 +53,59 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     void aValidTokenIsAccepted() throws Exception {
         mvc().perform(get("/api/v1/accounts").header("Authorization", "Bearer " + TestJwt.token("alice")))
                 .andExpect(status().isOk());
+    }
+
+    @Test // §6.4: the decorator is wired, not merely written — mallory holds a valid token and is
+    // still refused, which no unit test on AuthorizedUseCases could establish
+    void aValidTokenForTheWrongOwnerIsForbidden() throws Exception {
+        UUID alicesAccount = openAnAccountAs("alice");
+
+        mvc().perform(get("/api/v1/accounts/{a}/balance", alicesAccount)
+                        .header("Authorization", "Bearer " + TestJwt.token("mallory")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.type").value("/errors/forbidden"));
+    }
+
+    @Test // the positive twin: a system that refuses everyone would satisfy the test above
+    void theOwnerReadsHerOwnBalance() throws Exception {
+        UUID alicesAccount = openAnAccountAs("alice");
+
+        mvc().perform(get("/api/v1/accounts/{a}/balance", alicesAccount)
+                        .header("Authorization", "Bearer " + TestJwt.token("alice")))
+                .andExpect(status().isOk());
+    }
+
+    @Test // History is a different bean; forgetting it fails SILENTLY, unlike Balances
+    void aValidTokenForTheWrongOwnerCannotPageTheHistory() throws Exception {
+        UUID alicesAccount = openAnAccountAs("alice");
+
+        mvc().perform(get("/api/v1/accounts/{a}/transactions", alicesAccount)
+                        .header("Authorization", "Bearer " + TestJwt.token("mallory")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.type").value("/errors/forbidden"));
+    }
+
+    @Test // §6.5: and an account nobody owns is still a 404, not a 403
+    void anUnknownAccountIsNotFoundRatherThanForbidden() throws Exception {
+        mvc().perform(get("/api/v1/accounts/{a}/balance", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + TestJwt.token("alice")))
+                .andExpect(status().isNotFound());
+    }
+
+    /**
+     * Opens a real account through the real chain, so the owner recorded on it is the token's subject and
+     * the projection row the decorator reads is the one the write path produced. The projection is fed by a
+     * synchronous {@code @EventListener} in both run modes, so it is readable as soon as this returns.
+     */
+    private UUID openAnAccountAs(String owner) throws Exception {
+        String body = mvc().perform(post("/api/v1/accounts")
+                        .header("Authorization", "Bearer " + TestJwt.token(owner))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"ACC-%s\",\"currency\":\"GBP\"}".formatted(owner)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return UUID.fromString(JsonPath.read(body, "$.accountUid"));
     }
 }
