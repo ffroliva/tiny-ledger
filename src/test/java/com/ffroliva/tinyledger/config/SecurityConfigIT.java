@@ -3,6 +3,7 @@ package com.ffroliva.tinyledger.config;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -13,10 +14,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 
 /**
  * The {@code full} profile carries the entire security posture, and {@code application-full.properties}
@@ -27,31 +25,50 @@ import org.springframework.web.context.WebApplicationContext;
  */
 class SecurityConfigIT extends AbstractIntegrationTest {
 
+    /**
+     * Autowired rather than hand-built. A hand-built {@code webAppContextSetup(context).apply(springSecurity())}
+     * registers the security filter and nothing else, so no application {@code Filter} is in the chain and
+     * filter ordering cannot be observed — measured: {@code x-fapi-interaction-id} came back null on every
+     * response. {@code @AutoConfigureMockMvc} on {@link AbstractIntegrationTest} assembles the chain from the
+     * real filter registrations instead, which is what {@link #anUnauthenticatedRefusalStillCarriesTheInteractionId}
+     * depends on.
+     */
     @Autowired
-    private WebApplicationContext context;
-
-    private MockMvc mvc() {
-        return MockMvcBuilders.webAppContextSetup(context)
-                .apply(SecurityMockMvcConfigurers.springSecurity())
-                .build();
-    }
+    private MockMvc mvc;
 
     @Test // the context starting at all is half the assertion — .jwt(...) needs a decoder to exist
     void anUnauthenticatedRequestIsRefused() throws Exception {
-        mvc().perform(get("/api/v1/accounts")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/accounts")).andExpect(status().isUnauthorized());
     }
 
     @Test // §6.5: and the refusal is catalogued, not an empty body
     void theRefusalCarriesTheCataloguedProblem() throws Exception {
-        mvc().perform(get("/api/v1/accounts"))
+        mvc.perform(get("/api/v1/accounts"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.type").value("/errors/unauthenticated"));
     }
 
+    /**
+     * Task 7's ordering fix, and the only test in the suite that can see it. A 401 is written by the security
+     * chain, which registers at {@code SecurityProperties.DEFAULT_FILTER_ORDER = -100}; a plain
+     * {@code @Component Filter} registers at {@code Ordered.LOWEST_PRECEDENCE}. Measured: dropping
+     * {@code @Order(HIGHEST_PRECEDENCE)} from {@link com.ffroliva.tinyledger.platform.FapiInteractionIdFilter}
+     * fails this on the header — the filter never ran, so there was no {@code traceId} in the MDC either.
+     * Asserting the header and the body carry the <em>same</em> value is the point: two {@code exists()} checks
+     * would be satisfied by two unrelated ids.
+     */
+    @Test
+    void anUnauthenticatedRefusalStillCarriesTheInteractionId() throws Exception {
+        mvc.perform(get("/api/v1/accounts").header("x-fapi-interaction-id", "abc-123"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("x-fapi-interaction-id", "abc-123"))
+                .andExpect(jsonPath("$.traceId").value("abc-123"));
+    }
+
     @Test // and a valid token gets through, so the refusal above is not just "everything 401s"
     void aValidTokenIsAccepted() throws Exception {
-        mvc().perform(get("/api/v1/accounts").header("Authorization", "Bearer " + TestJwt.token("alice")))
+        mvc.perform(get("/api/v1/accounts").header("Authorization", "Bearer " + TestJwt.token("alice")))
                 .andExpect(status().isOk());
     }
 
@@ -60,7 +77,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     void aValidTokenForTheWrongOwnerIsForbidden() throws Exception {
         UUID alicesAccount = openAnAccountAs("alice");
 
-        mvc().perform(get("/api/v1/accounts/{a}/balance", alicesAccount)
+        mvc.perform(get("/api/v1/accounts/{a}/balance", alicesAccount)
                         .header("Authorization", "Bearer " + TestJwt.token("mallory")))
                 .andExpect(status().isForbidden())
                 // §6.5: the refusal must be a problem document, the same as the 401 above. These two 403s
@@ -73,7 +90,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     void theOwnerReadsHerOwnBalance() throws Exception {
         UUID alicesAccount = openAnAccountAs("alice");
 
-        mvc().perform(get("/api/v1/accounts/{a}/balance", alicesAccount)
+        mvc.perform(get("/api/v1/accounts/{a}/balance", alicesAccount)
                         .header("Authorization", "Bearer " + TestJwt.token("alice")))
                 .andExpect(status().isOk());
     }
@@ -82,7 +99,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     void aValidTokenForTheWrongOwnerCannotPageTheHistory() throws Exception {
         UUID alicesAccount = openAnAccountAs("alice");
 
-        mvc().perform(get("/api/v1/accounts/{a}/transactions", alicesAccount)
+        mvc.perform(get("/api/v1/accounts/{a}/transactions", alicesAccount)
                         .header("Authorization", "Bearer " + TestJwt.token("mallory")))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
@@ -102,10 +119,16 @@ class SecurityConfigIT extends AbstractIntegrationTest {
      */
     @Test
     void theAuditTrailIsRefusedToAnOrdinaryToken() throws Exception {
-        mvc().perform(get("/api/v1/audit/entries").header("Authorization", "Bearer " + TestJwt.token("alice")))
+        mvc.perform(get("/api/v1/audit/entries")
+                        .header("Authorization", "Bearer " + TestJwt.token("alice"))
+                        .header("x-fapi-interaction-id", "abc-123"))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
-                .andExpect(jsonPath("$.type").value("/errors/forbidden"));
+                .andExpect(jsonPath("$.type").value("/errors/forbidden"))
+                // Task 7: the chain-level 403 is written by the same handler as the 401, so it is correlatable
+                // for free once the filter outranks the chain — asserted here rather than in a new test.
+                .andExpect(header().string("x-fapi-interaction-id", "abc-123"))
+                .andExpect(jsonPath("$.traceId").value("abc-123"));
     }
 
     @Test // §7: and the raw stream, which returns verbatim payloads. Alice's OWN account, so this asserts a
@@ -113,7 +136,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     void theRawEventStreamIsRefusedToAnOrdinaryToken() throws Exception {
         UUID alicesAccount = openAnAccountAs("alice");
 
-        mvc().perform(get("/api/v1/accounts/{a}/events", alicesAccount)
+        mvc.perform(get("/api/v1/accounts/{a}/events", alicesAccount)
                         .header("Authorization", "Bearer " + TestJwt.token("alice")))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
@@ -122,7 +145,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
 
     @Test // §6.5: and an account nobody owns is still a 404, not a 403
     void anUnknownAccountIsNotFoundRatherThanForbidden() throws Exception {
-        mvc().perform(get("/api/v1/accounts/{a}/balance", UUID.randomUUID())
+        mvc.perform(get("/api/v1/accounts/{a}/balance", UUID.randomUUID())
                         .header("Authorization", "Bearer " + TestJwt.token("alice")))
                 .andExpect(status().isNotFound());
     }
@@ -133,7 +156,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
      * synchronous {@code @EventListener} in both run modes, so it is readable as soon as this returns.
      */
     private UUID openAnAccountAs(String owner) throws Exception {
-        String body = mvc().perform(post("/api/v1/accounts")
+        String body = mvc.perform(post("/api/v1/accounts")
                         .header("Authorization", "Bearer " + TestJwt.token(owner))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"ACC-%s\",\"currency\":\"GBP\"}".formatted(owner)))
