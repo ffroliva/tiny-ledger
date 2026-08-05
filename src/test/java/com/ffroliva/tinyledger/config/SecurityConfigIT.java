@@ -63,6 +63,9 @@ class SecurityConfigIT extends AbstractIntegrationTest {
         mvc().perform(get("/api/v1/accounts/{a}/balance", alicesAccount)
                         .header("Authorization", "Bearer " + TestJwt.token("mallory")))
                 .andExpect(status().isForbidden())
+                // §6.5: the refusal must be a problem document, the same as the 401 above. These two 403s
+                // are the only ones the suite asserts, so nothing else proves the content type.
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.type").value("/errors/forbidden"));
     }
 
@@ -82,6 +85,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
         mvc().perform(get("/api/v1/accounts/{a}/transactions", alicesAccount)
                         .header("Authorization", "Bearer " + TestJwt.token("mallory")))
                 .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.type").value("/errors/forbidden"));
     }
 
