@@ -35,10 +35,14 @@ and **whose account it was**. This revision adds one role and one field, and not
 
 ## 2. Design summary
 
-**D1 — `ledger:admin` widens the ownership term, never the role term.** **[repaired]** The
-authorisation rule at every §6.4 site becomes *operation role* **AND** (*subject is owner* **OR**
-*caller holds `ledger:admin`*). The admin role grants no operation on its own: an admin who is to
-record movements holds `ledger:writer` as well. *Rejected: a superuser role that short-circuits the
+**D1 — `ledger:admin` widens the ownership term, never the role term.** **[repaired]** At the two
+§6.4 sites that compare a caller against an account's owner — the in-service check against the
+rehydrated aggregate, and the decorator wrapping the read-model ports — the authorisation rule
+becomes *operation role* **AND** (*subject is owner* **OR** *caller holds `ledger:admin`*). The
+other two sites are untouched: the collection endpoint carries its scope in the port signature and
+D8 forbids widening it, and the auditor routes turn on role alone with no subject to compare, which
+D2 keeps admin out of. The admin role grants no operation on its own: an admin who is to record
+movements holds `ledger:writer` as well. *Rejected: a superuser role that short-circuits the
 ownership comparison.* One
 `if (admin) return;` at the top is smaller code and deletes two boundaries at once — it cannot
 express "may move money on any account but may not read the compliance trail", and every positive
@@ -195,10 +199,12 @@ Ordering is untouched: authorise, then idempotency, then apply.
 **[superseded]** This edit assumed a single authorisation decorator wrapping every use case
 ("inside that wrapper"). v3.9's §6.4 replaced the paragraph below with a principle — *"Every
 authorisation decision is made by the component that holds the state the decision needs"* — and a
-four-row table of enforcement sites, explicitly closed against a fifth (§6.4). The admin clause
-applies at every site in that table, not in one wrapper, so the exact replacement text below must
-not be applied as written; it is retained only as a record of what was originally proposed. The
-implementing plan needs to write this edit against the real four-site table.
+four-row table of enforcement sites, explicitly closed against a fifth (§6.4). The admin clause has
+to be reasoned about against every site in that table, not confined to one wrapper — and D1/D8 (§2)
+already establish that it widens ownership at only two of the four, leaving the collection endpoint
+and the auditor routes untouched. So the exact replacement text below must not be applied as
+written; it is retained only as a record of what was originally proposed. The implementing plan
+needs to write this edit against the real four-site table.
 
 **Current (second sentence):**
 
@@ -377,9 +383,9 @@ visible only where an admin reaches something an admin should not have. N13–N1
 
 ### 3.14 Revision history
 
-**Add one row: [repaired — version and date cells released, see the Status block above]**
+**Add one row: [repaired — version/date cells released (see Status block above); ownership-widening clause corrected to match D1/D8]**
 
-> | TBD | TBD | Admin on-behalf-of, landing with step 8: `ledger:admin` widens the ownership term for reads and change operations on any account without widening the role term (§6.4); every event records the acting principal as `actor` (§2.3/§2.4/§4.1) and the audit entry surfaces it (§7); admin is not an auditor — separation of duties kept; test user `trent`, scenarios P9/N13–N18, error row (§6.5), assumptions 8–9, delegation protocols declared a non-goal (§13) |
+> | TBD | TBD | Admin on-behalf-of, landing with step 8: `ledger:admin` widens the ownership term at the two §6.4 sites that compare a caller against an account's owner, for reads and change operations, without widening the role term and without widening the account collection (D8); every event records the acting principal as `actor` (§2.3/§2.4/§4.1) and the audit entry surfaces it (§7); admin is not an auditor — separation of duties kept; test user `trent`, scenarios P9/N13–N18, error row (§6.5), assumptions 8–9, delegation protocols declared a non-goal (§13) |
 >
 > Both cells are placeholders: the version and date belong to the plan that applies this proposal to
 > `docs/spec.md`, not to this proposal. Pinning a number here would only reserve one a later plan may
