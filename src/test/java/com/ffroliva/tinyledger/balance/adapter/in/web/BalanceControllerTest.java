@@ -138,6 +138,19 @@ class BalanceControllerTest {
         assertThat(caller.getValue()).isEqualTo("captain-nemo");
     }
 
+    @Test // §6.4: the same for history — Task 6 decorates both ports, so both call sites need proving
+    void theResolvedCallerIsPassedToTheHistoryQuery() throws Exception {
+        // The three feed tests above stub with any(), so a hardcoded literal here would go unnoticed too.
+        given(callerPrincipal.current()).willReturn("captain-nemo");
+        given(queryHistory.history(any(), any(), any())).willReturn(new HistoryPage(List.of(transaction()), null));
+        ArgumentCaptor<String> caller = ArgumentCaptor.forClass(String.class);
+
+        mvc.perform(get("/api/v1/accounts/{a}/transactions", ACCOUNT)).andExpect(status().isOk());
+
+        verify(queryHistory).history(caller.capture(), any(), any());
+        assertThat(caller.getValue()).isEqualTo("captain-nemo");
+    }
+
     @Test // §7: links.next is a URL — same path, the cursor as a query parameter
     void transactionFeedCarriesTheNextPageUrl() throws Exception {
         given(queryHistory.history(any(), any(), any())).willReturn(new HistoryPage(List.of(transaction()), CURSOR));
