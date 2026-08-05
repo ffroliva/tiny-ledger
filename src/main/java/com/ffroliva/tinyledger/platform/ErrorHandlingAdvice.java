@@ -93,7 +93,7 @@ public class ErrorHandlingAdvice {
         return ResponseEntity.status(status).body(body);
     }
 
-    /** §6.5/§6.6: the correlating id, whenever a tracer has put one in the MDC. Plan 3 wires the tracer. */
+    /** §6.5/§6.6: the correlating id. {@link FapiInteractionIdFilter} is the tracer that puts it there. */
     private static ProblemDetail traced(ProblemDetail body) {
         String traceId = MDC.get("traceId");
         if (traceId != null) body.setProperty("traceId", traceId);

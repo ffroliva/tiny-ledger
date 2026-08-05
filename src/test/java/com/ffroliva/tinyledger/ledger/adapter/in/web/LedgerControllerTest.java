@@ -33,7 +33,6 @@ import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
@@ -251,17 +250,24 @@ class LedgerControllerTest {
         verifyNoInteractions(recordMovement);
     }
 
-    @Test // §6.5/§6.6: the correlating id, whenever a tracer has put one in the MDC
+    /**
+     * §6.5/§6.6: the correlating id. This used to hand-stuff the MDC to stand in for a tracer that did not
+     * exist yet; Task 7's {@code FapiInteractionIdFilter} is that tracer, and it sets the MDC per request —
+     * measured: the hand-stuffed value lost to the filter's minted UUID and this test went red. So the id now
+     * arrives the way a caller actually supplies it, and the header must carry the same value as the body:
+     * two independent {@code exists()} checks would be satisfied by two unrelated ids.
+     */
+    @Test
     void problemBodiesCarryTheTraceIdWhenTracingIsPresent() throws Exception {
         given(recordMovement.deposit(any())).willThrow(new IdempotencyConflictException(MOVEMENT));
-        MDC.put("traceId", "7c6f2e1a9b4d5c30");
-        try {
-            deposit()
-                    .andExpect(status().isConflict())
-                    .andExpect(jsonPath("$.traceId").value("7c6f2e1a9b4d5c30"));
-        } finally {
-            MDC.remove("traceId");
-        }
+
+        mvc.perform(put("/api/v1/accounts/{a}/deposits/{d}", ACCOUNT, MOVEMENT)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(BODY)
+                        .header("x-fapi-interaction-id", "7c6f2e1a9b4d5c30"))
+                .andExpect(status().isConflict())
+                .andExpect(header().string("x-fapi-interaction-id", "7c6f2e1a9b4d5c30"))
+                .andExpect(jsonPath("$.traceId").value("7c6f2e1a9b4d5c30"));
     }
 
     @Test // §6.5: no stack traces, no internal identifiers, no messages cross the boundary
