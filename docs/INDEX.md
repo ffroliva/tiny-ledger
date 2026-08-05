@@ -44,6 +44,11 @@ Quadrants are Diátaxis, per spec §8.5.
 A stale index is worse than none — it sends readers confidently to the wrong place. This file was itself
 stale until 2026-08-05, listing five documents while `docs/` held four subdirectories and seven plans.
 
-When you add a document: add a row here **and** run `python scripts/ci/check_docs_governance.py`, which
-CI stage 6 gates on. If a document's claims stop matching the code, fix or retract them the same day —
-`spec.md` v3.8 exists because a whole class of such drift accumulated unnoticed (finding CR14).
+When you add a document, **add a row here by hand.** Nothing will remind you:
+`scripts/ci/check_docs_governance.py` reads a curated list in `governance-baseline.md` and does **not**
+discover new files — it reported `17 known, 0 new` both before and after four documents were added on
+2026-08-05, including an ADR. Its name and its green result both imply otherwise, so do not rely on it
+as a safety net for this. Making it discover additions is an open task.
+
+If a document's claims stop matching the code, fix or retract them the same day. `spec.md` v3.8 exists
+because a whole class of such drift accumulated unnoticed (finding CR14).
