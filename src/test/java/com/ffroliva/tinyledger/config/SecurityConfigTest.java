@@ -43,6 +43,26 @@ class SecurityConfigTest {
     }
 
     /**
+     * The framework contributes an inbound route this API never declared.
+     * {@code HttpSecurityConfiguration#httpSecurity()} applies {@code logout(withDefaults())} to every
+     * {@code HttpSecurity}, and because both chains call {@code csrf(csrf -> csrf.disable())},
+     * {@code LogoutConfigurer#createLogoutRequestMatcher} finds a null {@code CsrfConfigurer} and ORs
+     * {@code GET}/{@code PUT}/{@code DELETE} in beside {@code POST}. {@code LogoutFilter} sits ahead of
+     * {@code AuthorizationFilter}, so in {@code full} an <em>unauthenticated</em> caller was answered
+     * {@code 302 → /login?logout} — a page that does not exist — instead of the catalogued 401, and
+     * {@code /logout} appears in neither {@code openapi.yaml} nor {@code ErrorCode}.
+     *
+     * <p>Measured, not inferred: before {@code .logout(AbstractHttpConfigurer::disable)} this assertion
+     * failed with {@code Status expected:<404> but was:<302>}. It runs here rather than in
+     * {@code SecurityConfigIT} because the route is contributed to both chains identically and this class
+     * needs no Docker — but the disable is applied to both, since it is {@code full} where the 302 mattered.
+     */
+    @Test
+    void logoutIsNotARouteThisApiServes() throws Exception {
+        mvc().perform(get("/logout")).andExpect(status().isNotFound());
+    }
+
+    /**
      * §7: {@code full} refuses the two auditor operations until the {@code ledger:auditor} role lands, and it
      * does so with a chain-level {@code denyAll()} in {@code fullChain}. {@code standalone} has its own chain
      * and must keep answering the contractual 501 (`openapi.yaml:296-355`). Nothing else in the repository

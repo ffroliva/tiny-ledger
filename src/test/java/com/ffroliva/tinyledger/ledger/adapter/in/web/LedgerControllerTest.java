@@ -1,9 +1,11 @@
 package com.ffroliva.tinyledger.ledger.adapter.in.web;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -17,6 +19,7 @@ import com.ffroliva.tinyledger.ledger.application.error.AccountNotFoundException
 import com.ffroliva.tinyledger.ledger.application.error.ConcurrencyConflictException;
 import com.ffroliva.tinyledger.ledger.application.error.IdempotencyConflictException;
 import com.ffroliva.tinyledger.ledger.application.error.OwnershipException;
+import com.ffroliva.tinyledger.ledger.application.port.in.Deposit;
 import com.ffroliva.tinyledger.ledger.application.port.in.MovementResult;
 import com.ffroliva.tinyledger.ledger.application.port.in.OpenAccountUseCase;
 import com.ffroliva.tinyledger.ledger.application.port.in.OpenedAccount;
@@ -24,6 +27,7 @@ import com.ffroliva.tinyledger.ledger.application.port.in.Outcome;
 import com.ffroliva.tinyledger.ledger.application.port.in.QueryStrongBalanceUseCase;
 import com.ffroliva.tinyledger.ledger.application.port.in.RecordMovementUseCase;
 import com.ffroliva.tinyledger.ledger.application.port.in.StrongBalance;
+import com.ffroliva.tinyledger.ledger.application.port.in.Withdraw;
 import com.ffroliva.tinyledger.ledger.domain.MovementType;
 import com.ffroliva.tinyledger.platform.CallerPrincipal;
 import com.ffroliva.tinyledger.shared.AccountId;
@@ -33,6 +37,7 @@ import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
@@ -66,9 +71,17 @@ class LedgerControllerTest {
     @MockitoBean
     private CallerPrincipal callerPrincipal;
 
+    /**
+     * §6.4/P1-3: "captain-nemo" is a value nothing in the system can produce — {@code standalone} always
+     * resolves "local", which is what this stub used to return. With that literal, a controller that stopped
+     * calling {@code callerPrincipal.current()} and passed "local" directly kept the whole suite green, on the
+     * money path, in the one file Task 5 never reached. The sentinel is what makes every call site fail: the
+     * exact-argument stub in {@code strongReadIsServedByTheLedgerModule}, the echoed {@code $.owner} in
+     * {@code openAccountIsCreatedWithLocation}, and the two captors in {@code theResolvedCallerIsOnEveryMovement}.
+     */
     @BeforeEach
     void caller() {
-        given(callerPrincipal.current()).willReturn("local");
+        given(callerPrincipal.current()).willReturn("captain-nemo");
     }
 
     @Test // §6.3: first write
@@ -86,6 +99,31 @@ class LedgerControllerTest {
                 .andExpect(jsonPath("$.amount.minorUnits").value(10000))
                 .andExpect(jsonPath("$.balanceAfter.minorUnits").value(25000))
                 .andExpect(jsonPath("$.reference").value("rent"));
+    }
+
+    /**
+     * §6.4/P1-3: the caller on a movement must be the resolved principal, not a literal — Task 6 authorises on
+     * this value, and a wrong one is a caller writing to somebody else's account. Both money-path call sites
+     * are captured, not just the deposit: {@code putWithdrawal} is the adjacent line with the identical
+     * defect, and every other withdrawal test in this class stubs with {@code any()}.
+     */
+    @Test
+    void theResolvedCallerIsOnEveryMovement() throws Exception {
+        given(recordMovement.deposit(any())).willReturn(recorded(Outcome.CREATED));
+        given(recordMovement.withdraw(any())).willReturn(recorded(Outcome.CREATED));
+        ArgumentCaptor<Deposit> deposited = ArgumentCaptor.forClass(Deposit.class);
+        ArgumentCaptor<Withdraw> withdrawn = ArgumentCaptor.forClass(Withdraw.class);
+
+        deposit().andExpect(status().isCreated());
+        mvc.perform(put("/api/v1/accounts/{a}/withdrawals/{w}", ACCOUNT, MOVEMENT)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(BODY))
+                .andExpect(status().isCreated());
+
+        verify(recordMovement).deposit(deposited.capture());
+        verify(recordMovement).withdraw(withdrawn.capture());
+        assertThat(deposited.getValue().caller()).isEqualTo("captain-nemo");
+        assertThat(withdrawn.getValue().caller()).isEqualTo("captain-nemo");
     }
 
     @Test // §6.3: same UID, same payload — replayed, never re-applied
@@ -197,7 +235,8 @@ class LedgerControllerTest {
                 .andExpect(jsonPath("$.accountUid").value(ACCOUNT.toString()))
                 .andExpect(jsonPath("$.name").value("ACC-001"))
                 .andExpect(jsonPath("$.currency").value("GBP"))
-                .andExpect(jsonPath("$.owner").value("local"))
+                // §6.4: echoed from the resolved caller, so a hardcoded literal in openAccount fails here
+                .andExpect(jsonPath("$.owner").value("captain-nemo"))
                 .andExpect(jsonPath("$.createdAt").exists());
     }
 
@@ -285,7 +324,7 @@ class LedgerControllerTest {
 
     @Test // §4.4: the params-qualified mapping is the write side's own strong read
     void strongReadIsServedByTheLedgerModule() throws Exception {
-        given(strongBalance.strongBalance("local", new AccountId(ACCOUNT)))
+        given(strongBalance.strongBalance("captain-nemo", new AccountId(ACCOUNT)))
                 .willReturn(new StrongBalance(new AccountId(ACCOUNT), Money.of("GBP", 8000), NOW, 3));
 
         mvc.perform(get("/api/v1/accounts/{a}/balance", ACCOUNT).param("consistency", "strong"))

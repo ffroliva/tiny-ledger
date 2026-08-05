@@ -12,11 +12,21 @@ import com.tngtech.archunit.lang.ArchRule;
         importOptions = com.tngtech.archunit.core.importer.ImportOption.DoNotIncludeTests.class)
 class HexagonalRulesTest {
 
+    /**
+     * {@code ..shared..} is fenced alongside {@code ..domain..}, and that is load-bearing rather than
+     * thorough. ArchUnit checks <em>direct</em> dependencies, so with {@code ..domain..} alone a Spring import
+     * in {@code shared.error.ErrorCode} stayed green while landing on the domain's transitive compile path —
+     * and Task 1 made {@code Account} import {@code shared.error.InvalidAmountException}, so the domain now
+     * genuinely compiles against {@code shared}. {@code ErrorCode}'s own javadoc already stated the rule;
+     * nothing enforced it, which AGENTS.md counts as a defect. Proven by violation: a temporary
+     * {@code org.springframework} import in {@code ErrorCode} fails this rule.
+     */
     @ArchTest
-    static final ArchRule domainIsFrameworkFree = noClasses()
+    static final ArchRule domainAndSharedAreFrameworkFree = noClasses()
             .that()
-            .resideInAPackage("..domain..")
-            // spec §9.2 v3.4: package-info boundary metadata (@NamedInterface) is not domain logic.
+            .resideInAnyPackage("..domain..", "..shared..")
+            // spec §9.2 v3.4: package-info boundary metadata (@NamedInterface, @ApplicationModule) is not
+            // domain logic — `shared`'s package-info carries the Modulith OPEN marker.
             .and()
             .doNotHaveSimpleName("package-info")
             .should()

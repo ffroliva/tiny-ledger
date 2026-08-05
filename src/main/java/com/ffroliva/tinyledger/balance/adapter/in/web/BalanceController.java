@@ -87,6 +87,20 @@ public class BalanceController implements BalanceApi {
                 .toList()));
     }
 
+    /**
+     * <strong>Known divergence from §6.5, recorded rather than fixed.</strong> This answers <b>404</b> for an
+     * account that exists but belongs to someone else, where its two siblings on adjacent paths —
+     * {@code /balance} and {@code /transactions} — answer <b>403</b> through
+     * {@code AuthorizedUseCases.requireOwner}. §6.5 says wrong-owner is 403. The cause is structural: this
+     * route has no use-case port to decorate, so it filters the caller's own list and an unowned account is
+     * indistinguishable from an absent one.
+     *
+     * <p>Not changed here because it is a wire-contract change: a client today can distinguish "no such
+     * account" from "not yours" on this route and not on the other two, and moving it deserves its own test
+     * and its own decision. It belongs with the §6.4/§6.5 amendment, alongside the history path's own
+     * divergence already recorded on {@code AuthorizedUseCases.requireOwner}. Two adjacent routes disagreeing
+     * is tolerable; disagreeing silently is not.
+     */
     @GetMapping(
             path = "/api/v1/accounts/{accountUid}",
             produces = {JSON, PROBLEM_JSON})
