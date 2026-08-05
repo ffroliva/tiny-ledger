@@ -1,28 +1,26 @@
 # Tiny Ledger
 
 An event-sourced banking ledger — accounts, deposits, withdrawals, balances — built as a Spring
-Modulith modular monolith.
+Modulith modular monolith, runnable either as a single JDK process or against Postgres, Redis and
+Kafka, from one codebase.
 
-**Start here:** [`docs/architecture.md`](docs/architecture.md) — three diagrams covering the two run
-modes, the module boundaries and the domain. Ten minutes, and you have the argument.
+**The code was written by AI. Every design decision was made by a human, and the record shows both.**
+That is the part worth your attention: this repository is an experiment in agentic engineering with a
+human in the loop, and it is documented as such — including where the agents got things wrong.
 
-Full design contract: [`docs/spec.md`](docs/spec.md). How it was built:
-[`docs/agentic-workflow.md`](docs/agentic-workflow.md). Documentation map:
-[`docs/INDEX.md`](docs/INDEX.md).
+---
 
-## Quickstart (standalone)
+## Run it
 
-Prerequisite: **JDK 25**. No database, no broker, no auth to configure — `standalone` is the
-default Spring profile. (`full` mode — Postgres, Redis, Kafka — also ships in this build; see
-[Run modes](#run-modes).)
+Prerequisite: **JDK 25**. No database, no broker, nothing to configure — `standalone` is the default
+profile.
 
 ```bash
 ./mvnw spring-boot:run
 ```
 
-The startup log prints `AUTH DISABLED (standalone)` and binds `127.0.0.1:8080` only.
-
-With the app running, open an account, deposit into it, and read the balance:
+The log prints `AUTH DISABLED (standalone)` and binds `127.0.0.1:8080` only. Then open an account,
+deposit into it, and read the balance:
 
 ```bash
 DEP_UID=$(python -c "import uuid;print(uuid.uuid4())")
@@ -33,41 +31,99 @@ curl -s -X PUT 127.0.0.1:8080/api/v1/accounts/$ACC/deposits/$DEP_UID -H 'Content
 curl -s 127.0.0.1:8080/api/v1/accounts/$ACC/balance
 ```
 
-The `POST` returns `201` with the account; the `PUT` returns the deposit's transaction, including
-`balanceAfter`; the final `GET` returns the balance with its staleness markers, `asOf` and
-`streamVersion` (spec §4.4).
+`POST` returns `201` with the account. `PUT` returns the transaction including `balanceAfter`. `GET`
+returns the balance with its staleness markers, `asOf` and `streamVersion`.
 
-Money is one shape on the wire, everywhere — requests, responses, balances:
+Money is one shape everywhere — requests, responses, balances:
 
 ```json
 { "currency": "GBP", "minorUnits": 10000 }
 ```
 
-`minorUnits` is an integer (pence/cents). Sending a non-integer (`10000.5`) is rejected `400` —
-there is no silent truncation to an int.
+`minorUnits` is an integer of pence or cents. A non-integer (`10000.5`) is rejected `400`; there is no
+silent truncation.
+
+```bash
+./mvnw verify          # unit, architecture and BDD tests — starts zero containers
+./mvnw verify -Pit     # integration suite against real Postgres, Redis and Kafka
+```
+
+---
+
+## What this is really demonstrating
+
+Anyone can have an AI write a ledger. The interesting question is whether the *engineering discipline*
+survives contact with generated code. The claim this repository makes is that it can, provided a human
+owns the decisions and the process leaves evidence.
+
+**Decisions are recorded with their rejected alternatives.** `docs/spec.md` is a contract, not a
+description; the ADRs in `docs/adr/` each state what was chosen, what was rejected, and what the choice
+costs. Where the human overrode the AI — including a minimalism analysis that argued, correctly against
+the brief as written, for building far less — the override and its reasoning are on record.
+
+**The agents' mistakes are kept, not hidden.** `docs/agentic-workflow.md` §5 exists specifically to
+record where agents were wrong: an implementation agent orphaned by a closed session that finished its
+work with nobody left to report to; a test that trusted a remembered framework default instead of
+checking the jar and asserted against the wrong topic name. A process document that records only
+successes is marketing.
+
+**Review is treated as fallible.** Plan 2 went through three independent review passes. The third found
+a defect *inside the second's own fix*. That is recorded too, because "reviewed" is not a binary, and a
+single pass over money-handling code is optimism.
+
+**Gates are proven to fail, not observed to pass.** A green build is not evidence that a rule is
+enforced — an architecture rule matching zero classes passes silently. So the rules here are checked by
+deliberately violating them and confirming the build breaks. The same standard applies to tests: one
+that would still pass with its fix reverted is not coverage, and several such tests were found and
+replaced.
+
+**The human decides; the AI executes and argues.** Scope, architecture, trade-offs, what to defer and
+what to refuse — those were human calls, made against AI analysis that was often right and sometimes
+confidently wrong. `AGENTS.md` is what any agent — Claude, Codex, Cursor, Gemini or another — reads
+before touching this repository, so the rules are the same whoever picks it up.
+
+---
+
+## If you are reviewing this
+
+| You have | Read |
+|---|---|
+| 10 minutes | [`docs/architecture.md`](docs/architecture.md) — three diagrams: the two run modes, the module boundaries, the domain |
+| 20 minutes | [`docs/agentic-workflow.md`](docs/agentic-workflow.md) §5 (where the agents were wrong), §6 (decisions, human over agent), §7 (per-phase gate record with real numbers) |
+| Longer | [`docs/spec.md`](docs/spec.md) — the full contract, and [`docs/INDEX.md`](docs/INDEX.md) to navigate everything else |
+| You want to judge the code | `git log` — one commit per reviewed task, and the commit messages carry the reasoning |
+
+---
 
 ## Run modes
 
-The full design ships two run modes from one codebase (spec §1); both are runnable in this build.
+Both ship in this build, from one codebase, and run the same domain code — only the adapters differ.
 
-| Mode | Command | What runs | Status |
-|---|---|---|---|
-| **`standalone`** (default) | `./mvnw spring-boot:run` | In-memory event store, in-memory cache, no auth, no broker. Binds `127.0.0.1` only. | Implemented — this build. |
-| **`full`** | `docker compose -f docker/docker-compose.yml up -d`, then `./mvnw spring-boot:run -Dspring-boot.run.profiles=full` | PostgreSQL, Redis, Kafka (KRaft, no ZooKeeper). Auth (Keycloak) and observability (OTel, Grafana, …) arrive in later plans (spec §14). | Implemented — this build. |
+| Mode | Command | What runs |
+|---|---|---|
+| **`standalone`** (default) | `./mvnw spring-boot:run` | In-memory event store and cache. No database, broker or auth. Binds `127.0.0.1` only. |
+| **`full`** | `docker compose -f docker/docker-compose.yml up -d` then `./mvnw spring-boot:run -Dspring-boot.run.profiles=full` | PostgreSQL, Redis and Kafka (KRaft). |
 
-Both modes run the same domain code and the same core ledger API; only the adapters differ.
+That duality is the design's central bet: a reviewer who wants the tiny ledger from the brief gets it in
+one command, and a reviewer who wants production concerns gets those too, without forking the code that
+holds the money.
 
-The `full`-profile adapters are exercised against real Postgres/Redis/Kafka via Testcontainers in
-the integration test suite: `./mvnw verify -Pit`.
+**Not yet built:** authentication and authorisation (planned in detail, not implemented), observability,
+and the FAPI/DPoP work. The auditor endpoints `GET /api/v1/accounts/{id}/events` and
+`GET /api/v1/audit/entries` are `full`-only; in `standalone` both answer `501` with an RFC 7807 problem
+detail. Role enforcement on them arrives with authentication — see
+[`docs/superpowers/plans/`](docs/superpowers/plans/).
 
-## Auditor endpoints
+---
 
-`GET /api/v1/accounts/{accountUid}/events` and `GET /api/v1/audit/entries` are `full`-profile-only
-(they need Kafka and the auth-scoped `ledger:auditor` role). In `standalone` both answer `501` with
-an RFC 7807 problem detail of type `/errors/not-available-in-standalone`.
+## The engineering, briefly
 
-## Further reading
+Event-sourced write side with optimistic concurrency on the stream version, and client-generated
+movement UIDs as the idempotency key enforced by a unique index. CQRS read side fed by domain events,
+served from a cache with the projection as fallback, carrying explicit staleness markers rather than
+pretending to be current. Hexagonal boundaries enforced at build time by ArchUnit — the domain depends
+on no framework — and module boundaries verified by Spring Modulith. Errors are RFC 7807 throughout, with
+the machine-readable `type` as the contract.
 
-- [`docs/spec.md`](docs/spec.md) — the full technical specification (architecture, API, quality gates).
-- [`docs/agentic-workflow.md`](docs/agentic-workflow.md) — how this repository was built.
-- [`docs/INDEX.md`](docs/INDEX.md) — the documentation map.
+The API surface follows Starling Bank's public API where its conventions fit a ledger, so that
+naming, money representation and error shape are settled by precedent rather than by taste.
