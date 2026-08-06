@@ -6,9 +6,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * Spec §6.1: "limits are configuration, not constants" — the table's four rows, bound here rather
  * than hard-coded in {@link RateLimitFilter}. {@code capacity} is the steady-state rate per
- * {@code period}; {@code burst} is the extra headroom a bucket may hold above that rate (Bucket4j
- * bucket capacity = {@code capacity + burst}, refilled at {@code capacity} tokens per
- * {@code period}). Declared in {@code platform}, not {@code config}, so {@link RateLimitFilter}
+ * {@code period}, refilled at {@code capacity} tokens per {@code period}. {@code burst} is still
+ * bound here — the table states it, and {@code application.properties} still carries the literal
+ * 20 — but review finding I3 established that §9.3 N9 ("alice exceeds 100 writes in a minute →
+ * 429" is the 101st write) reads §6.1's "100/minute, burst 20" more strictly than "capacity + burst"
+ * would: {@link RateLimitFilter#probe} does not add it to bucket capacity. See that method's
+ * javadoc; whether "burst" keeps a distinct meaning is left for the spec text itself (Task 5), not
+ * decided here. Declared in {@code platform}, not {@code config}, so {@link RateLimitFilter}
  * can depend on it directly without {@code platform} reaching into {@code config} — the same
  * one-way boundary {@link ErrorHandlingAdvice}'s javadoc documents for
  * {@link SecurityProblemHandler}.
