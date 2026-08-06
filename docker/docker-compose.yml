@@ -16,7 +16,14 @@ services:
       POSTGRES_USER: ledger
       POSTGRES_PASSWORD: ledger
     ports:
-      - "5432:5432"
+      # Overridable because 5432 is the most contested port on a developer machine, and
+      # the failure mode is worse than a refused bind: the app's datasource URL is a fixed
+      # localhost:5432, so if another Postgres already holds the port, this container stays
+      # in `Created` and the app connects to THAT database instead. It is caught today only
+      # because the credentials differ — an unrelated instance with a ledger/ledger user
+      # would be read and written silently. Set TINY_LEDGER_PG_PORT and scripts/e2e/run-e2e.sh
+      # points the app at the same value.
+      - "${TINY_LEDGER_PG_PORT:-5432}:5432"
     # The event store is the system of record: without a named volume `docker compose down` deletes it.
     volumes:
       - postgres-data:/var/lib/postgresql/data
