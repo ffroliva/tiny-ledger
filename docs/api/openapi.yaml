@@ -491,6 +491,13 @@ components:
                 traceId: 7c6f2e1a9b4d5c30
     RateLimited:
       description: Rate limit exceeded (§6.1). `type` is `/errors/rate-limit-exceeded`.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          required: true
+          schema:
+            type: integer
+            format: int32
       content:
         application/problem+json:
           schema:

@@ -63,8 +63,11 @@
   reachable by an unauthenticated request.
 - **Operator-managed IP exemptions** for rate limiting: empty by default, matched on
   `getRemoteAddr()` only and never a header, configuration-only with no runtime endpoint.
-- **The committed test signing key is gone.** `TestJwt` generates a keypair per JVM, which is
-  strictly stronger — the issuer cannot know a key that did not exist when the container started.
+- **The committed test signing key is removed from the tree — not from history.** `TestJwt` now
+  generates a keypair per JVM, which is strictly stronger — the issuer cannot know a key that did not
+  exist when the container started. `main` still carries the old key in past commits; it is test-only,
+  has no consumer, and no issuer ever trusted it, so no rotation is owed and history is deliberately
+  not rewritten to scrub it.
 - **`full` temporarily refused both auditor operations with 403 until the `ledger:auditor` role
   existed.** `accountUid` is optional on the trail and `PostgresAuditTrail` builds `WHERE true`, so once
   `full` became authenticated *any* valid token could page every account's id, amount and reference —

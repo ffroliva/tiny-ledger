@@ -60,8 +60,10 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: corretto, java-version: '25', cache: maven }
       - name: "Stage 7 — integration suite against real Postgres/Redis/Kafka"
-        # Named for what it runs. Stages 8-12 (Python CLI, e2e, load, security scan, publish) are
+        # Named for what it runs. Stages 8, 9, 10 and 12 (Python CLI, e2e, load, publish) are
         # specified in spec §12.1 and do NOT exist yet — the old "Stages 7-12" label claimed them.
+        # Stage 11 (security) is now partial: the `security` job below runs gitleaks; `detect-secrets`,
+        # Trivy and `dependency-check` are not wired.
         run: ./mvnw -q verify -Pit
 
       - name: "Integration test count — a green build that ran nothing is not green"
