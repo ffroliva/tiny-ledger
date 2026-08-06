@@ -301,13 +301,14 @@ class LedgerControllerTest {
     void problemBodiesCarryTheInteractionId() throws Exception {
         given(recordMovement.deposit(any())).willThrow(new IdempotencyConflictException(MOVEMENT));
 
+        String interactionId = "9f8e7d6c-5b4a-4c3d-8e2f-1a2b3c4d5e6f";
         mvc.perform(put("/api/v1/accounts/{a}/deposits/{d}", ACCOUNT, MOVEMENT)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(BODY)
-                        .header("x-fapi-interaction-id", "7c6f2e1a9b4d5c30"))
+                        .header("x-fapi-interaction-id", interactionId))
                 .andExpect(status().isConflict())
-                .andExpect(header().string("x-fapi-interaction-id", "7c6f2e1a9b4d5c30"))
-                .andExpect(jsonPath("$.traceId").value("7c6f2e1a9b4d5c30"));
+                .andExpect(header().string("x-fapi-interaction-id", interactionId))
+                .andExpect(jsonPath("$.traceId").value(interactionId));
     }
 
     @Test // §6.5: no stack traces, no internal identifiers, no messages cross the boundary

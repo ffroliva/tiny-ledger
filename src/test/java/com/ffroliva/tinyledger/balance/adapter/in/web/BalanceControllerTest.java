@@ -260,17 +260,19 @@ class BalanceControllerTest {
      * §6.5/§6.6: the body's {@code traceId} must BE the header, or the correlation is imaginary. A pair of
      * {@code exists()} assertions is independently satisfiable — an implementation minting two different UUIDs,
      * one for the header and one for the MDC, would pass both while the correlation is silently broken.
-     * Supplying {@code abc-123} also proves the echo path through the real chain, which the direct-{@code
-     * doFilter} unit test cannot.
+     * Supplying a distinctive, valid UUID also proves the echo path through the real chain, which the
+     * direct-{@code doFilter} unit test cannot; {@code FapiInteractionIdFilter} now replaces a non-UUID value
+     * rather than echoing it, so this literal must itself conform.
      */
     @Test
     void theProblemBodyTraceIdIsTheInteractionId() throws Exception {
         given(queryBalance.balance(any(), any())).willThrow(new RuntimeException("boom"));
 
-        mvc.perform(get("/api/v1/accounts/{a}/balance", ACCOUNT).header("x-fapi-interaction-id", "abc-123"))
+        String interactionId = "a1b2c3d4-e5f6-4a1b-8c2d-3e4f5a6b7c8d";
+        mvc.perform(get("/api/v1/accounts/{a}/balance", ACCOUNT).header("x-fapi-interaction-id", interactionId))
                 .andExpect(status().isInternalServerError())
-                .andExpect(header().string("x-fapi-interaction-id", "abc-123"))
-                .andExpect(jsonPath("$.traceId").value("abc-123"));
+                .andExpect(header().string("x-fapi-interaction-id", interactionId))
+                .andExpect(jsonPath("$.traceId").value(interactionId));
     }
 
     private static TransactionView transaction() {

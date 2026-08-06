@@ -62,10 +62,11 @@ class SecurityConfigIT extends AbstractIntegrationTest {
      */
     @Test
     void anUnauthenticatedRefusalStillCarriesTheInteractionId() throws Exception {
-        mvc.perform(get("/api/v1/accounts").header("x-fapi-interaction-id", "abc-123"))
+        String interactionId = "c3f1a9e2-7b6d-4f8a-9c1e-2d3f4a5b6c7d";
+        mvc.perform(get("/api/v1/accounts").header("x-fapi-interaction-id", interactionId))
                 .andExpect(status().isUnauthorized())
-                .andExpect(header().string("x-fapi-interaction-id", "abc-123"))
-                .andExpect(jsonPath("$.traceId").value("abc-123"));
+                .andExpect(header().string("x-fapi-interaction-id", interactionId))
+                .andExpect(jsonPath("$.traceId").value(interactionId));
     }
 
     // A boot proof, not just a unit-level check: a broken issuer-uri context starts clean and both 401
@@ -130,16 +131,17 @@ class SecurityConfigIT extends AbstractIntegrationTest {
      */
     @Test
     void theAuditTrailIsRefusedToAnOrdinaryToken() throws Exception {
+        String interactionId = "d4e5f6a7-8b9c-4d1e-af23-456789abcdef";
         mvc.perform(get("/api/v1/audit/entries")
                         .header("Authorization", bearer("alice"))
-                        .header("x-fapi-interaction-id", "abc-123"))
+                        .header("x-fapi-interaction-id", interactionId))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.type").value("/errors/forbidden"))
                 // Task 7: the chain-level 403 is written by the same handler as the 401, so it is correlatable
                 // for free once the filter outranks the chain — asserted here rather than in a new test.
-                .andExpect(header().string("x-fapi-interaction-id", "abc-123"))
-                .andExpect(jsonPath("$.traceId").value("abc-123"));
+                .andExpect(header().string("x-fapi-interaction-id", interactionId))
+                .andExpect(jsonPath("$.traceId").value(interactionId));
     }
 
     @Test // §7: and the raw stream, which returns verbatim payloads. Alice's OWN account, so this asserts a
