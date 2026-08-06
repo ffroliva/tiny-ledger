@@ -1,5 +1,15 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      users:
+        description: "Concurrent users for the Gatling ramp (§9.7 asks for 500)"
+        default: "50"
+      rampSeconds:
+        description: "Ramp duration in seconds"
+        default: "30"
 
 # A fix loop pushes repeatedly. Without this, every superseded commit keeps a four-container stack
 # running to report on a revision that has already been replaced. Cancel them.
@@ -222,6 +232,77 @@ jobs:
       - name: Compose logs on failure
         if: failure()
         run: docker compose -f docker/docker-compose.yml logs --no-color --tail 200
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose -f docker/docker-compose.yml down -v
+
+  # Stage 10 (spec §12.1) — Gatling load simulation and JMH benchmarks.
+  #
+  # workflow_dispatch ONLY, deliberately. A load run is minutes and needs the whole stack;
+  # firing it on every push would triple CI time to produce a number nobody reads that
+  # commit. §9.7's thresholds are assertions, so this job FAILS when a percentile is
+  # missed — see docs/performance-findings.md §2.4, where they currently do fail.
+  load:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    needs: gate
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: 25
+          cache: maven
+
+      - name: Start the full stack
+        run: docker compose -f docker/docker-compose.yml up -d --wait
+
+      # install, not package: benchmarks/ and loadtest/ resolve the app from the local
+      # repository, and the `exec` classifier means the plain jar they compile against is
+      # the main artifact.
+      - name: Build and install the application
+        run: ./mvnw -q -DskipTests install
+
+      - name: Start the app under full,load
+        run: |
+          nohup java -jar target/tiny-ledger-0.1.0-SNAPSHOT-exec.jar \
+            --spring.profiles.active=full,load > app.log 2>&1 &
+          ./scripts/e2e/wait-for.sh http://127.0.0.1:8080/api/v1/accounts 401 120 "tiny-ledger (full,load)"
+
+      - name: JMH benchmarks (§9.7 — event replay, Money arithmetic)
+        working-directory: benchmarks
+        run: |
+          ../mvnw -q clean package
+          java -jar target/benchmarks.jar -rf json -rff jmh-result.json
+
+      # Continues on failure so the HTML report and the app log are always uploaded: a
+      # threshold breach is exactly the run whose artifacts someone needs.
+      - name: Gatling (§9.7 thresholds as assertions)
+        id: gatling
+        continue-on-error: true
+        working-directory: loadtest
+        run: >
+          ../mvnw gatling:test
+          -Dledger.users=${{ inputs.users }}
+          -Dledger.rampSeconds=${{ inputs.rampSeconds }}
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-results
+          path: |
+            loadtest/target/gatling/**
+            benchmarks/jmh-result.json
+            app.log
+
+      - name: Fail if a threshold was missed
+        if: steps.gatling.outcome == 'failure'
+        run: |
+          echo "::error::a §9.7 threshold was missed — see the load-results artifact"
+          exit 1
 
       - name: Stop the stack
         if: always()
