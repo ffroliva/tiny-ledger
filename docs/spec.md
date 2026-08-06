@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.12
+**Version:** 3.13
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -1285,6 +1285,10 @@ auth cannot assert a `403` or an admin, and a mode that loses state on restart c
 | N16 | `trent` requests `GET /api/v1/accounts` | `200`; only accounts he owns — none. Proves D8 |
 | N17 | `mallory` (writer, no admin) attempts a cross-account deposit, and separately a cross-account withdrawal | `403` on both — the two verbs are wired independently (§6.4), so each needs its own refusal. Proves the widening is gated on the role rather than always-on |
 | N18 | An event written after the cutover with no `actor` | Reported as `unknown`, never as the owner |
+| N19 | **Racing duplicate `PUT`s with the same `movementUid`** — 5 concurrent identical deposits | Exactly one `201`, four `200`, **credited once**. §6.3 claims this needs no special path; this is the proof |
+| N20 | Reused `movementUid` against a **different** account | `409` `idempotency-conflict` — the lookup is global (§6.3), not per-stream |
+| N21 | A refused withdrawal is replayed with the same uid **after a top-up** | Still the original `422`. A rejection is durable; topping up does not resurrect it |
+| N22 | Two identical `POST /api/v1/accounts` | Two distinct `accountUid`s. Account opening is **not** client-idempotent (§6.3) — pinned so it is a decision, not an accident |
 
 **N18 cannot be driven through the HTTP API**: no endpoint writes an event without stamping `actor`
 (§4.1 step 4). Its executable form is `AuditKafkaListenerTest`, a repository-level test of the
@@ -1313,6 +1317,8 @@ indistinguishable from a bug, so the lag is asserted rather than hoped away.
 | E7 | **Restart replays incomplete publications.** Kill the app mid-publication, restart | Spring Modulith's incomplete-publication retry completes the delivery; the projection converges without manual intervention |
 | E8 | **Full rebuild from the log.** Drop the projection entirely and replay the stream | Rebuilt state is byte-identical to the state before the drop. This is the strongest guarantee event sourcing offers, and the one that makes the design worth its cost |
 | E9 | **Lag gates readiness.** Hold the listener until projection lag exceeds the threshold | The readiness probe reports *not ready*; the instance stops receiving traffic rather than serving stale balances |
+| E10 | **Redis unavailable.** Stop Redis, keep writing | Rate limiting fails **open**; the application keeps serving. The 250 ms Lettuce command timeout exists for exactly this and has never been exercised at runtime |
+| E11 | **Kafka unavailable.** Stop Kafka, keep writing | Writes still `201`; the projection lags; `?consistency=strong` still returns the correct balance |
 
 **Method:** never `Thread.sleep`. Convergence is asserted with **Awaitility** and a stated timeout;
 the stale window is produced *deliberately* by pausing a listener, so the test observes the lag rather
@@ -1324,6 +1330,11 @@ that stores the balance as a mutable field, and it is the reason for optimistic 
 `(stream_id, version)` rather than a read-then-write. It runs at stage 7 (Testcontainers, §12.1) against real
 Postgres, because an in-memory store can pass it for the wrong reason — which is exactly what the
 port contract test in §9.2b is there to rule out.
+
+**Traceability.** Every case id above must appear in the name, tag or javadoc of at least one test.
+Cucumber scenarios carry `@N19`-style tags; Java tests name the id in the method javadoc; pytest e2e
+scenarios name it in the docstring. A case with no id anywhere is untested until proven otherwise —
+`N2` sat in this table for eleven revisions with no test, and nobody could see it.
 
 ### 9.4 Integration — Spring Boot Test + Testcontainers
 Real Postgres, Kafka, Redis **and Keycloak** in containers: the production `issuer-uri` decoder
@@ -1681,3 +1692,4 @@ Javadoc, because a reader checks the spec:
 | 3.10 | 2026-08-06 | Roles and Keycloak realm plan close-out truth alignment: `KeycloakRealmRolesConverter` maps `realm_access.roles` to bare Spring authorities and `SecurityConfig` enforces `ledger:auditor` on `/api/v1/audit/**` and `/api/v1/accounts/*/events`, `ledger:writer` on `POST /accounts` and both movement `PUT` routes, and `ledger:reader` on `/api/v1/accounts/**` (§6.4, §7); `AbstractIntegrationTest` now starts a real Keycloak container importing `docker/keycloak/realm-tiny-ledger.json`, so every IT exercises the production `issuer-uri` decoder branch instead of a committed test key (§9.4, §12.1 stage 7); three gaps-table rows are deleted rather than softened, under *Open issues* — the Keycloak realm and its test users, `POST /accounts` authorised by authentication alone, and the temporary 403 on both auditor operations; the seed script that pins deterministic `accountUid`s to the realm's fixture users is still not built (§6.4); the `aud`, rate-limiting, `x-fapi-interaction-id` and `/error` gaps are unchanged, still owned by Plan 3 |
 | 3.11 | 2026-08-06 | Plan 3 security-hardening close-out truth alignment: four gaps-table rows deleted as closed rather than softened, under *Open issues* — `x-fapi-interaction-id` validates by RFC 4122 full match and replaces (never strips, never logs) a non-conforming value with a minted UUID, already recorded `Built` at §7.2; `ErrorMvcAutoConfiguration` excluded in both `application.properties` and `application-standalone.properties`, since profile files shadow rather than merge, closing the internal-identifier leak §6.5 forbids; `spring.security.oauth2.resourceserver.jwt.audiences` set in `application-full.properties`, validated by Boot's own auto-configured decoder; `RateLimitFilter` (identity buckets) and `IpBackstopFilter` (per-IP backstop, ahead of authentication) implement §6.1 on Bucket4j, Redis in `full` / Caffeine in `standalone`; three corrections within §6.1 itself — `burst` recorded as configured but with no operative effect on bucket capacity, since §9.3 N9 requires the 101st write to be refused; the `exempt-ips` contract (empty by default, `getRemoteAddr()` only, configuration-only) described; `standalone`'s rate limiting stated as deliberately inert under the loopback bind, per §9.2b's mode-parity rule; §6.4's enforcement-sites table splits the row conflating `RecordMovementService` (writes) and `StrongBalanceService` (`?consistency=strong` reads) into two, so a future admin-role decision can attach to the correct one, with the intro count corrected from four sites to five accordingly |
 | 3.12 | 2026-08-06 | Admin on-behalf-of: `ledger:admin` widens the ownership term at one comparison point — `RecordMovementService`'s in-service check — for change operations only, never for reads, whether the read-model decorator, `StrongBalanceService`'s strong read, or the account collection (D8), and never the role term; every event records the acting principal as `actor` (§2.3/§2.4/§4.1) and the audit entry surfaces it (§7); admin is not an auditor — separation of duties kept; test user `trent`, scenarios P9/N13–N18, error row (§6.5), assumptions 8–9, delegation protocols declared a non-goal (§13); `audit_entries.actor` added by changeset 005. Truth alignment landed in the same revision: §6.4's P9 evidence re-attributed to the two tests that actually carry it after the read refusals were split out, and the P9 and N17 catalogue rows extended to both verbs, because `LedgerController` wires the admin flag into deposit and withdrawal as two independent arguments and each needs its own refusal; §9.3's evidence paragraph extended to N6–N10, with N9 called out as the exception — `RateLimitIT` proves the 429, `Retry-After` and catalogued type against a real bucket, but as `bob` under a lowered limit, not at §6.1's 100/minute; §1 and §12 corrected to stop putting the app inside Compose and to move Keycloak out of the not-built bucket — the realm and resource-server integration are built, what is absent is a Compose service, so a hand-run `full` needs `LEDGER_ISSUER_URI`. **CI stage 6 and the vendored ISO governance skill deleted rather than repaired** — the script resolved `REPO_ROOT` inside its own directory, so all five checks scanned a tree holding none of their 17 artefacts and the gate reported `17 known, 0 new` unconditionally; a green check that verifies nothing is worse than no check, and generating the artefacts to turn it green was refused as out of scope. §10 reduced from two `docs/compliance/` files that never existed to a stated boundary; four false lifecycle claims withdrawn from §8.5 (the index is hand-maintained, versions do not derive from `versions.json`, no document names an owner); §12.1's stage 6 struck in place rather than the table renumbered, because six citations across three files name absolute stage numbers and no gate would catch them drifting; the eleven delivered plans (8,838 lines of agent execution script, five times this document) moved to `docs/_archive/` |
+| 3.13 | 2026-08-06 | Battle-testing pass: N19–N22 and E10–E11 added; traceability rule stated; N2 finally given a test |
