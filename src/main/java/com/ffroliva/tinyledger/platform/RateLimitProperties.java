@@ -1,6 +1,7 @@
 package com.ffroliva.tinyledger.platform;
 
 import java.time.Duration;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -19,10 +20,43 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * <p>Defaults live in {@code application.properties} as the table's own numbers, true in both run
  * modes — only the storage backing these buckets differs by profile (§6.1, {@code RateLimitConfig}).
+ *
+ * <p>{@code exemptIps} is a later, additive change to §6.1: source addresses excused from both
+ * buckets entirely, so an operator can unblock local development or a load-testing rig without a
+ * redeploy. <strong>Empty by default</strong> — declared nowhere in {@code application.properties}
+ * or {@code application-full.properties}, only in {@code application-standalone.properties}
+ * ({@code 127.0.0.1}), so `full`'s production posture stays strict and unexempted by default.
+ * Matched against exactly the same {@code getRemoteAddr()} source the buckets themselves read
+ * (never a header) — an allowlist keyed on a spoofable value would be a total bypass of the whole
+ * control for anyone able to set that header. Exact string match only, no CIDR: nobody has asked
+ * for a range, and Java ships no subnet parser to build one against without adding a dependency
+ * for a feature nobody needs yet — a maintainer who does can extend {@link RateLimitFilter#isExempt}
+ * without touching this record's shape.
+ *
+ * <p><strong>Never default this list to {@code 127.0.0.1} for every profile.</strong> A reverse
+ * proxy fronting this app on the same host makes {@code getRemoteAddr()} loopback for
+ * <em>every</em> caller, proxied or not — a loopback exemption in that deployment would silently
+ * disable rate limiting entirely, which is the exact failure this control exists to prevent. The
+ * {@code standalone}-only entry above is safe only because {@code standalone} is documented as
+ * running unfronted (§1); it must never migrate into the shared base file.
  */
 @ConfigurationProperties(prefix = "ledger.rate-limit")
 public record RateLimitProperties(
-        Limit writePerPrincipal, Limit readPerPrincipal, Limit unauthenticatedPerIp, Limit ipBackstop) {
+        Limit writePerPrincipal,
+        Limit readPerPrincipal,
+        Limit unauthenticatedPerIp,
+        Limit ipBackstop,
+        List<String> exemptIps) {
+
+    // Measured on CI, not assumed: an auxiliary 4-arg constructor here (a "no exemptions" convenience
+    // overload) broke @ConfigurationProperties binding outright — Boot's binder saw two constructors,
+    // could not tell which one is canonical, and fell back to looking for a no-arg default
+    // constructor, which a record never has ("No default constructor found"). A record bound by
+    // @ConfigurationProperties must have exactly one constructor; every call site below passes
+    // exemptIps explicitly instead.
+    public RateLimitProperties {
+        exemptIps = exemptIps == null ? List.of() : List.copyOf(exemptIps);
+    }
 
     public record Limit(int capacity, int burst, Duration period) {}
 }

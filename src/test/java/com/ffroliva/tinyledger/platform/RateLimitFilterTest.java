@@ -9,6 +9,7 @@ import jakarta.servlet.ServletRequest;
 import jakarta.servlet.ServletResponse;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
@@ -48,7 +49,7 @@ class RateLimitFilterTest {
             RateLimitProperties.Limit read,
             RateLimitProperties.Limit unauthenticated,
             RateLimitProperties.Limit backstop) {
-        return new RateLimitProperties(write, read, unauthenticated, backstop);
+        return new RateLimitProperties(write, read, unauthenticated, backstop, List.of());
     }
 
     private static final RateLimitProperties.Limit GENEROUS = limit(1_000, 0);
@@ -166,6 +167,59 @@ class RateLimitFilterTest {
         filter.doFilter(request("GET", "203.0.113.3"), second, chain);
 
         assertThat(chain.count).isEqualTo(1);
+        assertThat(second.getStatus()).isEqualTo(429);
+    }
+
+    @Test // product-owner addition: an exempt IP skips the identity bucket entirely, no matter how tiny it is
+    void anExemptIpIsNeverChargedTheIdentityBucket() throws Exception {
+        RateLimitProperties properties =
+                new RateLimitProperties(limit(1, 0), GENEROUS, GENEROUS, GENEROUS, List.of("203.0.113.9"));
+        RateLimitFilter filter = new RateLimitFilter(new LocalRateLimiterStore(), properties, fullPrincipal(), MAPPER);
+        authenticateAs("alice");
+        CountingChain chain = new CountingChain();
+
+        for (int i = 0; i < 5; i++) { // well past the capacity-1 bucket, which never gets charged
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            filter.doFilter(request("POST", "203.0.113.9"), response, chain);
+            assertThat(response.getStatus()).isNotEqualTo(429);
+        }
+        assertThat(chain.count).isEqualTo(5);
+    }
+
+    @Test // the differential: the same tiny limit still bites a non-exempt IP — without this, the test above proves
+    // nothing
+    void aNonExemptIpWithTheSameLimitIsStillThrottled() throws Exception {
+        RateLimitProperties properties =
+                new RateLimitProperties(limit(1, 0), GENEROUS, GENEROUS, GENEROUS, List.of("203.0.113.9"));
+        RateLimitFilter filter = new RateLimitFilter(new LocalRateLimiterStore(), properties, fullPrincipal(), MAPPER);
+        authenticateAs("alice");
+        CountingChain chain = new CountingChain();
+
+        filter.doFilter(request("POST", "203.0.113.10"), new MockHttpServletResponse(), chain);
+        MockHttpServletResponse second = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "203.0.113.10"), second, chain);
+
+        assertThat(second.getStatus()).isEqualTo(429);
+    }
+
+    @Test // the production default (application.properties/application-full.properties declare nothing) exempts nobody
+    void anEmptyExemptionListExemptsNobody() throws Exception {
+        RateLimitFilter filter = new RateLimitFilter(
+                new LocalRateLimiterStore(),
+                properties(
+                        limit(1, 0),
+                        GENEROUS,
+                        GENEROUS,
+                        GENEROUS), // the 4-arg constructor: exemptIps defaults to List.of()
+                fullPrincipal(),
+                MAPPER);
+        authenticateAs("alice");
+        CountingChain chain = new CountingChain();
+
+        filter.doFilter(request("POST", "203.0.113.11"), new MockHttpServletResponse(), chain);
+        MockHttpServletResponse second = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "203.0.113.11"), second, chain);
+
         assertThat(second.getStatus()).isEqualTo(429);
     }
 

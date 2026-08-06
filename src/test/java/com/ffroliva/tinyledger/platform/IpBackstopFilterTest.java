@@ -8,6 +8,7 @@ import jakarta.servlet.ServletRequest;
 import jakarta.servlet.ServletResponse;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -30,8 +31,12 @@ class IpBackstopFilterTest {
     }
 
     private static RateLimitProperties properties(RateLimitProperties.Limit backstop) {
+        return properties(backstop, List.of());
+    }
+
+    private static RateLimitProperties properties(RateLimitProperties.Limit backstop, List<String> exemptIps) {
         RateLimitProperties.Limit generous = limit(1_000);
-        return new RateLimitProperties(generous, generous, generous, backstop);
+        return new RateLimitProperties(generous, generous, generous, backstop, exemptIps);
     }
 
     private static MockHttpServletRequest request(String ip) {
@@ -89,4 +94,34 @@ class IpBackstopFilterTest {
         assertThat(chain.count).isEqualTo(2);
         assertThat(fromAnotherIp.getStatus()).isNotEqualTo(429);
     }
+
+    @Test // product-owner addition: an exempt IP is never charged, no matter how tiny the bucket is
+    void anExemptIpIsNeverChargedTheBackstop() throws Exception {
+        IpBackstopFilter filter = new IpBackstopFilter(
+                new LocalRateLimiterStore(), properties(limit(1), List.of("198.51.100.5")), MAPPER);
+        CountingChain chain = new CountingChain();
+
+        for (int i = 0; i < 5; i++) { // well past the capacity-1 bucket, which never gets charged
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            filter.doFilter(request("198.51.100.5"), response, chain);
+            assertThat(response.getStatus()).isNotEqualTo(429);
+        }
+        assertThat(chain.count).isEqualTo(5);
+    }
+
+    @Test // the differential: the same tiny limit still bites a non-exempt IP
+    void aNonExemptIpWithTheSameLimitIsStillThrottled() throws Exception {
+        IpBackstopFilter filter = new IpBackstopFilter(
+                new LocalRateLimiterStore(), properties(limit(1), List.of("198.51.100.5")), MAPPER);
+        CountingChain chain = new CountingChain();
+
+        filter.doFilter(request("198.51.100.6"), new MockHttpServletResponse(), chain);
+        MockHttpServletResponse second = new MockHttpServletResponse();
+        filter.doFilter(request("198.51.100.6"), second, chain);
+
+        assertThat(second.getStatus()).isEqualTo(429);
+    }
+
+    // "an empty list exempts nobody" is exhaustingTheBackstopAnswers429WithRetryAfterAndTheCataloguedType
+    // above: properties(limit(1)) uses the 4-arg constructor, whose exemptIps defaults to List.of().
 }
