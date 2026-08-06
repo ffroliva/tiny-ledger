@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  §9.7's Gatling load simulation.
+
+  Like benchmarks/, DELIBERATELY NOT A MODULE of the root pom. Same reason: `./mvnw -q verify`
+  at the root must stay fast and start zero containers (ADR 0003), and a load simulation is
+  minutes against a live system. The root still has no <modules> section.
+
+  Run it against a running `full,load` stack:
+
+      cd .. && docker compose -f docker/docker-compose.yml up -d --wait
+      cd .. && ./mvnw -q -DskipTests package
+      java -jar target/tiny-ledger-0.1.0-SNAPSHOT-exec.jar --spring.profiles.active=full,load &
+      cd loadtest && ../mvnw gatling:test
+
+  The `load` profile is not optional. Against `full`'s production limits the per-IP backstop
+  (300/min, and exempt-ips is empty in `full`) caps the whole application at five requests per
+  second, so the run measures the rate limiter rather than the ledger. See
+  src/main/resources/application-load.properties.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.ffroliva</groupId>
+  <artifactId>tiny-ledger-loadtest</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+  <name>tiny-ledger load simulation (Gatling)</name>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>25</maven.compiler.release>
+    <gatling.version>3.11.5</gatling.version>
+    <gatling-maven-plugin.version>4.9.6</gatling-maven-plugin.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>io.gatling.highcharts</groupId>
+      <artifactId>gatling-charts-highcharts</artifactId>
+      <version>${gatling.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>io.gatling</groupId>
+        <artifactId>gatling-maven-plugin</artifactId>
+        <version>${gatling-maven-plugin.version}</version>
+        <configuration>
+          <!--
+            Named explicitly rather than discovered. Gatling runs every simulation it finds by
+            default, so adding a second one later would silently double the run time and blur
+            which assertions produced a failure.
+          -->
+          <simulationClass>com.ffroliva.tinyledger.loadtest.LedgerSimulation</simulationClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
