@@ -19,6 +19,20 @@ of Kafka consumers and connection pools.
 
 That cost is not theoretical here. Today the suite holds **four** contexts:
 
+> **Superseded 2026-08-06 — the table and the paragraph after it are the pre-decision snapshot, not
+> the tree.** Commit `028293e` ("test: one full-profile context…") — this ADR's own Decision 1 — moved
+> `PostgresEventStoreIT` onto the shared base, and the Context section was left in the present tense.
+> Measured now: **9** IT classes extend `AbstractIntegrationTest`, not 4.
+> `PostgresEventStoreIT.java:10` reads `extends AbstractIntegrationTest implements EventStoreContract`,
+> and `EventStoreContract.java:14` is a `public interface` — so single inheritance was never the
+> obstacle the second row describes. That 27-line file declares no `@SpringBootTest`,
+> `@ActiveProfiles`, `@Import`, `@TestPropertySource` or `@DynamicPropertySource` of its own, so the
+> fork it is the cautionary example of **no longer exists**. Read row 2 as the hazard the decision
+> removed, not as a live warning — the hazard itself is real and is why trap 5 routes here.
+> **The context total is deliberately not restated**: counting contexts means observing what the
+> suite actually builds, which needs a `-Pit` run, and `-Pit` is CI's to run, not this worktree's.
+> Take "four" as unverified rather than as corrected.
+
 | Context | Keyed by |
 |---|---|
 | `AbstractIntegrationTest` | `full` + its own `@DynamicPropertySource` — shared by 4 IT classes |
