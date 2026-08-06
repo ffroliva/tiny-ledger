@@ -16,4 +16,9 @@ form appearing *inside* these files — including inside recorded `git` commands
 written rather than rewritten, because falsifying a record of what an agent was told to run is a worse
 defect than a stale path. Read `docs/superpowers/` as `docs/_archive/` when you meet one.
 
+The same applies to **CI stage 6 and `scripts/ci/check_docs_governance.py`**, which several of these
+plans build, run and cite — one of them carries the script's full source. Both were deleted on
+2026-08-06 because the check scanned the wrong directory tree and could not fail; `spec.md` §8.4 has
+the reasoning. Nothing here has been back-edited to hide that it once existed.
+
 [`../INDEX.md`](../INDEX.md) lists every plan here newest-first, with what it delivered.
