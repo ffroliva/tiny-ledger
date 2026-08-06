@@ -71,6 +71,25 @@ public abstract class AbstractIntegrationTest {
         return "Bearer " + KeycloakTokens.accessToken(issuerUri(), username);
     }
 
+    /**
+     * Task 4 ({@code RateLimitIT}): "limits are configuration" (§6.1), demonstrated by lowering one
+     * here rather than issuing 100+ real requests. Declared on the shared base — not a per-class
+     * {@code @TestPropertySource} — because either fork the one Spring context {@code missCount = 1}
+     * relies on (ADR 0003); this is the same mechanism the Testcontainers properties below already
+     * use, so nothing new is added to the risk this class carries.
+     *
+     * <p>Safe only because of the margin, not because the key is per-principal: the write-per-principal
+     * *limit value* is one number shared by every principal's bucket, so lowering it affects
+     * {@code alice} and {@code carol} too, not just {@code bob}. Grepped against every
+     * {@code post(}/{@code put(} call site under {@code src/test} before picking this number: the
+     * heaviest existing writer is {@code alice} at 4 calls across {@code SecurityConfigIT}
+     * ({@code openAnAccountAs}, once per test method, accumulating in one shared bucket for her
+     * subject), then {@code carol} at 3 in {@code RoleAuthorizationIT}. {@code LOWERED_WRITE_LIMIT}
+     * stays comfortably above both so {@code RateLimitIT} is the only test that ever reaches it —
+     * {@code bob} is simply the one fixture user no other test's write call touches at all.
+     */
+    public static final int LOWERED_WRITE_LIMIT = 10;
+
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
@@ -86,5 +105,9 @@ public abstract class AbstractIntegrationTest {
         registry.add(
                 "spring.security.oauth2.resourceserver.jwt.issuer-uri",
                 () -> "http://" + KEYCLOAK.getHost() + ":" + KEYCLOAK.getMappedPort(8080) + "/realms/tiny-ledger");
+
+        registry.add("ledger.rate-limit.write-per-principal.capacity", () -> String.valueOf(LOWERED_WRITE_LIMIT));
+        registry.add("ledger.rate-limit.write-per-principal.burst", () -> "0");
+        registry.add("ledger.rate-limit.write-per-principal.period", () -> "60s");
     }
 }
