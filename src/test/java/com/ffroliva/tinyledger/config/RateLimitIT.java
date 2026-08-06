@@ -59,9 +59,9 @@ class RateLimitIT extends AbstractIntegrationTest {
     /**
      * Review finding C1. {@code BearerTokenAuthenticationFilter} answers 401 for a malformed token
      * itself, inline, without calling the rest of the chain — so before the fix, none of these
-     * requests ever reached a rate limiter at all, and this loop would run to
-     * {@code RAISED_IP_BACKSTOP_LIMIT + 1} without ever seeing a 429. {@code IpBackstopFilter} sits
-     * ahead of that filter specifically to close this gap.
+     * requests ever reached a rate limiter at all, and this loop would run to the ceiling below
+     * without ever seeing a 429. {@code IpBackstopFilter} sits ahead of that filter specifically to
+     * close this gap.
      *
      * <p>A unique IP (never used by any other {@code *IT} test's default-{@code 127.0.0.1} traffic)
      * isolates this flood from every other test sharing the same context, so it can drive its own
@@ -70,11 +70,19 @@ class RateLimitIT extends AbstractIntegrationTest {
      * unrecognised {@code kid} — that shape can drive a real JWKS refetch per attempt (the review's
      * own warning about the cost of leaving this gap open); a string that fails to parse as a JWT at
      * all is rejected locally, so a few hundred iterations stay cheap.
+     *
+     * <p>Measured on CI, not assumed: {@code RAISED_IP_BACKSTOP_LIMIT + 1} alone once failed here —
+     * {@code refillGreedy} keeps dripping tokens back in while this loop runs, so a flood barely
+     * larger than capacity can land just short of exhausting it. {@code FLOOD_MARGIN} is the extra
+     * headroom; {@link AbstractIntegrationTest#RAISED_IP_BACKSTOP_LIMIT}'s javadoc has the arithmetic
+     * and the period change that makes the margin far bigger than it needs to be.
      */
+    private static final int FLOOD_MARGIN = 200;
+
     @Test
     void aFloodOfGarbageBearerTokensEventuallyTripsTheIpBackstop() throws Exception {
         MvcResult result = null;
-        for (int i = 0; i <= AbstractIntegrationTest.RAISED_IP_BACKSTOP_LIMIT; i++) {
+        for (int i = 0; i <= AbstractIntegrationTest.RAISED_IP_BACKSTOP_LIMIT + FLOOD_MARGIN; i++) {
             result = mockMvc.perform(get("/api/v1/accounts")
                             .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt")
                             .with(request -> {

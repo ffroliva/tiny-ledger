@@ -103,6 +103,14 @@ public abstract class AbstractIntegrationTest {
      * task report, not hidden). {@code CucumberSpringConfig} carries the same override for the
      * separate {@code standalone} context, for the same reason — Awaitility polling in
      * {@code eventual-consistency.feature} is the equivalent risk there.
+     *
+     * <p>Measured on CI, not assumed: the first version of this override used the production period
+     * (60s), and {@code RateLimitIT}'s flood test failed — {@code refillGreedy} drips tokens back in
+     * continuously while the test is running, and at 1000 tokens/60s (~16.7/s) a ~1.8s flood of 1001
+     * requests refills ~30 of them mid-flight, so {@code capacity + 1} requests landed just short of
+     * exhausting the bucket. The period below is minutes, not seconds, purely to make that refill
+     * negligible over a flood test's few seconds of wall-clock time — it does not change the capacity
+     * ceiling ambient traffic is measured against, so the I5 safety margin above is unaffected.
      */
     public static final int RAISED_IP_BACKSTOP_LIMIT = 1000;
 
@@ -128,6 +136,6 @@ public abstract class AbstractIntegrationTest {
 
         registry.add("ledger.rate-limit.ip-backstop.capacity", () -> String.valueOf(RAISED_IP_BACKSTOP_LIMIT));
         registry.add("ledger.rate-limit.ip-backstop.burst", () -> "0");
-        registry.add("ledger.rate-limit.ip-backstop.period", () -> "60s");
+        registry.add("ledger.rate-limit.ip-backstop.period", () -> "10m");
     }
 }
