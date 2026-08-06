@@ -116,15 +116,17 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     }
 
     /**
-     * §7: both auditor operations are {@code ledger:auditor}-only, and roles arrive in the follow-up plan.
-     * {@code accountUid} is optional on the trail, so an ordinary token that omitted it paged every
-     * account's id, amount and reference — which also voids §6.5's "account UUIDs are unguessable"
-     * justification for wrong-owner 403s, since the trail hands the UUIDs out. Until the role exists
-     * {@code full} refuses. This is the only test that reaches
+     * §7: both auditor operations are {@code ledger:auditor}-only. {@code accountUid} is optional on the
+     * trail, so an ordinary token that omitted it paged every account's id, amount and reference — which
+     * also voids §6.5's "account UUIDs are unguessable" justification for wrong-owner 403s, since the
+     * trail hands the UUIDs out. alice holds {@code ledger:writer}/{@code ledger:reader}, not
+     * {@code ledger:auditor}, so the chain-level {@code hasAuthority("ledger:auditor")} check on
+     * {@code /api/v1/audit/**} refuses her (Task 4). This is the only test that reaches
      * {@link com.ffroliva.tinyledger.platform.SecurityProblemHandler#handle}: Task 6's 403 comes from
-     * {@code OwnershipException} through {@code ErrorHandlingAdvice}, so a chain-level {@code denyAll()} is
-     * the first thing to be refused before {@code DispatcherServlet}. The body assertion is the point — the
-     * framework default here is {@code BasicErrorController}'s shape, which echoes the request {@code path}.
+     * {@code OwnershipException} through {@code ErrorHandlingAdvice}, so a chain-level authorisation
+     * refusal is the first thing to run, before {@code DispatcherServlet}. The body assertion is the
+     * point — the framework default here is {@code BasicErrorController}'s shape, which echoes the
+     * request {@code path}.
      */
     @Test
     void theAuditTrailIsRefusedToAnOrdinaryToken() throws Exception {

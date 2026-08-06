@@ -76,6 +76,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // §6.4 row 4 / §7: role alone, no account subject. This REPLACES Task 6b's
                         // denyAll() — the routes stay closed to everyone without ledger:auditor.
+                        // standalone answers these 501 from its own chain — SecurityConfigTest goes red
+                        // if these two matchers are moved there (measured: 403 instead of 501).
                         .requestMatchers("/api/v1/audit/**", "/api/v1/accounts/*/events")
                         .hasAuthority("ledger:auditor")
                         .requestMatchers(HttpMethod.POST, "/api/v1/accounts")
