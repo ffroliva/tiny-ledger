@@ -1211,7 +1211,12 @@ Steps drive the HTTP API, not internal classes — the specification must not de
 The rows below are the contract's requirement catalogue; a row does not imply that a like-named
 `.feature` file exists. The currently committed Gherkin subset is tagged **`@standalone`** and runs
 in-process on every push (§12.1 stage 5); N11 is one exact scenario in that subset. P9 and N13–N17
-have full-profile integration tests extending `AbstractIntegrationTest`. N15 deliberately injects
+have full-profile integration tests extending `AbstractIntegrationTest`. N6, N7, N8 and N10 have them
+too — `RoleAuthorizationIT#aReaderMayNotWithdraw`, `SecurityConfigIT#aValidTokenForTheWrongOwnerIsForbidden`,
+`RoleAuthorizationIT#anAuditorMayNotMoveMoney` and `SecurityConfigIT#anUnauthenticatedRequestIsRefused`
+respectively. **N9 is the exception in that group**: `RateLimitIT` proves the 429, the `Retry-After`
+header and the catalogued type against a real bucket, but as `bob` under a lowered limit, not as
+`alice` at §6.1's 100/minute — the mechanism is evidenced, the exact scenario is not. N15 deliberately injects
 JWT authorities because the filter-chain matcher — specifically the `ledger:admin` and
 `ledger:writer` conjunction — is the unit under test; the shared full context supplies the rest of
 the application, but that test is not evidence for Keycloak decoding. N12 has controller and

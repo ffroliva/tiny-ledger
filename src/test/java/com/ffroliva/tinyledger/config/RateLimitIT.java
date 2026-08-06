@@ -34,9 +34,11 @@ class RateLimitIT extends AbstractIntegrationTest {
     void exceedingTheWritePerPrincipalLimitAnswers429WithRetryAfterAndTheCataloguedType() throws Exception {
         // Review finding I4: minted once. bearer("bob") is a fresh Keycloak password-grant round
         // trip per call — inside the loop, that repeated network work plus real Postgres/Kafka writes
-        // can consume the refill margin on a loaded runner. The shared override therefore uses a
-        // 30-second-per-token period, while this loop derives its request count from the configured
-        // capacity so changing the proof limit cannot silently leave a hardcoded request sequence.
+        // can consume the refill margin on a loaded runner. The shared override therefore stretches the
+        // period to 10m, which over LOWERED_WRITE_LIMIT tokens is 600s / 20 = 30 seconds per refilled
+        // token — the derivation matters because it moves with the capacity below. This loop derives its
+        // request count from that same capacity, so changing the proof limit cannot silently leave a
+        // hardcoded request sequence behind (it does silently change the per-token figure — re-derive it).
         String token = bearer("bob");
         for (int i = 0; i < AbstractIntegrationTest.LOWERED_WRITE_LIMIT; i++) {
             mockMvc.perform(post("/api/v1/accounts")
