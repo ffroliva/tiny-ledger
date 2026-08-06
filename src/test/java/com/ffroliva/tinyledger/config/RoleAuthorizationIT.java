@@ -53,6 +53,13 @@ class RoleAuthorizationIT extends AbstractIntegrationTest {
                 .isEqualTo(KeycloakTokens.SUBJECTS.get("dave"));
     }
 
+    @Test // same reason as theMintedTokenSubjectMatchesThePinnedFixture, for the new fixture user
+    void theMintedTokenSubjectMatchesThePinnedFixtureForTrent() throws Exception {
+        String token = KeycloakTokens.accessToken(issuerUri(), "trent");
+        assertThat(SignedJWT.parse(token).getJWTClaimsSet().getSubject())
+                .isEqualTo(KeycloakTokens.SUBJECTS.get("trent"));
+    }
+
     @Test
     void aReaderIsRefusedTheTrail() throws Exception {
         mockMvc.perform(get("/api/v1/audit/entries").header(HttpHeaders.AUTHORIZATION, bearer("carol")))
