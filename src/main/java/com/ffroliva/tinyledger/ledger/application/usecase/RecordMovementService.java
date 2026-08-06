@@ -63,7 +63,7 @@ public class RecordMovementService implements RecordMovementUseCase {
         Account account = Account.rehydrate(history); // ②
         // §6.4 D1: the role check already ran in the filter chain (SecurityConfig, ledger:writer).
         // This is the ownership term alone — ledger:admin widens it, and only it. The role term is
-        // untouched: an admin without ledger:writer never reaches this line at all (N15).
+        // untouched: an admin without ledger:writer never reaches this line at all (N15, Task 5).
         if (!account.owner().equals(caller) && !callerIsAdmin) throw new OwnershipException(caller, accountId); // ③
         Optional<LedgerEvent> existing = store.findByMovementUid(movementUid); // ④ (after authz)
         if (existing.isPresent()) return replayOf(existing.get(), accountId, type, amount, reference);

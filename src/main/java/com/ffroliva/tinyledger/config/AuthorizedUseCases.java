@@ -26,9 +26,9 @@ import java.util.Optional;
  * authorise-before-idempotency is an ordering <em>inside</em> that service, which it already satisfies.
  *
  * <p><strong>The spec records this split.</strong> §6.4 states the principle — every authorisation
- * decision is made by the component that holds the state the decision needs — and enumerates the four
- * enforcement sites, of which this decorator is one. The list is closed there against a fifth. No gate
- * enforces that closure; it is a review obligation, and §6.4 says so plainly.
+ * decision is made by the component that holds the state the decision needs — and enumerates the five
+ * comparison points across four sites, of which this decorator is one. The list is closed there against
+ * a sixth. No gate enforces that closure; it is a review obligation, and §6.4 says so plainly.
  *
  * <p>It throws {@link OwnershipException}, never Spring's {@code AccessDeniedException}. Measured
  * 2026-08-05: a Spring denial thrown from inside a controller invocation is claimed by
