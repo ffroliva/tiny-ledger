@@ -14,7 +14,7 @@ Quadrants are Diátaxis, per spec §8.1.
 |---|---|---|
 | **`../AGENTS.md`** | **Always, first.** The gates, the enforced rules, the traps already paid for | — |
 | `../README.md` | Running it for the first time | Tutorial |
-| `spec.md` (v3.11) | Any question about *contract* — API shape, errors (§6.5), security model (§6.4), idempotency (§6.3), the two run modes (§1), module boundaries (§3/§4) | Explanation |
+| `spec.md` (v3.12) | Any question about *contract* — API shape, errors (§6.5), security model (§6.4), idempotency (§6.3), the two run modes (§1), module boundaries (§3/§4) | Explanation |
 | `architecture.md` | You need the shape of the system before the detail | Explanation |
 | `api/openapi.yaml` | Changing a request/response, a status code, or a validation constraint. **The generated server interfaces come from here** — edit the contract, not the generated code | Reference |
 | `adr/0001-kafka-delivery-path.md` | Touching event publication, the outbox, Kafka, or the transaction boundary around publishing | Explanation |
@@ -46,7 +46,7 @@ is being built next is §14 of `spec.md`, and what is known-open is its *Open is
 
 | Plan | State |
 |---|---|
-| `_archive/plans/2026-08-07-admin-on-behalf-of.md` | **Applied through task 5** — `ledger:admin` exists in `src/main`: `CallerPrincipal:55` reads the authority, `RecordMovementService:65` is the one comparison it widens, and the acting principal reaches the audit trail on the event. Task 6 (the spec version bump and its revision-history row) is outstanding — and that bump must also carry a row for the 2026-08-06 documentation pass, which rewrote §5, §8–§8.6, §10, §12.1, §14, the glossary and *Traceability* without one |
+| `_archive/plans/2026-08-07-admin-on-behalf-of.md` | **Applied through task 5** — `ledger:admin` exists in `src/main`: `CallerPrincipal:55` reads the authority, `RecordMovementService:65` is the one comparison it widens, and the acting principal reaches the audit trail on the event. **Fully applied** — task 6 landed spec v3.12, whose revision-history row carries both this plan and the 2026-08-06 documentation pass (§5, §8–§8.6, §10, §12.1, §14, the glossary and *Traceability*) |
 | `_archive/plans/2026-08-06-security-hardening.md` | **Delivered** — closed the four security gaps spec v3.10 recorded open (rate limiter §6.1, `aud` validation, `x-fapi-interaction-id` bound/validated, `/error` path leak excluded) plus CI stage 11 (`gitleaks`); spec v3.11 close-out |
 | `_archive/plans/2026-08-06-roles-and-keycloak-realm.md` | **Delivered** — `ledger:reader`/`writer`/`auditor` enforced on the `full` filter chain, a real Keycloak container and realm behind the integration suite; spec v3.10 close-out |
 | `_archive/plans/2026-08-05-spec-v3.9-and-proposal-repair.md` | Delivered — spec v3.9 truth alignment folded into `docs/spec.md`; the admin on-behalf-of proposal repaired, not applied |
