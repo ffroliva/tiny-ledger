@@ -128,7 +128,8 @@ question, so you read the one authority you need rather than all of them. The es
 | What is the contract? | `docs/spec.md` — its own header carries the current version |
 | Why is delivery shaped this way? | `docs/adr/0001-kafka-delivery-path.md` |
 | Why one test context, and how does CI split? | `docs/adr/0003-test-topology-and-ci-parallelisation.md` |
-| What is being built next? | `docs/superpowers/plans/` (newest first, listed in the index) |
+| What is being built next? | `docs/spec.md` §14 (order) and its *Open issues* section (what is known-open) |
+| What was an agent actually told to do? | `docs/_archive/plans/` — delivered execution scripts, listed in the index. **Not contract**; `spec.md` wins on any disagreement |
 | How was this built, and where did agents go wrong? | `docs/agentic-workflow.md` |
 | Session state, if present | `HANDOFF.md` (root, gitignored, session-local) |
 

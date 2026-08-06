@@ -112,7 +112,7 @@ Authentication and role authorisation are built: `full` requires a JWT issued by
 (spec §6.4), and the filter chain enforces `ledger:reader` / `ledger:writer` / `ledger:auditor` per
 route. **Not yet built:** observability and the FAPI/DPoP work. The auditor endpoints
 `GET /api/v1/accounts/{id}/events` and `GET /api/v1/audit/entries` are `full`-only; in `standalone` both
-answer `501` with an RFC 7807 problem detail — see [`docs/superpowers/plans/`](docs/superpowers/plans/).
+answer `501` with an RFC 7807 problem detail — see [`docs/spec.md`](docs/spec.md) §6.5 and §7.
 
 ---
 

@@ -20,8 +20,7 @@ Quadrants are Diátaxis, per spec §8.5.
 | `adr/0001-kafka-delivery-path.md` | Touching event publication, the outbox, Kafka, or the transaction boundary around publishing | Explanation |
 | `adr/0003-test-topology-and-ci-parallelisation.md` | Adding a `@SpringBootTest`, changing CI, or wondering why there is one integration context | Explanation |
 | `agentic-workflow.md` | Understanding how this was built — including §5, where the agents were wrong, and §7, the per-phase gate record | Explanation |
-| `superpowers/plans/` | What is being built now, and the decisions behind it. Newest first; each plan states its own scope and what it deliberately defers | Explanation |
-| `_archive/` | Superseded material. **Do not treat as current** | — |
+| `_archive/plans/`, `_archive/specs/` | Tracing *why* a decision was taken, or auditing what an agent was actually instructed to do. **Working artifacts, not documentation** — see below | — |
 
 There is no `0002` in `adr/`. It was never written — the Postgres-event-store decision that
 `spec.md:337` and `:423` call "ADR-002" lives in the spec itself, and `0003` took the next free
@@ -33,21 +32,32 @@ The Diátaxis quadrants above are the ones that have documents. `docs/` has no `
 `tutorial/` tree: the README is the tutorial and the operational how-tos are not written. Empty
 directories were removed rather than left as a promise (spec §8.1).
 
-## Plans, newest first
+## Archived plans, newest first
+
+**These are agent execution scripts, not documentation.** They read "Step 1: write the failing test",
+carry commit heredocs, and run to 8,838 lines against this specification's 1,583 — because they were
+written to be executed by a subagent, not read by a person. They are archived rather than deleted so
+the record of *why* each change was made survives, and so a reviewer can check the account in
+`agentic-workflow.md` against the instructions that actually produced the code. **Nothing here is
+current contract.** Where a plan and `spec.md` disagree, `spec.md` wins.
+
+Everything under `_archive/` is delivered or superseded. There is no "in flight" plan directory; what
+is being built next is §14 of `spec.md`, and what is known-open is its *Open issues* section.
 
 | Plan | State |
 |---|---|
-| `superpowers/plans/2026-08-07-admin-on-behalf-of.md` | **Applied through task 5** — `ledger:admin` exists in `src/main`: `CallerPrincipal:55` reads the authority, `RecordMovementService:65` is the one comparison it widens, and the acting principal reaches the audit trail on the event. Task 6 (the spec version bump and its revision-history row) is outstanding |
-| `superpowers/plans/2026-08-06-security-hardening.md` | **Delivered** — closed the four security gaps spec v3.10 recorded open (rate limiter §6.1, `aud` validation, `x-fapi-interaction-id` bound/validated, `/error` path leak excluded) plus CI stage 11 (`gitleaks`); spec v3.11 close-out |
-| `superpowers/plans/2026-08-06-roles-and-keycloak-realm.md` | **Delivered** — `ledger:reader`/`writer`/`auditor` enforced on the `full` filter chain, a real Keycloak container and realm behind the integration suite; spec v3.10 close-out |
-| `superpowers/plans/2026-08-05-spec-v3.9-and-proposal-repair.md` | Delivered — spec v3.9 truth alignment folded into `docs/spec.md`; the admin on-behalf-of proposal repaired, not applied |
-| `superpowers/plans/2026-08-05-plan-3-security-and-authorization.md` | **Delivered (Plan 3)** — council-reviewed three times; the third round's 13 P0s are folded into the task text, so the plan reads as executed rather than as first drafted |
-| `superpowers/plans/2026-08-05-plan-3-research.md` | Research input to the above |
-| `superpowers/plans/2026-08-04-error-handling-catalogue-proposal.md` | Approved, folded into Plan 3 |
-| `superpowers/plans/2026-08-04-spec-admin-on-behalf-of-proposal.md` | Approved; its decisions (D1–D8) were executed by `superpowers/plans/2026-08-07-admin-on-behalf-of.md`. Its "targets spec v3.9" is stale — v3.9 was spent on the truth-alignment pass above; the proposal's own target version is `TBD`, assigned by the applying plan |
-| `superpowers/plans/2026-08-04-open-banking-standards-review.md` | Four items approved. **Contains two known errors** corrected by the Plan 3 research: the DPoP DSL is `@since 7.1` and opt-in, not "6.5+ auto-validated", and Keycloak is 26.7 |
-| `superpowers/plans/2026-08-04-full-persistence.md` | Delivered (Plan 2) |
-| `superpowers/plans/2026-08-03-standalone-core.md` | Delivered (Plan 1) |
+| `_archive/plans/2026-08-07-admin-on-behalf-of.md` | **Applied through task 5** — `ledger:admin` exists in `src/main`: `CallerPrincipal:55` reads the authority, `RecordMovementService:65` is the one comparison it widens, and the acting principal reaches the audit trail on the event. Task 6 (the spec version bump and its revision-history row) is outstanding |
+| `_archive/plans/2026-08-06-security-hardening.md` | **Delivered** — closed the four security gaps spec v3.10 recorded open (rate limiter §6.1, `aud` validation, `x-fapi-interaction-id` bound/validated, `/error` path leak excluded) plus CI stage 11 (`gitleaks`); spec v3.11 close-out |
+| `_archive/plans/2026-08-06-roles-and-keycloak-realm.md` | **Delivered** — `ledger:reader`/`writer`/`auditor` enforced on the `full` filter chain, a real Keycloak container and realm behind the integration suite; spec v3.10 close-out |
+| `_archive/plans/2026-08-05-spec-v3.9-and-proposal-repair.md` | Delivered — spec v3.9 truth alignment folded into `docs/spec.md`; the admin on-behalf-of proposal repaired, not applied |
+| `_archive/plans/2026-08-05-plan-3-security-and-authorization.md` | **Delivered (Plan 3)** — council-reviewed three times; the third round's 13 P0s are folded into the task text, so the plan reads as executed rather than as first drafted |
+| `_archive/plans/2026-08-05-plan-3-research.md` | Research input to the above |
+| `_archive/plans/2026-08-04-error-handling-catalogue-proposal.md` | Approved, folded into Plan 3 |
+| `_archive/plans/2026-08-04-spec-admin-on-behalf-of-proposal.md` | Approved; its decisions (D1–D8) were executed by `_archive/plans/2026-08-07-admin-on-behalf-of.md`. Its "targets spec v3.9" is stale — v3.9 was spent on the truth-alignment pass above; the proposal's own target version is `TBD`, assigned by the applying plan |
+| `_archive/plans/2026-08-04-open-banking-standards-review.md` | Four items approved. **Contains two known errors** corrected by the Plan 3 research: the DPoP DSL is `@since 7.1` and opt-in, not "6.5+ auto-validated", and Keycloak is 26.7 |
+| `_archive/plans/2026-08-04-full-persistence.md` | Delivered (Plan 2) |
+| `_archive/plans/2026-08-03-standalone-core.md` | Delivered (Plan 1) |
+| `_archive/specs/2026-08-05-spec-v3.9-and-proposal-repair-design.md` | The design doc behind the v3.9 plan two rows above |
 
 ## Keeping this honest
 
