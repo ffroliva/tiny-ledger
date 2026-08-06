@@ -28,7 +28,8 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 class RoleAuthorizationIT extends AbstractIntegrationTest {
 
-    private static final String ANY_UID = "11111111-1111-4111-8111-111111111111";
+    // ANY_UID is inherited from AbstractIntegrationTest — SecurityConfigIT#theRawEventStreamIsRefusedToAnAdmin
+    // needs the same literal, and two copies of one magic UUID is one too many.
     private static final String MOVEMENT_BODY = """
             {"amount":{"currency":"GBP","minorUnits":1000}}""";
 
@@ -136,6 +137,14 @@ class RoleAuthorizationIT extends AbstractIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"ACC-N16\",\"currency\":\"GBP\"}"))
                 .andExpect(status().isCreated());
+
+        // The positive control beside the negative. `$.accounts` is empty here for exactly one interesting
+        // reason — trent owns nothing — and this is the suite's only account-list body assertion through the
+        // real chain, so a regression returning an empty list to *everyone* would leave the assertion below
+        // green while it asserted nothing about admin at all. alice owns the account just opened.
+        mockMvc.perform(get("/api/v1/accounts").header(HttpHeaders.AUTHORIZATION, bearer("alice")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accounts").isNotEmpty());
 
         mockMvc.perform(get("/api/v1/accounts").header(HttpHeaders.AUTHORIZATION, bearer("trent")))
                 .andExpect(status().isOk())
