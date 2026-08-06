@@ -74,12 +74,8 @@ public class SecurityConfig {
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // DELIBERATE VIOLATION (Task 4 Step 3): reader rule moved ahead of the auditor
-                        // rule on purpose, to prove over CI that RoleAuthorizationIT#aReaderIsRefusedThe
-                        // RawEventStream fails with 200 when the order is wrong. Must be reverted before
-                        // this branch is considered done.
-                        .requestMatchers(HttpMethod.GET, "/api/v1/accounts/**")
-                        .hasAuthority("ledger:reader")
+                        // §6.4 row 4 / §7: role alone, no account subject. This REPLACES Task 6b's
+                        // denyAll() — the routes stay closed to everyone without ledger:auditor.
                         .requestMatchers("/api/v1/audit/**", "/api/v1/accounts/*/events")
                         .hasAuthority("ledger:auditor")
                         .requestMatchers(HttpMethod.POST, "/api/v1/accounts")
@@ -87,6 +83,8 @@ public class SecurityConfig {
                         .requestMatchers(
                                 HttpMethod.PUT, "/api/v1/accounts/*/deposits/*", "/api/v1/accounts/*/withdrawals/*")
                         .hasAuthority("ledger:writer")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/accounts/**")
+                        .hasAuthority("ledger:reader")
                         .anyRequest()
                         .authenticated())
                 .oauth2ResourceServer(
