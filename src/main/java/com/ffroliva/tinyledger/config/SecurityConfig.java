@@ -1,9 +1,11 @@
 package com.ffroliva.tinyledger.config;
 
+import com.ffroliva.tinyledger.platform.KeycloakRealmRolesConverter;
 import com.ffroliva.tinyledger.platform.SecurityProblemHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -71,20 +73,25 @@ public class SecurityConfig {
         return http.csrf(csrf -> csrf.disable())
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth.requestMatchers("/api/v1/audit/**", "/api/v1/accounts/*/events")
-                        // TEMPORARY (§7): both auditor operations are `ledger:auditor`-only and the role does
-                        // not exist yet. `accountUid` is optional on the trail, so any authenticated caller
-                        // could page every account's id, amount and reference — which also voids §6.5's
-                        // "account UUIDs are unguessable" premise, since the trail hands them out. Ownership
-                        // decoration cannot help: the trail is deliberately not owner-scoped. So `full`
-                        // refuses until the role check lands. `standalone` answers these 501 from its own
-                        // chain — SecurityConfigTest goes red if these two matchers are moved there
-                        // (measured: 403 instead of 501). Remove this with the ledger:auditor check, not
-                        // before.
-                        .denyAll()
+                .authorizeHttpRequests(auth -> auth
+                        // DELIBERATE VIOLATION (Task 4 Step 3): reader rule moved ahead of the auditor
+                        // rule on purpose, to prove over CI that RoleAuthorizationIT#aReaderIsRefusedThe
+                        // RawEventStream fails with 200 when the order is wrong. Must be reverted before
+                        // this branch is considered done.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/accounts/**")
+                        .hasAuthority("ledger:reader")
+                        .requestMatchers("/api/v1/audit/**", "/api/v1/accounts/*/events")
+                        .hasAuthority("ledger:auditor")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/accounts")
+                        .hasAuthority("ledger:writer")
+                        .requestMatchers(
+                                HttpMethod.PUT, "/api/v1/accounts/*/deposits/*", "/api/v1/accounts/*/withdrawals/*")
+                        .hasAuthority("ledger:writer")
                         .anyRequest()
                         .authenticated())
-                .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> {}).authenticationEntryPoint(problems))
+                .oauth2ResourceServer(
+                        oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(new KeycloakRealmRolesConverter()))
+                                .authenticationEntryPoint(problems))
                 .exceptionHandling(e -> e.authenticationEntryPoint(problems).accessDeniedHandler(problems))
                 .build();
     }
