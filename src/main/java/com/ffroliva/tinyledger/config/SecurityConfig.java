@@ -82,8 +82,14 @@ public class SecurityConfig {
                         .hasAuthority("ledger:auditor")
                         .requestMatchers(HttpMethod.POST, "/api/v1/accounts")
                         .hasAuthority("ledger:writer")
-                        .requestMatchers(
-                                HttpMethod.PUT, "/api/v1/accounts/*/deposits/*", "/api/v1/accounts/*/withdrawals/*")
+                        // Method-less, not PUT-scoped: a deposit/withdrawal path is a write path regardless
+                        // of verb. Scoping it to PUT left every other verb on these paths (no handler today,
+                        // so 405 — but the framework, not this rule, would decide that) falling through to
+                        // the method-less reader matcher below, making ledger:reader — the weakest role —
+                        // the default authority on a money path. POST /api/v1/accounts stays method-scoped
+                        // deliberately: broadening it the same way would also catch GET /api/v1/accounts and
+                        // require ledger:writer there, blocking readers from listing their own accounts.
+                        .requestMatchers("/api/v1/accounts/*/deposits/*", "/api/v1/accounts/*/withdrawals/*")
                         .hasAuthority("ledger:writer")
                         // Method-less, not GET-scoped: hasAuthority matches on request.getMethod(), and
                         // Spring MVC serves HEAD from the same @GetMapping handler by default — a
