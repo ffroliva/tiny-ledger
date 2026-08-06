@@ -21,4 +21,12 @@ class FailClosedGuardTest {
     void bootsCleanStandalone() {
         runner.run(context -> assertThat(context).hasNotFailed());
     }
+
+    @Test
+    void refusesAThirdProfileThatIsNeitherStandaloneNorFull() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(FailClosedGuard.class)
+                .withPropertyValues("spring.profiles.active=prod")
+                .run(context -> assertThat(context).hasFailed());
+    }
 }
