@@ -64,7 +64,7 @@ Read the primary sources directly; never work from a paraphrase.
 For this project: the assignment and prep PDFs were pulled from Gmail, the prior V2 specification
 from Google Drive, and the surrounding process state (dates, stages, who said what) reconstructed
 from the mailbox by the `pipeline` skill. Both PDFs are kept on disk under `docs/source/` and
-**deliberately not committed** — `.gitignore:9-12` excludes that directory, because the brief is the
+**deliberately not committed** — `.gitignore:10-12` excludes that directory, because the brief is the
 assessor's material to publish, not this repository's. The derived contract is `docs/spec.md`, and §1
 of it is where a reader checks what was actually asked for.
 
