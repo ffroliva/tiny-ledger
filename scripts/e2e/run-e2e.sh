@@ -91,8 +91,14 @@ APP_PID=$!
 # 401 is the ready signal — see scripts/e2e/wait-for.sh for why a status and not a port.
 scripts/e2e/wait-for.sh "$BASE_URL/api/v1/accounts" 401 "$READY_TIMEOUT" "tiny-ledger (full)"
 
-cd ledger-cli
+# A SUBSHELL, not a bare `cd`. The EXIT trap above cats "$APP_LOG", which is relative to the
+# repository root — a bare `cd ledger-cli` here leaks into the trap, so it looks for
+# ledger-cli/app.log and prints "(no application log was produced)" while the real 21 KB log sits
+# unread at the root. Measured on the first run this suite ever had: six scenarios failed 401 and
+# the operator was handed that message instead of the cause. The comment at the top of this file
+# says dumping the log is the point of the trap; this is what makes it true.
+#
 # -m e2e overrides pyproject's addopts, which excludes the marker by default. If this
 # ever reports "deselected" instead of running five tests, the override did not take
 # and the job is green having tested nothing.
-uv run pytest -m e2e -v
+(cd ledger-cli && uv run pytest -m e2e -v)

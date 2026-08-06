@@ -36,3 +36,7 @@ __pycache__/
 benchmarks/jmh-result.json
 # maven-shade-plugin writes this beside benchmarks/pom.xml on every package
 benchmarks/dependency-reduced-pom.xml
+
+# Written by scripts/e2e/run-e2e.sh on every run, at the repository root (its EXIT trap
+# resolves APP_LOG from here). Never a build artefact worth keeping.
+app.log
