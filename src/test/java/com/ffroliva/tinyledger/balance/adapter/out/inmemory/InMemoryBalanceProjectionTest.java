@@ -67,7 +67,7 @@ class InMemoryBalanceProjectionTest {
         projection.apply(new AccountOpened(account, 1, T0, "alice", "ACC-001", GBP));
         Instant storedAt = T0.plusSeconds(60).plusNanos(200_000); // …000200
         projection.apply(new MoneyDeposited(
-                account, 2, storedAt, UUID.randomUUID(), Money.of("GBP", 100), "tx", Money.of("GBP", 100)));
+                account, 2, storedAt, UUID.randomUUID(), Money.of("GBP", 100), "tx", Money.of("GBP", 100), null));
 
         Instant laterInTheSameMilli = T0.plusSeconds(60).plusNanos(700_000); // …000700
         HistoryPage page = projection.history(account, new HistoryQuery(null, 10, laterInTheSameMilli, null));
@@ -87,7 +87,7 @@ class InMemoryBalanceProjectionTest {
         projection.apply(new AccountOpened(account, 1, T0, "alice", "ACC-001", GBP));
         Instant storedAt = T0.plusSeconds(60).plusNanos(700_000); // …000700
         projection.apply(new MoneyDeposited(
-                account, 2, storedAt, UUID.randomUUID(), Money.of("GBP", 100), "tx", Money.of("GBP", 100)));
+                account, 2, storedAt, UUID.randomUUID(), Money.of("GBP", 100), "tx", Money.of("GBP", 100), null));
 
         Instant earlierInTheSameMilli = T0.plusSeconds(60).plusNanos(200_000); // …000200
         HistoryPage page = projection.history(account, new HistoryQuery(null, 10, null, earlierInTheSameMilli));
@@ -101,7 +101,14 @@ class InMemoryBalanceProjectionTest {
         // One millisecond, four movements: the uid is the only tie-break left.
         for (UUID uid : List.of(LSB_LOW, MSB_HIGH, LSB_HIGH, MSB_LOW)) {
             projection.apply(new MoneyDeposited(
-                    account, version++, T0.plusSeconds(60), uid, Money.of("GBP", 100), "tx", Money.of("GBP", 100)));
+                    account,
+                    version++,
+                    T0.plusSeconds(60),
+                    uid,
+                    Money.of("GBP", 100),
+                    "tx",
+                    Money.of("GBP", 100),
+                    null));
         }
     }
 
