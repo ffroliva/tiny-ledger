@@ -1862,6 +1862,21 @@ Replace with:
 **Status:** Contract for implementation
 ```
 
+**Then bump the SECOND occurrence — this step is not done until both are.** `docs/spec.md` carries
+its version in two places, and the header edit above reaches only one. The *Open issues* section
+opens with:
+
+```
+**Known divergences between this document and the code at v3.11.**
+```
+
+That must read **v3.12** in this same commit. It survived the pass that corrected this task's own
+stale version numbers — reasonably, since that pass scoped itself to "version numbers" and this does
+not look like a version field. Which is exactly why it is written here rather than remembered.
+
+Before committing: `grep -n 'at v3\.' docs/spec.md` and confirm nothing else carries a stale version.
+Left alone, v3.12 ships with its divergences table announcing v3.11.
+
 ### Step 2: Add the revision-history row
 
 Determine today's UTC date: `date -u +%F`. Add, after the `3.11` row:
