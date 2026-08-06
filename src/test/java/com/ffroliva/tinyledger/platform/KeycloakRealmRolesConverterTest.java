@@ -43,4 +43,10 @@ class KeycloakRealmRolesConverterTest {
         Jwt jwt = jwtWith(Map.of("realm_access", "not-a-map-at-all"));
         assertThat(converter.convert(jwt).getAuthorities()).isEmpty();
     }
+
+    @Test
+    void aRolesClaimThatIsNotACollectionYieldsNoAuthorities() {
+        Jwt jwt = jwtWith(Map.of("realm_access", Map.of("roles", "ledger:reader")));
+        assertThat(converter.convert(jwt).getAuthorities()).isEmpty();
+    }
 }
