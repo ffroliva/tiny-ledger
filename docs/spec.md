@@ -1061,7 +1061,7 @@ a current gate.
 |---|---|---|
 | C4 component diagrams, module canvas | The module graph | Spring Modulith `Documenter` |
 | API reference + Swagger UI (planned) | `openapi.yaml` | `springdoc` is not a dependency or current gate; OpenAPI-generated interfaces are the enforcement that exists (§5) |
-| CLI reference (planned) | `openapi.yaml` | Pydantic generation belongs to the unbuilt CLI toolchain (§11/§12.1 stage 8) |
+| CLI reference (planned) | `openapi.yaml` | Pydantic model generation is not wired; the CLI toolchain it belongs to is built (§11/§12.1 stage 8) |
 | Traceability matrix rows (planned) | Catalogue labels in features and Java tests | No generator exists yet, and nothing harvests requirement tags |
 | Coverage tables | JaCoCo | report merge |
 | Dependency inventory / SBOM | The build | CycloneDX |
@@ -1400,8 +1400,9 @@ enforcement sites (§6.4), the error catalogue (§6.5), the architecture rules t
 
 `ledger-cli` — the e2e driver and a genuine operator tool.
 
-**This section defines the planned CLI contract.** No `ledger-cli/` tree or Python CLI toolchain is
-built or running in CI yet (§12.1 stage 8).
+**This section defines the CLI contract, and it is built.** The `ledger-cli/` tree exists and CI
+gates it (§12.1 stages 8–9): `click` entry point, `pyright` strict, `ruff`, and a `pytest` matrix,
+alongside the e2e suite it drives against a real `full`-profile application.
 
 **House style is settled here rather than per-file, so the choices below are conventions, not
 preferences.** Re-deciding them file-by-file would produce drift for no gain. Conventions:
@@ -1474,16 +1475,16 @@ is not part of today's failure ordering.
 
 | # | Stage | Gate | Runs on |
 |---|---|---|---|
-| 1 | Lint & format | `spotless:check`; `ruff` belongs to the unbuilt Python CLI stage | every push (Spotless only) |
+| 1 | Lint & format | `spotless:check`; `ruff` runs in the Python CLI's own stage 8 | every push |
 | 2 | Compile + unit | JUnit, JaCoCo ≥90% line / 85% branch on `domain` | every push |
 | 3 | **Architecture** | `ApplicationModules.verify()` + ArchUnit (§9.2) | every push |
 | 4 | **Contract** | OpenAPI-generated interfaces compile; port contract suites (§9.2b) | every push |
 | 5 | BDD in-process | Cucumber, the committed `@standalone` subset (§9.3); full auth/admin acceptance currently runs as JUnit ITs at stage 7, with the stage-9 binding still planned | every push |
 | 6 | ~~Documentation~~ — **removed 2026-08-06** | Was `scripts/ci/check_docs_governance.py`, wrapping a vendored ISO governance test. All five of its checks scanned the vendored skill's own directory rather than this repository, so it passed unconditionally (§8.4). Deleted, not repaired | — |
 | 7 | Integration | Testcontainers: Postgres, Kafka, Redis, Keycloak | every push |
-| 8 | Python CLI (planned) | `pytest` matrix on **3.11, 3.12, 3.13**; `pyright` strict; `ruff` | not yet wired; no `ledger-cli/` tree |
-| 9 | E2E (planned) | `docker compose up`, then pytest-bdd over the full catalogue + `ledger-cli scenario run` (§9.6) — **including the README's extracted `curl` examples** (§8.3) | not yet wired |
-| 10 | Load (planned) | Gatling; p99 write <150 ms, p99 cached read <20 ms, errors <0.1% | not yet wired |
+| 8 | **Python CLI** | `ruff`, `pyright` strict, and the `ledger-cli` unit tests. Deliberately needs no Docker — a lint failure should not cost a four-container stack to discover | every push |
+| 9 | **E2E** | `docker compose up`, then the five unmocked scenarios driven by `ledger-cli` against a running `full`-profile application (§9.6). The pytest-bdd binding over the *whole* catalogue, and the README `curl` extraction (§8.3), remain planned | every push |
+| 10 | **Load** | Gatling simulation and the JMH benchmarks; thresholds fail the build (§9.7) | `workflow_dispatch` only — a ramp on every push would pay for itself in queue time, not signal |
 | 11 | Security (partial) | `gitleaks` runs; `detect-secrets`, Trivy and `dependency-check` remain unwired | every push (`gitleaks` only) |
 | 12 | Publish (planned) | Multi-arch image, CycloneDX SBOM, generated module diagrams to `docs/generated/` | not yet wired |
 

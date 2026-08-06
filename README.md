@@ -84,28 +84,26 @@ One codebase, one set of domain classes. Only the adapters differ.
 | Mode | What runs |
 |---|---|
 | **`standalone`** (default) | In-memory event store and cache. No database, broker or auth. Binds `127.0.0.1` only |
-| **`full`** | PostgreSQL, Redis and Kafka (KRaft), JWT authentication and role authorisation |
+| **`full`** | PostgreSQL, Redis, Kafka (KRaft) and Keycloak. JWT authentication and role authorisation |
 
 That duality is the design's central bet: a reviewer who wants the ledger from the brief gets it in
 one command; a reviewer who wants production concerns gets those too, without forking the code that
 holds the money.
 
-**`standalone` is the one-command path. `full` is not**, and it is worth being straight about why.
+Compose brings up the infrastructure, including a Keycloak preloaded with the realm and its fixture
+users; the jar then runs on the host against it:
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=full
 ```
 
-Compose brings up **infrastructure only** — no Keycloak, and no app service; the jar runs on the
-host. `full` requires an OAuth2 issuer, and nothing here starts one for a hand run: point
-`LEDGER_ISSUER_URI` at a Keycloak of your own, loaded with
-[`docker/keycloak/realm-tiny-ledger.json`](docker/keycloak/realm-tiny-ledger.json). The built-in
-default has nothing behind it.
+Every route then requires a bearer token, so `full` is the mode to read if you care about the
+authorisation model (spec §6.4) rather than the ledger mechanics.
 
-The integration suite is unaffected — Testcontainers starts a throwaway Keycloak on a random port and
-overrides the issuer at runtime, so `./mvnw verify -Pit` exercises the real authenticated path
-without any of the above.
+The integration suite is independent of both — Testcontainers starts its own Postgres, Redis, Kafka
+and Keycloak on random ports, so `./mvnw verify -Pit` exercises the real authenticated path without
+anything running beforehand.
 
 ## The engineering, briefly
 
