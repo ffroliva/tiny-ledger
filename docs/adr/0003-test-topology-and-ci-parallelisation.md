@@ -38,8 +38,8 @@ treats the symptom. The cause is the extra context.
 ### 1. One context per profile. Subclasses derive; forks are exceptional and justified in writing.
 
 `AbstractIntegrationTest` owns the whole `full` stack — containers, properties, and (from Plan 3) the
-test `JwtDecoder`, supplied as a **property through the existing `@DynamicPropertySource`, never via
-`@Import`**, because an `@Import` on a subclass forks the context by definition.
+Keycloak `issuer-uri`, supplied as a **property through the existing `@DynamicPropertySource`, never
+via `@Import`**, because an `@Import` on a subclass forks the context by definition.
 
 Any test that genuinely needs a modified context must (a) say why in a comment, and (b) set
 `spring.kafka.listener.auto-startup=false`, or it silently re-enters CR13.
