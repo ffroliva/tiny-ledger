@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.16
+**Version:** 3.17
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -1334,7 +1334,7 @@ indistinguishable from a bug, so the lag is asserted rather than hoped away.
 | E7 | **Restart replays incomplete publications.** Kill the app mid-publication, restart | Spring Modulith's incomplete-publication retry completes the delivery; the projection converges without manual intervention |
 | E8 | **Full rebuild from the log.** Drop the projection entirely and replay the stream | Rebuilt state is byte-identical to the state before the drop. This is the strongest guarantee event sourcing offers, and the one that makes the design worth its cost |
 | E9 | **Lag gates readiness.** Hold the listener until projection lag exceeds the threshold | The readiness probe reports *not ready*; the instance stops receiving traffic rather than serving stale balances |
-| E10 | **Redis unavailable.** Stop Redis, keep writing | Rate limiting fails **open**; the application keeps serving. The 250 ms Lettuce command timeout exists for exactly this and has never been exercised at runtime |
+| E10 | **Redis unavailable.** Pause Redis, keep writing | Rate limiting fails **open**, the write still `201`s, and `?consistency=strong` is still exact — Postgres is the record. **The stall must be bounded**: covered by `RedisOutageIT`. Its first run found the write costing **64 seconds**, because the balance cache's Spring Data Redis client had no timeout while the rate limiter's had 250 ms (`docs/performance-findings.md` §3.5) |
 | E11 | **Kafka unavailable.** Stop Kafka, keep writing | Writes still `201`; the projection lags; `?consistency=strong` still returns the correct balance |
 
 **Method:** never `Thread.sleep`. Convergence is asserted with **Awaitility** and a stated timeout;
@@ -1362,8 +1362,8 @@ comm -23 \
   <(grep -rhoE "\b(P|N|E)[0-9]{1,2}\b" src/test ledger-cli/tests | sort -u)
 ```
 
-**Known-open as of v3.15 — the whole expected output of that command, as a set** (it prints them
-lexicographically, so `E10 E11` land before `E6`): `E6 E7 E9 E10 E11 N20 N22`.
+**Known-open as of v3.17 — the whole expected output of that command, as a set** (it prints them
+lexicographically, so `E11` lands before `E6`): `E6 E7 E9 E11 N20 N22`.
 Anything else appearing is a regression: a case that had a label and lost it. `E9` is deferred by decision
 (§14 step 9); the rest are the unplanned rows this pass added deliberately rather than quietly.
 
@@ -1733,3 +1733,4 @@ Javadoc, because a reader checks the spec:
 | 3.14 | 2026-08-06 | Battle-testing pass, second half: the traceability rule gains the command that checks it and the known-open list that command must print (`E6 E7 E9 E10 E11 N20 N21 N22`), stated with no gate claimed for it; P7 recorded as the worked example of trap 7 — it read as covered by two tests that each proved half, and now has one that proves it whole (`KafkaAuditModuleIT#anAuditorReadsAlicesDepositOutOfTheTrailOverHttp`); N6/N7/N8/N10 labelled on the tests that already carried them. N2 additionally proved against real Postgres in stage `integration` (`ConcurrentWithdrawalIT`), which required the shared write-per-principal budget re-derived from 20/10m to 150/90m — the per-token margin `RateLimitIT` depends on moved 30s → 36s, so it widened rather than thinned |
 | 3.15 | 2026-08-06 | N21 given a test at the BDD layer (`withdrawals.feature`): a refused withdrawal replayed after a top-up is still the original 422, and the stream version proves the replay appended nothing. Known-open set narrows to `E6 E7 E9 E10 E11 N20 N22`. The scenario also surfaced §6.7 of `docs/performance-findings.md` — disabling `RecordMovementService:69`'s replay short-circuit leaves all 22 BDD scenarios green, because the duplicate-UID catch at `:73` enforces the same guarantee; line 69 is what makes a replay 409-proof under contention, and nothing tests that |
 | 3.16 | 2026-08-07 | **§6.3's racing-duplicate mechanism corrected against a measurement.** Stage 9 ran in CI for the first time and `N19` failed: the losers of a same-`movementUid` race are answered `409` `/errors/version-conflict`, not `200`. The event store checks the stream version *before* the UID (`PostgresEventStore:66`), so the unique-constraint re-read §6.3 named is unreachable for same-stream racers — a racer holding the later version would already have returned `200` from `RecordMovementService:68` without appending. The guarantee is unchanged but arrives one retry later; §6.3 and §12's N19 row now say so, and the e2e scenario retries the 409 as the contract requires. The test had passed locally: on Windows the five threads never overlapped tightly enough to collide, so a green run was never evidence the race had happened |
+| 3.17 | 2026-08-07 | **E10 covered, and its first run found a high-severity availability defect.** `RedisOutageIT` pauses Redis and asserts the write still `201`s, the strong read is still exact, and the stall is *bounded*. The rate limiter failed open in 250 ms exactly as designed — but the request took **64 seconds**, because a second Lettuce client (Spring Data Redis, behind the balance cache) had no timeout at all, and `BalanceProjector` evicts inside the open append transaction. That is the Tomcat worker-pool saturation `RateLimitConfig` documents its own 250 ms as preventing. Bounded to the same value in `application-full.properties`; the test now takes 2.8 s. Recorded as `docs/performance-findings.md` §3.5 |
