@@ -1035,14 +1035,20 @@ build already runs.
 
 `docs/` is organised by *what the reader is trying to do*, not by what the writer happened to write.
 
-| Quadrant | Directory | Answers |
+| Quadrant | Where it lives today | Answers |
 |---|---|---|
-| **Tutorial** — learning | `README.md`, `docs/tutorial/` | "I have never seen this before. Get me to a working ledger." |
-| **How-to** — a task | `docs/runbook.md`, `docs/how-to/` | "Projection lag is alerting. What do I do?" |
-| **Reference** — facts | `docs/api/openapi.yaml`, `docs/api.md`, `docs/database.md`, `docs/generated/` | "What exactly does this endpoint return?" |
-| **Explanation** — why | `docs/spec.md`, `docs/adr/`, `docs/agentic-workflow.md` | "Why Postgres and not Kafka as the event store?" |
+| **Tutorial** — learning | `README.md` | "I have never seen this before. Get me to a working ledger." |
+| **How-to** — a task | *Nothing written* | "Projection lag is alerting. What do I do?" |
+| **Reference** — facts | `docs/api/openapi.yaml` | "What exactly does this endpoint return?" |
+| **Explanation** — why | `docs/spec.md`, `docs/architecture.md`, `docs/adr/`, `docs/agentic-workflow.md` | "Why Postgres and not Kafka as the event store?" |
 
 The most common documentation failure is a single file trying to be all four. The split is load-bearing.
+
+**The How-to quadrant is empty, and the directory that used to stand in for it is gone.** `docs/`
+carried `how-to/` and `tutorial/` trees holding nothing but `.gitkeep`, routed to from `INDEX.md`. An
+empty directory a router points at is worse than an acknowledged absence: it costs a reader a click
+to learn nothing. A runbook belongs with the observability stack (§14 step 9), which is unbuilt —
+there is no live projection lag to respond to yet.
 
 ### 8.2 Generated, not written
 

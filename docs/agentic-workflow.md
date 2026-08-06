@@ -63,10 +63,13 @@ Read the primary sources directly; never work from a paraphrase.
 
 For this project: the assignment and prep PDFs were pulled from Gmail, the prior V2 specification
 from Google Drive, and the surrounding process state (dates, stages, who said what) reconstructed
-from the mailbox by the `pipeline` skill. Both PDFs are committed under `docs/source/` so a reader
-can check the spec against the brief without access to my inbox.
+from the mailbox by the `pipeline` skill. Both PDFs are kept on disk under `docs/source/` and
+**deliberately not committed** — `.gitignore:9-12` excludes that directory, because the brief is the
+assessor's material to publish, not this repository's. The derived contract is `docs/spec.md`, and §1
+of it is where a reader checks what was actually asked for.
 
-**Rule:** the primary source is committed alongside the work derived from it.
+**Rule:** the primary source is read first-hand and kept beside the work derived from it, whether or
+not licensing lets it be committed.
 
 ### Stage 2 — Spec
 
@@ -385,7 +388,7 @@ whole-branch pass even when every task is green.
 
 | Question | Where to look |
 |---|---|
-| What was actually asked for? | `docs/source/` — the original PDFs, committed unmodified |
+| What was actually asked for? | `docs/spec.md` §1 and §13 — the brief PDFs themselves are the assessor's material and are gitignored, not committed (§2, Stage 1) |
 | What was decided, and why? | `docs/spec.md` and `docs/adr/` |
 | In what order was it built? | `docs/superpowers/plans/*.md`, and the commit history — one commit per task, each landing only after its review was accepted |
 | Was each step reviewed? | The per-task ledger, review packages and reviewer reports live under `.superpowers/sdd/<plan>/`, which is **session-local and gitignored** — deliberately, it is working state. What survives in the repo is §7 above, the commit messages, and this document |
