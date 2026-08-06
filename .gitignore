@@ -5,8 +5,15 @@ HANDOFF.md
 # licence in docs/agentic-workflow.md §3; vendoring ~150 files of another project's repository into
 # a ledger exercise is tooling, not deliverable. The review artefacts those skills produced — the
 # council reports and assessments — are kept, under docs/_archive/reviews/.
-.claude/
 .superpowers/
+
+# `.claude/` is deliberately NOT ignored, so a decision to commit agent configuration stays a
+# decision rather than something a blanket rule made silently. Two things currently sit there and
+# are machine-local, not deliverable — check `git status` before staging:
+#   .claude/worktrees/  — Claude Code's own worktree bookkeeping
+#   .claude/skills/     — the vendored skill copies, removed from the repository on purpose
+.claude/settings.local.json
+.claude/worktrees/
 
 # Build output
 target/
