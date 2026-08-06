@@ -29,4 +29,39 @@ class FailClosedGuardTest {
                 .withPropertyValues("spring.profiles.active=prod")
                 .run(context -> assertThat(context).hasFailed());
     }
+
+    /**
+     * §9.7's load runs activate {@code full,load} — the {@code load} profile is an overlay that raises
+     * rate limits (application-load.properties), never a run mode of its own.
+     *
+     * <p>This passes because the guard tests profile <em>membership</em>: {@code matchesProfiles("full")}
+     * is true when {@code full} is among the active set, and a second active profile does not falsify
+     * it. That is a property of the guard's condition, not of anything this test does, and nothing else
+     * in the suite pinned it — {@code grep -rn 'spring.profiles.active' src/test/java} reached only this
+     * file. So a future edit narrowing the guard to an exclusive match would make every load run refuse
+     * to start, and would do it silently.
+     */
+    @Test
+    void bootsUnderFullPlusTheLoadOverlay() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(FailClosedGuard.class)
+                .withPropertyValues("spring.profiles.active=full,load")
+                .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    /**
+     * The other half, and the one that matters: {@code load} raises rate limits, so it must never be
+     * capable of running without the security posture it is raising them inside. Alone it is neither
+     * {@code standalone} nor {@code full}, so the guard refuses (spec §1).
+     */
+    @Test
+    void refusesTheLoadOverlayOnItsOwn() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(FailClosedGuard.class)
+                .withPropertyValues("spring.profiles.active=load")
+                .run(context -> assertThat(context)
+                        .hasFailed()
+                        .getFailure()
+                        .hasMessageContaining("neither 'standalone' nor 'full'"));
+    }
 }
