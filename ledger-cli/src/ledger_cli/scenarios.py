@@ -15,6 +15,7 @@ from decimal import Decimal
 from rich.console import Console
 
 from ledger_cli.client import LedgerClient
+from ledger_cli.concurrent import fan_out
 from ledger_cli.errors import LedgerApiError
 from ledger_cli.money import from_minor_units, to_minor_units
 
@@ -105,6 +106,65 @@ def zero_boundary(client: LedgerClient, console: Console, currency: str = "GBP")
         )
     return ScenarioResult(
         "zero-boundary", False, "a withdrawal past a zero balance was NOT refused"
+    )
+
+
+def concurrent_withdrawals(
+    client: LedgerClient, console: Console, currency: str = "GBP"
+) -> ScenarioResult:
+    """N2: 10 parallel withdrawals of 20.00 against 100.00. Exactly 5 settle, 5 are refused, and
+    the balance never goes negative. A bare 409 is not terminal — under optimistic concurrency,
+    retrying is part of the contract (§6.3), so each branch retries until it reaches 201 or 422."""
+    account_uid, name = _open_scratch_account(client, currency, "n2")
+    console.print(f"[dim]opened {name} ({account_uid})[/dim]")
+    client.deposit(account_uid, str(uuid.uuid4()), to_minor_units("100.00", currency), currency)
+
+    def withdraw_until_terminal() -> str:
+        # One client per thread: httpx.Client is not documented thread-safe.
+        with LedgerClient(client.settings) as own:
+            movement_uid = str(uuid.uuid4())
+            for _ in range(20):
+                try:
+                    own.withdraw(
+                        account_uid, movement_uid, to_minor_units("20.00", currency), currency
+                    )
+                    return "settled"
+                except LedgerApiError as exc:
+                    if exc.problem.status == 422:
+                        return "refused"
+                    if exc.problem.status == 409:
+                        continue  # version conflict: retry is the contract, not a failure
+                    return f"unexpected {exc.problem.status} {exc.problem.type}"
+            return "never reached a terminal outcome in 20 attempts"
+
+    outcomes = fan_out([withdraw_until_terminal] * 10)
+    errors = [str(o.error) for o in outcomes if o.error is not None]
+    if errors:
+        return ScenarioResult("concurrent-withdrawals", False, f"branch raised: {errors[0]}")
+
+    results = [str(o.value) for o in outcomes]
+    settled = results.count("settled")
+    refused = results.count("refused")
+    console.print(f"  {settled} settled, {refused} refused, from 10 parallel withdrawals")
+    if settled + refused != 10:
+        odd = [r for r in results if r not in ("settled", "refused")]
+        return ScenarioResult("concurrent-withdrawals", False, f"non-terminal outcomes: {odd}")
+    if settled != 5 or refused != 5:
+        return ScenarioResult(
+            "concurrent-withdrawals",
+            False,
+            f"expected 5 settled and 5 refused, got {settled}/{refused}",
+        )
+
+    final = client.get_balance(account_uid, strong=True)
+    if final.amount.minor_units != 0:
+        return ScenarioResult(
+            "concurrent-withdrawals",
+            False,
+            f"expected a final balance of 0, got {final.amount.minor_units}",
+        )
+    return ScenarioResult(
+        "concurrent-withdrawals", True, "5 settled, 5 refused, balance landed on exactly zero"
     )
 
 
@@ -233,6 +293,7 @@ def rate_limit(client: LedgerClient, console: Console, currency: str = "GBP") ->
 SCENARIOS = {
     "movement-chain": movement_chain,
     "zero-boundary": zero_boundary,
+    "concurrent-withdrawals": concurrent_withdrawals,
     "consistency-boundary": consistency_boundary,
     "edge-cases": edge_cases,
     "rate-limit": rate_limit,

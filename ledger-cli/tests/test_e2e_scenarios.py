@@ -43,6 +43,12 @@ def test_zero_boundary(client: LedgerClient) -> None:
     assert result.ok, result.detail
 
 
+def test_concurrent_withdrawals(client: LedgerClient) -> None:
+    """N2. Ten parallel withdrawals, individually affordable, collectively over balance."""
+    result = scenarios.concurrent_withdrawals(client, Console())
+    assert result.ok, result.detail
+
+
 def test_consistency_boundary(client: LedgerClient) -> None:
     """Deposit/read sequence crossing the eventual-consistency boundary, §4.4 (third axis)."""
     result = scenarios.consistency_boundary(client, Console())
