@@ -27,3 +27,5 @@ __pycache__/
 
 # JMH run output — a measurement, not a source artifact
 benchmarks/jmh-result.json
+# maven-shade-plugin writes this beside benchmarks/pom.xml on every package
+benchmarks/dependency-reduced-pom.xml
