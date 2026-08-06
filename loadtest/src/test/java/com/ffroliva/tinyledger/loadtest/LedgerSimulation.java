@@ -3,6 +3,7 @@ package com.ffroliva.tinyledger.loadtest;
 import static io.gatling.javaapi.core.CoreDsl.*;
 import static io.gatling.javaapi.http.HttpDsl.*;
 
+import io.gatling.javaapi.core.ChainBuilder;
 import io.gatling.javaapi.core.ScenarioBuilder;
 import io.gatling.javaapi.core.Simulation;
 import io.gatling.javaapi.http.HttpProtocolBuilder;
@@ -46,8 +47,7 @@ public class LedgerSimulation extends Simulation {
      * than any run here, so nothing refreshes mid-simulation — a refresh would appear in the write
      * percentiles as latency the ledger did not cause.
      */
-    private final ScenarioBuilder authenticate = scenario("authenticate")
-            .exec(http("token")
+    private final ChainBuilder authenticate = exec(http("token")
                     .post(ISSUER + "/protocol/openid-connect/token")
                     .header("Content-Type", "application/x-www-form-urlencoded")
                     .formParam("grant_type", "password")
@@ -61,9 +61,15 @@ public class LedgerSimulation extends Simulation {
             """
             {"owner":"%s","name":"load","currency":"GBP"}""".formatted(USERNAME);
 
-    /** Open an account and keep its uid in session — every later request needs one. */
-    private final ScenarioBuilder steadyState = scenario("steady state")
-            .exec(authenticate)
+    /**
+     * The work itself, as a chain rather than a scenario, because §9.7's steady-state and burst
+     * scenarios differ only in their injection profile — same requests, same assertions, arriving
+     * differently. Gatling requires scenario names to be unique, so injecting one scenario twice
+     * fails the run outright ("Scenario names must be unique"); sharing the chain and naming two
+     * scenarios from it is the correct shape and keeps the request names identical, which is what
+     * lets the per-request assertions below cover both.
+     */
+    private final ChainBuilder movementChain = exec(authenticate)
             .exec(http("open account")
                     .post("/api/v1/accounts")
                     .header("Authorization", "Bearer #{token}")
@@ -84,6 +90,10 @@ public class LedgerSimulation extends Simulation {
                             .get("/api/v1/accounts/#{acct}/balance")
                             .header("Authorization", "Bearer #{token}")
                             .check(status().is(200))));
+
+    private final ScenarioBuilder steadyState = scenario("steady state").exec(movementChain);
+
+    private final ScenarioBuilder burst = scenario("burst").exec(movementChain);
 
     /**
      * Hot-account contention: every virtual user drives ONE shared aggregate. This is the pathological
@@ -111,9 +121,8 @@ public class LedgerSimulation extends Simulation {
         setUp(
                         // Steady state: a gradual ramp to the §9.7 target.
                         steadyState.injectOpen(rampUsers(USERS).during(RAMP)),
-                        // Burst: the same population arriving at once, 5s in.
-                        steadyState
-                                .injectOpen(nothingFor(Duration.ofSeconds(5)), atOnceUsers(USERS / 5))
+                        // Burst: the same work arriving all at once, 5s in.
+                        burst.injectOpen(nothingFor(Duration.ofSeconds(5)), atOnceUsers(USERS / 5))
                                 .andThen(hotAccount.injectOpen(rampUsers(USERS / 10).during(Duration.ofSeconds(10)))))
                 .protocols(httpProtocol)
                 .assertions(

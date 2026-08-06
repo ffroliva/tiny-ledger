@@ -106,6 +106,42 @@ proven by deliberate violation.
 
 ---
 
+### 2.4 The §9.7 thresholds fail today — and the assertion mechanism is proven by that failure
+
+A Gatling run at **20 users** (not 500) against a `full,load` application:
+
+```
+write:       99th percentile of response time is less than 150.0 : false (actual : 334.0)
+cached read: 99th percentile of response time is less than 20.0  : false (actual : 141.0)
+Global:      percentage of failed events is less than 0.1        : true  (actual : 0.0)
+[INFO] BUILD FAILURE
+```
+
+**Two separate conclusions, and conflating them would be the easy mistake.**
+
+**The mechanism works.** A missed percentile fails the Maven build — §9.7's "thresholds are assertions,
+a regression fails the pipeline" is now literally true rather than aspirational. No deliberate
+sabotage was needed to demonstrate it; the thresholds failed on their own. Note also that the
+error-rate assertion **passed** (`KO=0`, 0.0%) in the same run, which is what shows the three
+assertions are evaluated independently rather than one failure poisoning all of them.
+
+**The numbers are NOT a verdict on the system.** This run had the load generator, the application, and
+four Docker containers competing for one developer laptop. A generator sharing a CPU with the system
+it measures inflates the very percentiles it reports. Request volumes were small (44 + 124 writes) so
+a p99 is drawn from roughly two samples per group, which is not a percentile in any meaningful sense.
+
+**What this genuinely establishes:**
+
+- The full pipeline runs end to end: token → open account → write → cached read, `KO=0` throughout.
+- The assertions bite, per request name, and fail the build.
+- A baseline on dedicated infrastructure is now the missing piece, not the harness (candidate 4).
+
+**What it does not establish:** whether this ledger meets §9.7 on representative hardware. Anyone
+citing `334 ms` as this system's write latency would be quoting a laptop under self-inflicted
+contention, not a measurement.
+
+---
+
 ## 3. Four defects found by running code that had only ever been read
 
 None of these is visible in a code review. Each was found the first time something actually executed.
