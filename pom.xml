@@ -19,6 +19,11 @@
     <archunit.version>1.5.0</archunit.version>
     <cucumber.version>7.34.6</cucumber.version>
     <openapi-generator.version>7.24.0</openapi-generator.version>
+    <!-- AGENTS.md trap 4: surefire's failIfNoSpecifiedTests defaults to FALSE, so `-Dtest=Typo`
+         matches nothing and the build exits 0 - a red step can "pass" having executed nothing, which
+         this repository has already shipped once. Only applies when `-Dtest` is given, so full runs
+         are unaffected. Failsafe's equivalent is configured on the plugin in the `it` profile. -->
+    <surefire.failIfNoSpecifiedTests>true</surefire.failIfNoSpecifiedTests>
   </properties>
   <dependencyManagement>
     <dependencies>
@@ -136,12 +141,26 @@
   </build>
   <profiles>
     <profile>
-      <!-- *IT.java suites need Docker (Testcontainers: Postgres, Redis, Kafka). Surefire's default
-           includes already skip them, so plain `./mvnw verify` stays the fast unit pipeline;
+      <!-- *IT.java suites need Docker (Testcontainers: Postgres, Redis, Kafka, Keycloak). Surefire's
+           default includes already skip them, so plain `./mvnw verify` stays the fast unit pipeline;
            `./mvnw verify -Pit` adds failsafe to run them. -->
       <id>it</id>
       <build>
         <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <configuration>
+              <!-- Skip the unit suite under -Pit. `verify` runs surefire then failsafe, so without
+                   this the integration job re-ran every unit test the unit job had just run - about
+                   90s of the integration job's 200s, on every push, for a result already known.
+                   `skipTests` skips execution but still COMPILES the tests (maven.test.skip would
+                   skip compilation and break the failsafe classpath). The unit job counts
+                   surefire-reports and the integration job counts failsafe-reports, so neither
+                   count gate is affected. -->
+              <skipTests>true</skipTests>
+            </configuration>
+          </plugin>
           <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-failsafe-plugin</artifactId>
@@ -149,6 +168,10 @@
               <includes>
                 <include>**/*IT.java</include>
               </includes>
+              <!-- AGENTS.md trap 4: this defaults to FALSE, so `-Dit.test=Typo` matches nothing and
+                   exits 0 - a targeted run that proves nothing while looking green. Only applies
+                   when a filter is given, so full runs are unaffected. -->
+              <failIfNoSpecifiedTests>true</failIfNoSpecifiedTests>
             </configuration>
             <executions>
               <execution>

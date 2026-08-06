@@ -1,5 +1,12 @@
 name: ci
 on: [push, pull_request]
+
+# A fix loop pushes repeatedly. Without this, every superseded commit keeps a four-container stack
+# running to report on a revision that has already been replaced. Cancel them.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   gate:
     runs-on: ubuntu-latest
