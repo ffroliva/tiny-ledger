@@ -145,6 +145,14 @@
            default includes already skip them, so plain `./mvnw verify` stays the fast unit pipeline;
            `./mvnw verify -Pit` adds failsafe to run them. -->
       <id>it</id>
+      <properties>
+        <!-- JaCoCo's gates measure the UNIT suite, which this profile now skips - so with no
+             surefire coverage data the check fails on ~0% and the integration job dies before
+             failsafe reports anything. Measured: CI run 31078... failed exactly there.
+             The `unit` job still enforces the gates on every push; running them a second time
+             against the same code was the duplication this profile change exists to remove. -->
+        <jacoco.skip>true</jacoco.skip>
+      </properties>
       <build>
         <plugins>
           <plugin>
