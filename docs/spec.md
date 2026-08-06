@@ -1273,7 +1273,7 @@ auth cannot assert a `403` or an admin, and a mode that loses state on restart c
 | N14 | `trent` (admin) requests `GET /api/v1/accounts/{accountUid}/events` | `403`, same reason as N13. `SecurityConfig` denies both auditor routes with a single matcher; a fix that split the routes and covered only `/audit/**` would pass N13 while an admin still reads the raw event stream on the other route |
 | N15 | A token carrying `ledger:admin` but not `ledger:writer` attempts a deposit | `403`. The actual conjunction test — P9 cannot fail against a short-circuit that also grants roles |
 | N16 | `trent` requests `GET /api/v1/accounts` | `200`; only accounts he owns — none. Proves D8 |
-| N17 | `mallory` (writer, no admin) attempts a cross-account deposit | `403`. Proves the widening is gated on the role rather than always-on |
+| N17 | `mallory` (writer, no admin) attempts a cross-account deposit, and separately a cross-account withdrawal | `403` on both — the two verbs are wired independently (§6.4), so each needs its own refusal. Proves the widening is gated on the role rather than always-on |
 | N18 | An event written after the cutover with no `actor` | Reported as `unknown`, never as the owner |
 
 **N18 cannot be driven through the HTTP API**: no endpoint writes an event without stamping `actor`
