@@ -1,5 +1,6 @@
 # Governance baseline — 2026-08-03 (spec §14 step 0)
-The registered backlog. Stage 6 fails only on regressions against this list.
+The registered backlog. Stage 6 is written to fail only on regressions against this list — and today
+it cannot fail at all, for the reason recorded immediately below.
 
 **Known-inert (Task 13):** the vendored `.claude/skills/iso-compliance/scripts/test_docs_governance.py`
 computes `REPO_ROOT` one directory too shallow for this repo's vendoring depth, so its checks never

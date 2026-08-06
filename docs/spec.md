@@ -1012,13 +1012,15 @@ Feb 2025), reviewed 2026-08-04.
 distinct. Docs that are merely *encouraged* rot, but a planned gate must not be described as one the
 build already runs.
 
-1. **Docs are gated by CI.** Stage 6 of §12.1 fails the build on a governance violation.
+1. **Docs have a CI stage, and it is inert today.** Stage 6 of §12.1 runs on every push, but the
+   check it runs currently scans nothing in this repository's `docs/` — §8.4. Nothing about the
+   documents below is enforced by a gate at present.
 2. **Generation is the target wherever generation is possible.** The current and planned rows are
    distinguished in §8.2.
 3. **Committed Gherkin is executable today.** README example extraction belongs to unbuilt stage 9
    (§8.3/§9.6).
 4. **Docs have a lifecycle** — an index, an archive, revision history, and an owner. This is a
-   documentation convention except where stage 6 explicitly checks a marker.
+   documentation convention, enforced by nobody while stage 6 stays inert.
 
 ### 8.1 Structure — Diátaxis
 
@@ -1064,8 +1066,9 @@ evidence instead; the catalogue as a whole is not yet one executable Gherkin sui
 
 ### 8.4 Governance — the ISO 15289 section contract
 
-Every governed document under `docs/` carries seven literal markers, enforced by
-`scripts/test_docs_governance.py` from the **`iso-compliance`** skill (§10):
+Every governed document under `docs/` is meant to carry seven literal markers. The check written to
+enforce them is `.claude/skills/iso-compliance/scripts/test_docs_governance.py`, vendored from the
+**`iso-compliance`** skill (§10) and run in CI by the wrapper `scripts/ci/check_docs_governance.py`:
 
 ```
 **Version:**   ·   ## Table of contents   ·   ## Scope & purpose   ·   ## Glossary & acronyms
@@ -1079,6 +1082,15 @@ Working papers, routers and registries (`docs/adr/`, `docs/generated/`, `docs/so
 `docs/superpowers/`, `INDEX.md`) are explicitly exempt: ADRs, specs-in-progress and implementation
 plans have their own canonical formats and should not be forced into a shape built for operational
 documents.
+
+**The check is present but inert, so none of the above is currently enforced.** The vendored script
+sets `REPO_ROOT = Path(__file__).resolve().parents[1]` (line 24), which resolves to
+`.claude/skills/iso-compliance/` — the skill's own directory, which contains no `docs/` tree — rather
+than the repository root. Every marker, artefact and version-string check therefore runs against an
+empty tree, and the wrapper's green `governance OK: 17 known, 0 new` says nothing about this
+repository's documents. `docs/governance-baseline.md` records the same finding. Repairing the path is
+an open task (§14 step 13), deliberately not done here: it would change what CI accepts and needs its
+own proof by deliberate violation.
 
 ### 8.5 Lifecycle
 
@@ -1095,10 +1107,14 @@ documents.
 
 ### 8.6 Docs travel with the code
 
-A pull request touching `src/**` and touching neither `docs/**` nor `CHANGELOG.md` fails stage 6 with
-a prompt rather than a hard block — the escape hatch is a `docs: n/a — <reason>` line in the PR body,
-which is recorded and reviewable. The goal is to make skipping documentation a *deliberate, visible*
-act rather than the default.
+**Planned, not enforcing.** Nothing checks this today: `.github/workflows/ci.yml` is the only
+workflow, it has no path filter and no step that reads a pull request's file list or body, and stage 6
+runs the governance script alone.
+
+When built, a pull request touching `src/**` and touching neither `docs/**` nor `CHANGELOG.md` would
+fail stage 6 with a prompt rather than a hard block — the escape hatch being a `docs: n/a — <reason>`
+line in the PR body, which is recorded and reviewable. The goal is to make skipping documentation a
+*deliberate, visible* act rather than the default.
 
 ---
 
@@ -1350,11 +1366,14 @@ that a PoC cannot satisfy (physical security, supplier management, HR screening)
 of scope** rather than silently claimed.
 
 `iso-27001-controls.md` **is the Statement of Applicability (SoA)** — the term §12.1 stage 6 and
-§14 step 13 use — and a *gap row* is any control marked applicable but not yet evidenced; stage 6
-fails on a gap row with no linked issue. The governance test itself,
-`scripts/test_docs_governance.py`, comes from the **`iso-compliance`** skill, vendored at
-`.claude/skills/iso-compliance` under the same policy as `dr-jskill`: vendored, not referenced, so
-a skill changing underneath a compliance run cannot invalidate the evidence trail.
+§14 step 13 use — and a *gap row* is any control marked applicable but not yet evidenced. Stage 6 is
+written to fail on a gap row with no linked issue, but does not do so today: the check is inert
+(§8.4). The governance test itself,
+`.claude/skills/iso-compliance/scripts/test_docs_governance.py`, comes from the **`iso-compliance`**
+skill, vendored under the same policy as `dr-jskill`: vendored, not referenced, so a skill changing
+underneath a compliance run cannot invalidate the evidence trail. CI does not invoke it directly —
+`scripts/ci/check_docs_governance.py` runs it under pytest and diffs the result against
+`docs/governance-baseline.md`.
 
 ---
 
@@ -1438,7 +1457,7 @@ is not part of today's failure ordering.
 | 3 | **Architecture** | `ApplicationModules.verify()` + ArchUnit (§9.2) | every push |
 | 4 | **Contract** | OpenAPI-generated interfaces compile; port contract suites (§9.2b) | every push |
 | 5 | BDD in-process | Cucumber, the committed `@standalone` subset (§9.3); full auth/admin acceptance currently runs as JUnit ITs at stage 7, with the stage-9 binding still planned | every push |
-| 6 | **Documentation** | `test_docs_governance.py`: artefact presence, the seven ISO markers, no pre-release version strings, every `TODO(25010)` registered, and no unlinked SoA gap row. Link checking, generated-artefact freshness and the §8.6 docs-travel prompt are planned, not wired | **every push** (the five governance checks only) |
+| 6 | **Documentation (inert)** | `scripts/ci/check_docs_governance.py` wraps `.claude/skills/iso-compliance/scripts/test_docs_governance.py`: artefact presence, the seven ISO markers, no pre-release version strings, every `TODO(25010)` registered, and no unlinked SoA gap row. **All five scan the skill's own directory, not this repository (§8.4), so the step passes regardless of what `docs/` contains.** Link checking, generated-artefact freshness and the §8.6 docs-travel prompt are planned, not wired | **every push** (runs, enforces nothing) |
 | 7 | Integration | Testcontainers: Postgres, Kafka, Redis, Keycloak | every push |
 | 8 | Python CLI (planned) | `pytest` matrix on **3.11, 3.12, 3.13**; `pyright` strict; `ruff` | not yet wired; no `ledger-cli/` tree |
 | 9 | E2E (planned) | `docker compose up`, then pytest-bdd over the full catalogue + `ledger-cli scenario run` (§9.6) — **including the README's extracted `curl` examples** (§8.3) | not yet wired |
@@ -1446,15 +1465,16 @@ is not part of today's failure ordering.
 | 11 | Security (partial) | `gitleaks` runs; `detect-secrets`, Trivy and `dependency-check` remain unwired | every push (`gitleaks` only) |
 | 12 | Publish (planned) | Multi-arch image, CycloneDX SBOM, generated module diagrams to `docs/generated/` | not yet wired |
 
-Stages 3, 4, 5 and 6 are the ones worth pointing at: they fail on a *design or documentation*
-regression, not a behavioural one. An agent-assisted codebase moving at speed needs boundary and
-documentation violations caught mechanically, because they are exactly the class of error that
-reviews miss and tests otherwise tolerate.
+Stages 3, 4 and 5 are the ones worth pointing at: they fail on a *design* regression, not a
+behavioural one. An agent-assisted codebase moving at speed needs boundary violations caught
+mechanically, because they are exactly the class of error that reviews miss and tests otherwise
+tolerate. **Stage 6 is not in that list**: it is wired and ordered, but inert (§8.4), so no
+documentation regression is caught mechanically today.
 
 **Stage 6 sits before integration deliberately.** Documentation failures are cheap to detect and
 cheap to fix; discovering them after a twelve-minute Testcontainers run trains everyone to ignore
-them. Position in a pipeline is a statement about priority, and this is the one that makes "first-class
-citizen" true rather than aspirational.
+them. Position in a pipeline is a statement about priority — but until the check actually reads this
+repository's `docs/`, that position is the only part of the "first-class citizen" claim that is real.
 
 `resolve-drift` is currently a placeholder step that only echoes where the Python CLI drift job will
 land. The planned job will install from declared ranges rather than the lockfile and smoke-import the
@@ -1491,7 +1511,7 @@ Each step ends green and demonstrable.
 
 | # | Step | Done when |
 |---|---|---|
-| 0 | **Docs scaffold first** — `docs/` Diátaxis tree, INDEX, CHANGELOG, `test_docs_governance.py` wired into `verify` | The governance test runs and **fails**, listing every missing artefact. That failing list is registered as the **governance baseline** — the documentation backlog, generated rather than guessed. Stage 6 (§12.1) fails on *regressions against the baseline*, never on the baseline itself — so step 1's `mvn verify` is green while the backlog burns down, and step 13 requires the baseline empty |
+| 0 | **Docs scaffold first** — `docs/` Diátaxis tree, INDEX, CHANGELOG, the governance check wired into CI stage 6 | Done, with a caveat. The governance test ran and **failed**, listing every missing artefact, and that failing list is registered as the **governance baseline** — the documentation backlog, generated rather than guessed. Stage 6 (§12.1) is written to fail on *regressions against the baseline*, never on the baseline itself. It does not do so today: the vendored script's `REPO_ROOT` points inside the skill directory (§8.4), so the baseline is frozen at what it recorded then and no new violation can be detected. It runs from `scripts/ci/check_docs_governance.py` in CI, not from `verify`. Step 13 requires the baseline empty — and requires the path fixed first, or "empty" means nothing |
 | 1 | Skeleton, pom, Modulith verification, CI | `mvn verify` green on an empty module graph |
 | 2 | `shared` + `ledger` domain, in-memory event store | Unit + architecture tests green — no endpoints yet; §5's rule holds |
 | 3 | OpenAPI contract + generated interfaces | Every §7 operation specified; controller drift breaks the build |
@@ -1504,7 +1524,7 @@ Each step ends green and demonstrable.
 | 10 | Python CLI + e2e scenarios | `ledger-cli scenario run edge-cases` green against compose |
 | 11 | Gatling + JMH + thresholds | Planned pipeline gate fails on regression once stage 10 is built |
 | 12 | **JVM assessment with `jvm-pulse`** — once the system is stable under load | GC + JFR telemetry captured against the composed stack (`pulse attach --docker <container> --duration 30s`) during a Gatling run; `report.html` committed to `docs/profiling/`; a `compare` against the pre-tuning baseline; tuning conclusions recorded as an ADR. **Run last, deliberately** — profiling an unstable system measures the instability, not the system |
-| 13 | Compliance run with the `iso-compliance` skill | Governance test green; every SoA-listed control dispositioned (§10); 25010 coverage table complete; dated acceptance record in the ISO hub |
+| 13 | Compliance run with the `iso-compliance` skill | The vendored script's `REPO_ROOT` repaired so the test actually scans this repository (§8.4) — a green run means nothing until then — and then: governance test green; every SoA-listed control dispositioned (§10); 25010 coverage table complete; dated acceptance record in the ISO hub |
 
 ---
 
