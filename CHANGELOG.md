@@ -42,7 +42,10 @@
   that is not an RFC 4122 UUID is **replaced**, not echoed and not sanitised — an allowlist cannot be
   defeated by an encoding a stripper did not anticipate, and the rejected value is never logged.
 - One `full` Spring test context for the whole integration suite, and a CI split into
-  `gate`/`unit`/`integration` — **the 26 integration tests were previously gated by nothing.**
+  `gate`/`unit`/`integration` — **the integration suite was previously gated by nothing**: no job ran
+  `-Pit` at all. (The count once quoted here is dropped rather than refreshed: it was never paired
+  with its run's exit code, which is the thing that makes a count mean anything — AGENTS trap 3, and
+  the same retraction ADR 0003 carries.)
 - `..shared..` fenced from frameworks alongside `..domain..`. ArchUnit checks *direct* dependencies,
   and the domain now compiles against `shared.error`, so a domain-only rule would have stayed green
   while a Spring import reached the domain's transitive compile path.
