@@ -1,8 +1,11 @@
-# `full`-profile infrastructure only — Postgres, Redis, Kafka (KRaft, no ZooKeeper). Image tags
-# match AbstractIntegrationTest's Testcontainers so compose and the ITs exercise the same versions.
-# The app itself is NOT a service here: run it on the host against these published ports, e.g.
-#   docker compose -f docker/docker-compose.yml up -d
+# `full`-profile dependencies — Postgres, Redis, Kafka (KRaft, no ZooKeeper) and Keycloak. Image
+# tags match AbstractIntegrationTest's Testcontainers so compose and the ITs exercise the same
+# versions. The app itself is still NOT a service here: run it on the host against these published
+# ports, e.g.
+#   docker compose -f docker/docker-compose.yml up -d --wait
 #   ./mvnw spring-boot:run -Dspring-boot.run.profiles=full
+# `--wait` blocks on the healthchecks; without it compose returns as soon as containers exist,
+# and the app races Keycloak's realm import.
 name: tiny-ledger
 
 services:
@@ -56,6 +59,32 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Published on 8081 because that is the port `application-full.properties:15` has always
+  # defaulted issuer-uri to. Until now nothing in this repository ever started a Keycloak there —
+  # it existed only under Testcontainers on a random port — so a `full` boot outside the IT suite
+  # had no issuer to talk to. The mapping is what makes that documented default true.
+  #
+  # TEST FIXTURE realm: dev-only credentials, pinned user ids, never deploy.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # Serves /health/* on the management port (9000). Measured on 26.4: the image ships
+      # neither curl nor wget, so the healthcheck below reaches it through bash's /dev/tcp,
+      # which is present at /usr/bin/bash.
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak/realm-tiny-ledger.json:/opt/keycloak/data/import/realm-tiny-ledger.json:ro
+    ports:
+      - "8081:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"status\": \"UP\"' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
 
 volumes:
   postgres-data:
