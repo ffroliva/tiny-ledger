@@ -1,5 +1,7 @@
 package com.ffroliva.tinyledger.config;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -11,6 +13,7 @@ import com.ffroliva.tinyledger.testsupport.AbstractIntegrationTest;
 import com.ffroliva.tinyledger.testsupport.KeycloakTokens;
 import com.ffroliva.tinyledger.testsupport.TestJwt;
 import com.jayway.jsonpath.JsonPath;
+import jakarta.servlet.RequestDispatcher;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -159,6 +162,32 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     void anUnknownAccountIsNotFoundRatherThanForbidden() throws Exception {
         mvc.perform(get("/api/v1/accounts/{a}/balance", UUID.randomUUID()).header("Authorization", bearer("alice")))
                 .andExpect(status().isNotFound());
+    }
+
+    /**
+     * §6.5: {@link com.ffroliva.tinyledger.platform.SecurityProblemHandler}'s own javadoc records this —
+     * Boot's default {@code /error} is {@code BasicErrorController}'s shape, which echoes the request
+     * {@code path} back to the caller, an internal identifier §6.5 forbids crossing the boundary. Neither
+     * {@link com.ffroliva.tinyledger.platform.SecurityProblemHandler} nor
+     * {@link com.ffroliva.tinyledger.platform.ErrorHandlingAdvice} can close this: both act inside
+     * {@code DispatcherServlet}'s own handling of a request, while {@code /error} is reached by a
+     * <em>container-level</em> forward — a Filter throwing, or a raw {@code sendError} — that carries this
+     * request's failure as two request attributes rather than as a Java exception. {@code requestAttr}
+     * reproduces exactly that forward without depending on finding a component that currently triggers one:
+     * the point is that {@code BasicErrorController} answers it this way for any future trigger, not
+     * just ones that exist today. A bearer token is required to even reach it: {@code /error} falls under
+     * {@code fullChain}'s {@code anyRequest().authenticated()}, so an unauthenticated attempt is refused by
+     * {@code SecurityProblemHandler} before {@code BasicErrorController} ever runs — which would make the
+     * assertion below pass for the wrong reason.
+     */
+    @Test
+    void anErrorDispatchDoesNotEchoTheRequestPath() throws Exception {
+        String leakedPath = "/api/v1/accounts/91b1d1c2-aaaa-4f2b-9c3d-abcdefabcdef";
+        mvc.perform(get("/error")
+                        .header("Authorization", bearer("alice"))
+                        .requestAttr(RequestDispatcher.ERROR_STATUS_CODE, 500)
+                        .requestAttr(RequestDispatcher.ERROR_REQUEST_URI, leakedPath))
+                .andExpect(content().string(not(containsString(leakedPath))));
     }
 
     /**
