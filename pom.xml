@@ -50,6 +50,17 @@
          Hibernate and an eager EntityManagerFactory into the standalone profile. -->
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-jdbc</artifactId></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-redis</artifactId></dependency>
+    <!-- Spec §6.1: token buckets. Storage is the part that swaps by profile (RateLimitConfig) —
+         bucket4j-core alone runs the local, in-memory `standalone` bucket; the two redis artifacts
+         add Bucket4jLettuce's distributed proxy for `full`, reusing the lettuce-core already on the
+         classpath via spring-boot-starter-data-redis rather than adding a second Redis client. -->
+    <dependency><groupId>com.bucket4j</groupId><artifactId>bucket4j_jdk17-core</artifactId><version>8.19.0</version></dependency>
+    <dependency><groupId>com.bucket4j</groupId><artifactId>bucket4j_jdk17-redis-common</artifactId><version>8.19.0</version></dependency>
+    <dependency><groupId>com.bucket4j</groupId><artifactId>bucket4j_jdk17-lettuce</artifactId><version>8.19.0</version></dependency>
+    <!-- Spec §6.1: the bounded, expiring store backing standalone's per-key buckets — version
+         supplied by spring-boot-starter-parent's dependency management, same as every other
+         Boot-covered dependency in this file. -->
+    <dependency><groupId>com.github.ben-manes.caffeine</groupId><artifactId>caffeine</artifactId></dependency>
     <dependency><groupId>org.springframework.kafka</groupId><artifactId>spring-kafka</artifactId></dependency>
     <!-- Boot 4 ships Liquibase auto-config in its own module; bare liquibase-core means the
          changelog never runs and the full profile boots against an empty schema. -->

@@ -1,6 +1,10 @@
 package com.ffroliva.tinyledger.config;
 
+import com.ffroliva.tinyledger.platform.CallerPrincipal;
 import com.ffroliva.tinyledger.platform.KeycloakRealmRolesConverter;
+import com.ffroliva.tinyledger.platform.RateLimitFilter;
+import com.ffroliva.tinyledger.platform.RateLimitProperties;
+import com.ffroliva.tinyledger.platform.RateLimiterStore;
 import com.ffroliva.tinyledger.platform.SecurityProblemHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -10,6 +14,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Spec §1: one codebase, two run modes — so security is one mechanism with two configurations rather
@@ -43,11 +49,20 @@ public class SecurityConfig {
     /** The brief as written: in-memory, unauthenticated, dependency-free. */
     @Bean
     @Profile("standalone")
-    SecurityFilterChain standaloneChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain standaloneChain(
+            HttpSecurity http,
+            RateLimiterStore rateLimiterStore,
+            RateLimitProperties rateLimitProperties,
+            CallerPrincipal callerPrincipal,
+            ObjectMapper mapper)
+            throws Exception {
         return http.csrf(csrf -> csrf.disable())
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+                .addFilterBefore(
+                        rateLimitFilter(rateLimiterStore, rateLimitProperties, callerPrincipal, mapper),
+                        AuthorizationFilter.class)
                 .build();
     }
 
@@ -76,7 +91,14 @@ public class SecurityConfig {
      */
     @Bean
     @Profile("full")
-    SecurityFilterChain fullChain(HttpSecurity http, SecurityProblemHandler problems) throws Exception {
+    SecurityFilterChain fullChain(
+            HttpSecurity http,
+            SecurityProblemHandler problems,
+            RateLimiterStore rateLimiterStore,
+            RateLimitProperties rateLimitProperties,
+            CallerPrincipal callerPrincipal,
+            ObjectMapper mapper)
+            throws Exception {
         return http.csrf(csrf -> csrf.disable())
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -112,6 +134,26 @@ public class SecurityConfig {
                         oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(new KeycloakRealmRolesConverter()))
                                 .authenticationEntryPoint(problems))
                 .exceptionHandling(e -> e.authenticationEntryPoint(problems).accessDeniedHandler(problems))
+                .addFilterBefore(
+                        rateLimitFilter(rateLimiterStore, rateLimitProperties, callerPrincipal, mapper),
+                        AuthorizationFilter.class)
                 .build();
+    }
+
+    /**
+     * Spec §6.1. {@code addFilterBefore(_, AuthorizationFilter.class)} in both chains above is the
+     * position that matters: after {@code BearerTokenAuthenticationFilter} has populated the
+     * {@code SecurityContext} for a presented token, so a real caller is limited by identity, and
+     * before {@code AuthorizationFilter} decides 401/403, so a token-less flood is throttled instead
+     * of reaching that refusal on every attempt. See {@link RateLimitFilter}'s own javadoc for why it
+     * is built here rather than exposed as a {@code @Component} — the latter would also be picked up
+     * by Boot's filter auto-registration and run the check twice per request.
+     */
+    private static RateLimitFilter rateLimitFilter(
+            RateLimiterStore store,
+            RateLimitProperties properties,
+            CallerPrincipal callerPrincipal,
+            ObjectMapper mapper) {
+        return new RateLimitFilter(store, properties, callerPrincipal, mapper);
     }
 }
