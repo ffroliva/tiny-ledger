@@ -8,7 +8,8 @@
     "realm": [
       { "name": "ledger:reader",  "description": "Read balance and history for owned accounts" },
       { "name": "ledger:writer",  "description": "Record movements on owned accounts" },
-      { "name": "ledger:auditor", "description": "Read the audit trail across all accounts; no writes" }
+      { "name": "ledger:auditor", "description": "Read the audit trail across all accounts; no writes" },
+      { "name": "ledger:admin",   "description": "Move money on any account, acting on behalf of its owner; no reads, no audit trail" }
     ]
   },
   "clients": [
@@ -63,6 +64,10 @@
       "email": "mallory@tiny-ledger.test", "emailVerified": true, "firstName": "Mallory", "lastName": "Fixture",
       "credentials": [{ "type": "password", "value": "dev-only", "temporary": false }],
       "realmRoles": ["ledger:writer", "ledger:reader"] },
+    { "id": "00000000-0000-4000-8000-000000000007", "username": "trent",   "enabled": true,
+      "email": "trent@tiny-ledger.test",   "emailVerified": true, "firstName": "Trent",   "lastName": "Fixture",
+      "credentials": [{ "type": "password", "value": "dev-only", "temporary": false }],
+      "realmRoles": ["ledger:writer", "ledger:reader", "ledger:admin"] },
     { "id": "00000000-0000-4000-8000-000000000006", "username": "nobody",  "enabled": true,
       "email": "nobody@tiny-ledger.test",  "emailVerified": true, "firstName": "Nobody",  "lastName": "Fixture",
       "credentials": [{ "type": "password", "value": "dev-only", "temporary": false }],
