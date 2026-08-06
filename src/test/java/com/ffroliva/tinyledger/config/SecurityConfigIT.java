@@ -184,19 +184,23 @@ class SecurityConfigIT extends AbstractIntegrationTest {
                         .content("{\"amount\":{\"currency\":\"GBP\",\"minorUnits\":10000}}"))
                 .andExpect(status().isCreated());
 
-        // P9's other half, on the same stream trent just changed: acting for the owner must not
-        // silently make the admin an owner on either projection-backed or strong reads.
-        mvc.perform(get("/api/v1/accounts/{a}/balance", alicesAccount).header("Authorization", bearer("trent")))
-                .andExpect(status().isForbidden());
+        // The withdrawal half of the same clause, and the only test at any level that reaches it.
+        // LedgerController wires callerPrincipal.isAdmin() into Deposit (:80) and Withdraw (:93) as two
+        // independent positional booleans, so the deposit above is no evidence for this line: flip :93 to
+        // a literal `true` and every ledger:writer could withdraw from any account they do not own, with
+        // every other test still green. Every `new Withdraw(...)` in the unit tree passes false.
+        mvc.perform(put("/api/v1/accounts/{a}/withdrawals/{w}", alicesAccount, UUID.randomUUID())
+                        .header("Authorization", bearer("trent"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":{\"currency\":\"GBP\",\"minorUnits\":4000}}"))
+                .andExpect(status().isCreated());
 
-        mvc.perform(get("/api/v1/accounts/{a}/balance?consistency=strong", alicesAccount)
-                        .header("Authorization", bearer("trent")))
-                .andExpect(status().isForbidden());
-
+        // 6000 is a number neither movement produces on its own: a deposit that never landed, or a
+        // withdrawal that was refused, each leave a different balance here.
         mvc.perform(get("/api/v1/accounts/{a}/balance?consistency=strong", alicesAccount)
                         .header("Authorization", bearer("alice")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.amount.minorUnits").value(10000));
+                .andExpect(jsonPath("$.amount.minorUnits").value(6000));
 
         await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> mvc.perform(get("/api/v1/audit/entries")
                         .param("accountUid", alicesAccount.toString())
@@ -204,6 +208,25 @@ class SecurityConfigIT extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.auditEntries[?(@.type == 'MoneyDeposited')].actor")
                         .value(hasItem(KeycloakTokens.SUBJECTS.get("trent")))));
+    }
+
+    /**
+     * P9's other half, split out of it on review. These two 403s are the sole coverage of two independent
+     * production comparison points — the projection-backed read, and the strong read decided separately in
+     * {@code StrongBalanceService:29} — and inside P9 they only ran if the deposit succeeded, so reverting
+     * the write-side clause hid three untested claims behind one failure. Acting for the owner must not
+     * silently make the admin an owner on either read path.
+     */
+    @Test
+    void anAdminCannotReadTheBalanceOfAnAccountHeDoesNotOwn() throws Exception {
+        UUID alicesAccount = openAnAccountAs("alice");
+
+        mvc.perform(get("/api/v1/accounts/{a}/balance", alicesAccount).header("Authorization", bearer("trent")))
+                .andExpect(status().isForbidden());
+
+        mvc.perform(get("/api/v1/accounts/{a}/balance?consistency=strong", alicesAccount)
+                        .header("Authorization", bearer("trent")))
+                .andExpect(status().isForbidden());
     }
 
     @Test // N13: ledger:admin widens ownership only — the trail stays ledger:auditor-only
@@ -219,9 +242,9 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     // reads the raw event stream on this one.
     @Test
     void theRawEventStreamIsRefusedToAnAdmin() throws Exception {
-        UUID alicesAccount = openAnAccountAs("alice");
-
-        mvc.perform(get("/api/v1/accounts/{a}/events", alicesAccount).header("Authorization", bearer("trent")))
+        // ANY_UID, not a real account: the chain refuses before anything dereferences the id, so opening
+        // one only spent a charged write. Same shape as RoleAuthorizationIT#aReaderIsRefusedTheRawEventStream.
+        mvc.perform(get("/api/v1/accounts/{a}/events", ANY_UID).header("Authorization", bearer("trent")))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.type").value("/errors/forbidden"));
@@ -230,6 +253,18 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     @Test // N17: mallory holds ledger:writer but not ledger:admin — the widening is gated on the role
     void aWriterWithoutAdminCannotDepositIntoSomeoneElsesAccount() throws Exception {
         UUID alicesAccount = openAnAccountAs("alice");
+        UUID mallorysAccount = openAnAccountAs("mallory");
+
+        // The positive control that pins which refusal the 403 below is. A chain-level rejection and an
+        // OwnershipException both render /errors/forbidden, so nothing else here distinguishes them:
+        // drop ledger:writer from mallory in docker/keycloak/realm-tiny-ledger.json — a hand-maintained
+        // file with no gate tying it to this suite — and the assertion below stays green while the
+        // ownership term it exists to test is never reached. This request fails first if that happens.
+        mvc.perform(put("/api/v1/accounts/{a}/deposits/{d}", mallorysAccount, UUID.randomUUID())
+                        .header("Authorization", bearer("mallory"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":{\"currency\":\"GBP\",\"minorUnits\":10000}}"))
+                .andExpect(status().isCreated());
 
         mvc.perform(put("/api/v1/accounts/{a}/deposits/{d}", alicesAccount, UUID.randomUUID())
                         .header("Authorization", bearer("mallory"))
