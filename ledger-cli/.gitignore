@@ -1,0 +1,7 @@
+# Root .gitignore already covers __pycache__/ and .pytest_cache/ (repo-wide patterns);
+# these are the additional artefacts uv/this package produce.
+tmp/
+.venv/
+dist/
+*.egg-info/
+.ruff_cache/
