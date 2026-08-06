@@ -233,3 +233,116 @@ what measurement *ruled out* is a finding.
 - **Not asserted:** any JMH result. There is no baseline to regress against yet — see candidate 4.
   Reporting a JMH number as a gate before a baseline exists would be a gate that fails on machine
   variance.
+
+---
+
+## 6. What the tests do not notice — mutation coverage
+
+A green suite answers "did the code run." It does not answer "would a test have noticed if the
+logic were wrong." Mutation testing asks the second question directly: PIT edits the bytecode —
+`>=` to `>`, `+` to `-`, a conditional negated, a call deleted, a return value nulled — and re-runs
+the unit suite against each edit. A mutant that still passes ("survived") is a change in behaviour
+none of the ~2,000 assertions in this repo would catch.
+
+**Report-only, as planned.** No score threshold is wired in. This is a first measurement, not a
+gate — see §5's own reasoning for why a threshold with no baseline is either meaningless or noise.
+
+### 6.1 Method
+
+| | |
+|---|---|
+| Tool | `org.pitest:pitest-maven` **1.25.9** + `pitest-junit5-plugin` **1.2.3** |
+| Why these versions | Newest on Maven Central at time of writing (checked against `maven-metadata.xml` directly — Central's search UI lags several releases behind; it still listed 1.19.1 as latest). The plan's suggested `1.20.4`/`1.2.3` starting point is five `pitest-maven` releases behind current |
+| JDK-25 check, before any config was written | `./mvnw org.pitest:pitest-maven:help -Ddetail=false` — `BUILD SUCCESS`, resolves and loads 1.25.9 cleanly on Corretto 25.0.3. No downgrade of `<java.version>` was needed or considered |
+| Scope | `targetClasses`: `ledger.domain.*`, `ledger.application.*`, `shared.*`. `targetTests`: `com.ffroliva.tinyledger.*Test` — unit suite only |
+| Containers started | **Zero.** `./mvnw -q verify` (no profile) was re-run after adding the profile and behaves exactly as before — same standalone boot, same Cucumber pass count, exit 0. The `mutation` profile is additive and untouched by the default build, same as `it` |
+| Command | `./mvnw -Pmutation org.pitest:pitest-maven:mutationCoverage` |
+| Exclusions | None needed. The run completed clean on the first attempt — no test class or mutator had to be carved out |
+| Wall time | 6 min 44 s (coverage analysis 1m39s, mutation analysis 5m03s) |
+
+### 6.2 The number
+
+```
+>> Line Coverage (for mutated classes only): 223/245 (91%)
+>> 28 tests examined
+>> Generated 95 mutations Killed 73 (77%)
+>> Mutations with no coverage 15. Test strength 91%
+>> Ran 147 tests (1.55 tests per mutation)
+```
+
+**Mutation score: 77% (73/95 killed).** Of the 22 not killed, 15 were **never executed** by any
+unit test (`NO_COVERAGE`) and 7 **ran and survived** — a test touched that line and still passed
+with the behaviour changed. **Test strength — killed as a fraction of what was actually
+covered — is 91%** (73/80). Those are different claims: a `NO_COVERAGE` mutant says "no test goes
+here at all"; a `SURVIVED` mutant says "a test goes here and doesn't care what happens."
+
+### 6.3 The boundary case the plan named, checked directly
+
+The motivating example for this task was `>=` vs `>` in the insufficient-funds check — exactly
+P3, "alice withdraws her exact balance." That logic lives in `Money.isNegative`/`isPositive` and
+`OverdraftPolicy.permits` (`!balanceAfter.isNegative()`, i.e. the withdrawal is allowed iff the
+resulting balance is `>= 0`). Every mutant PIT generated on that boundary was killed:
+
+| Class.method | Line | Mutator | Status |
+|---|---|---|---|
+| `Money.isPositive` | 41 | changed conditional boundary (`>` → `>=`) | KILLED |
+| `Money.isPositive` | 41 | replaced boolean return with `true` | KILLED |
+| `Money.isNegative` | 45 | changed conditional boundary (`<` → `<=`) | KILLED |
+| `Money.isNegative` | 45 | replaced boolean return with `true` | KILLED |
+| `OverdraftPolicy.permits` | 10 | replaced boolean return with `true` | KILLED |
+
+P3 is not decorative. This is the one result this task existed to check, and it holds.
+
+### 6.4 Survivors that matter
+
+Seven mutants survived execution; three are genuine test gaps in the targeted packages, the rest
+are noise (§6.5). Ordered by how much a real bug here would cost:
+
+| Class.method | Line | Mutator | What escaped |
+|---|---|---|---|
+| `Money.minus` | 36 | removed call to `requireSameCurrency` | Deleting the cross-currency guard inside `Money.minus` itself passes the whole suite. `Account.withdraw` guards currency *before* calling `minus` (line 57, and that guard's own mutant **is** killed), so nothing in this codebase currently calls `minus` with mismatched currencies — but `Money` is a public value type with no test exercising its own invariant directly. A `MoneyTest` asserting `minus` throws on currency mismatch would kill this without touching `Account` at all. |
+| `Account.withdraw` | 56 | removed call to `requirePositive` | Deleting the non-positive-amount guard on withdrawal passes the whole suite. The identical guard on `deposit` (line 38) **is** killed by an existing test — so this is a one-sided gap: `withdraw` has no equivalent of "reject a zero/negative amount" case, `deposit` does. |
+| `RecordMovementService.replayOf` (`MoneyWithdrawn` branch) | 94, 96, 97 | negated conditional (`NO_COVERAGE`, not `SURVIVED` — no test reaches this code at all) | Idempotent-replay of a **withdrawal** (a duplicate `movementUid` for a withdrawal that already succeeded) has zero unit coverage. The identical `MoneyDeposited` branch three lines above (88–92) **is** covered and its mutants **are** killed. Same asymmetry as the row above: deposit's idempotency path is tested, withdrawal's is not. |
+
+Two more, lower priority but real:
+
+- `Account.withdraw`, line 58, `MathMutator` on the rejected event's `version + 1` (currency-mismatch
+  branch): SURVIVED. Nothing asserts the version number stamped on a `MovementRejected` event when
+  the rejection reason is a currency mismatch on withdrawal.
+- `RecordMovementService.movementUidOf`, line 148, `NullReturnValsMutator`: SURVIVED. The switch
+  that extracts a movement's UUID can return `null` for at least one call site with nothing
+  noticing.
+
+### 6.5 Survivors that are noise
+
+- `Account.apply`, line 86 (`MathMutator` on `version + 1`) — this value is used only inside the
+  *message string* of an `IllegalStateException` that is already being thrown because of a real
+  version-gap. The actual gap detection (`event.version() != version + 1`, line 85) has its own
+  mutant, and that one **is** killed. This survivor changes a diagnostic string's wording, not
+  behaviour — the "changes a `toString`" class of finding the task called out in advance.
+- `Account.id()` (line 109) and `ErrorCode.title()` (line 45) — plain getters returning `null`/`""`
+  instead of the real value. Classic accessor noise.
+- 12 of the 15 `NO_COVERAGE` mutants are accessor methods on exception classes
+  (`ConcurrencyConflictException.accountId/currentVersion/expectedVersion`,
+  `OwnershipException.accountId/caller`, `TinyLedgerException.args`,
+  `IdempotencyConflictException.movementUid`, `DuplicateMovementException.movementUid`,
+  `AccountNotFoundException.accountId`, `AccountId.of`). These exceptions are presumably
+  constructed and asserted against somewhere in the adapter/IT layer (HTTP problem-detail mapping),
+  which the unit suite by design does not run — this is scope, not a domain gap.
+
+### 6.6 What a surviving mutant does and does not prove
+
+**Does prove:** a specific behaviour change at a specific line would pass the current unit suite
+undetected. That is a fact about test coverage, stated precisely enough to act on — §6.4's three
+rows are each fixable by one focused test.
+
+**Does not prove:** that the behaviour is wrong today, that the missing test is worth writing
+immediately, or that 77% is a bad score in isolation. A mutation score is only as meaningful as
+what it's compared against, and this is the first measurement — there is no prior run to regress
+against, the same reasoning §5 gives for not gating on an unbaselined JMH number. What it does
+give, for the first time, is a *ranked* list: three findings that are asymmetric gaps in
+already-half-tested behaviour (withdraw vs. deposit, twice), rather than a raw "83 lines have no
+branch coverage" that JaCoCo already reports without saying which branches matter.
+
+**Not done as part of this task:** writing the three tests §6.4 names. That is deliberately
+separate work — this section is the finding, not the fix.
