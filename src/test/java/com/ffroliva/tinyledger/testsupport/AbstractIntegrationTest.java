@@ -31,6 +31,14 @@ import org.testcontainers.utility.MountableFile;
 @AutoConfigureMockMvc
 public abstract class AbstractIntegrationTest {
 
+    /**
+     * A syntactically valid account UUID that is never opened, for the tests whose refusal happens at the
+     * filter chain and therefore never dereferences it. Using this instead of a real account keeps those
+     * tests from spending a charged write on a fixture they do not use — see {@link #LOWERED_WRITE_LIMIT}.
+     * Lives here rather than in one IT class because two of them need the same literal.
+     */
+    public static final String ANY_UID = "11111111-1111-4111-8111-111111111111";
+
     public static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
                     DockerImageName.parse("postgres:16-alpine"))
             .withDatabaseName("tiny_ledger")
@@ -81,11 +89,12 @@ public abstract class AbstractIntegrationTest {
      * <p>Safe only because of the margin, not because the key is per-principal: the write-per-principal
      * *limit value* is one number shared by every principal's bucket, so lowering it affects
      * {@code alice} and {@code carol} too, not just {@code bob}. Grepped against every
-     * {@code post(}/{@code put(} call site under {@code src/test} before picking this number: the
-     * heaviest existing writer is {@code alice} at 8 charged calls: seven
-     * {@code openAnAccountAs("alice")} paths in {@code SecurityConfigIT}, plus the account opened for
-     * N16 in {@code RoleAuthorizationIT}. {@code carol} is next at 3 charged paths in
-     * {@code RoleAuthorizationIT}. {@code LOWERED_WRITE_LIMIT} stays comfortably above both so
+     * {@code post(}/{@code put(} call site under {@code src/test} before picking this number, and
+     * recounted after every change to these classes: the heaviest existing writer is {@code alice} at
+     * 8 charged calls: seven {@code openAnAccountAs("alice")} paths in {@code SecurityConfigIT}, plus
+     * the account opened for N16 in {@code RoleAuthorizationIT}. {@code carol} is next at 3 charged
+     * paths in {@code RoleAuthorizationIT}, then {@code mallory} at 3 and {@code trent} at 2 in
+     * {@code SecurityConfigIT}. {@code LOWERED_WRITE_LIMIT} stays comfortably above all of them so
      * {@code RateLimitIT} is the only test that ever reaches it — {@code bob} is simply the one
      * fixture user no other test's write call touches at all.
      */
@@ -94,15 +103,23 @@ public abstract class AbstractIntegrationTest {
     /**
      * Review finding I5: every request any {@code *IT} test makes — not just writes — charges the
      * same {@code ip-backstop:127.0.0.1} bucket for the life of this shared context (MockMvc's
-     * default remote address, uniform across every test class). Left at §6.1's real 300/minute, nine
-     * IT classes' fixed call paths contribute 63 requests after P9 (counted from every
-     * {@code MockMvc.perform} path, including the 21-request write-limit proof), plus bounded retries
-     * from P9's audit Awaitility poll. That stays under it comfortably — but
-     * {@code RateLimitIT}'s own flood test (C1) must deliberately exceed whatever this number is, so
-     * it is raised well past anything ambient traffic could reach instead of left at the production
-     * value: the flood test is what exercises the backstop's behaviour now, not this suite's default
-     * traffic, and the production number itself is unexercised here as a result (recorded in the
-     * task report, not hidden). {@code CucumberSpringConfig} needs no equivalent override: it boots
+     * default remote address, uniform across every test class). Nine IT classes' fixed call paths
+     * contribute <strong>67</strong> requests — counted from every {@code MockMvc.perform} path,
+     * expanding {@code SecurityConfigIT}'s {@code openAnAccountAs} helper against its call sites (30),
+     * plus {@code RoleAuthorizationIT} (14), {@code AudienceValidationIT} (2) and
+     * {@code RateLimitIT}'s 21-request write-limit proof; {@code RateLimitIT}'s flood test is excluded
+     * because it sets {@code 203.0.113.222} and charges a different bucket, and the other five IT
+     * classes make no HTTP request at all — plus bounded retries from P9's audit Awaitility poll.
+     *
+     * <p><strong>Two ceilings, and the 67 is quoted against both — the comparison below is a
+     * counterfactual, not a description of what runs.</strong> §6.1's production value is 300/minute,
+     * and 67 would fit under it with room to spare; that is the reassurance a future editor wants
+     * before adding a request. But this bucket is deliberately <em>not</em> left at 300, because
+     * {@code RateLimitIT}'s flood test (C1) must exhaust whatever this constant is — so it is raised
+     * to the value below, far past anything ambient traffic could reach. Nothing in this suite ever
+     * runs against 300: the flood test exercises the backstop's behaviour now, and the production
+     * number is unexercised here as a result (recorded in the task report, not hidden).
+     * {@code CucumberSpringConfig} needs no equivalent override: it boots
      * {@code standalone} (no {@code @ActiveProfiles}, so {@code spring.profiles.default=standalone}
      * applies), and {@code application-standalone.properties} exempts {@code 127.0.0.1} from every
      * bucket outright — an override there would raise a ceiling nothing can ever be charged against.
@@ -136,8 +153,11 @@ public abstract class AbstractIntegrationTest {
 
         registry.add("ledger.rate-limit.write-per-principal.capacity", () -> String.valueOf(LOWERED_WRITE_LIMIT));
         registry.add("ledger.rate-limit.write-per-principal.burst", () -> "0");
-        // 30 seconds per greedily-refilled token: far longer than the 21-request proof itself, so
-        // the configured-capacity assertion cannot be erased by a token arriving mid-loop.
+        // Derived, not chosen: period / capacity = 600s / LOWERED_WRITE_LIMIT (20) = 30 seconds per
+        // greedily-refilled token — far longer than the 21-request proof itself takes, so its
+        // configured-capacity assertion cannot be erased by a token arriving mid-loop. Raise
+        // LOWERED_WRITE_LIMIT and this shrinks proportionally (600s / 40 = 15s), so re-derive the
+        // margin here rather than assuming "30 seconds" still holds.
         registry.add("ledger.rate-limit.write-per-principal.period", () -> "10m");
 
         registry.add("ledger.rate-limit.ip-backstop.capacity", () -> String.valueOf(RAISED_IP_BACKSTOP_LIMIT));
