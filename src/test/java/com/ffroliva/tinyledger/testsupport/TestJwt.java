@@ -16,28 +16,14 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * Mints locally-signed tokens so the suite needs no Keycloak. Real Keycloak is a compose service proven by
- * a boot proof, not by ITs — keeping the suite hermetic and fast.
- *
- * <p>The keypair is a <em>committed file</em> rather than one generated at class-init, and that is the whole
- * point: a generated key could only reach the context as a {@code JwtDecoder} bean, and the only ways to add
- * a bean to one IT class are {@code @Import} or a per-class {@code @TestConfiguration} — both of which change
- * the context cache key and fork the {@code full} context (ADR 0003). A file can instead be named by a
- * property on {@link AbstractIntegrationTest}'s shared {@code @DynamicPropertySource}, so every IT keeps an
- * identical cache key and the suite keeps one context.
- *
- * <p>Only the private half is read here: an {@code RSAPrivateKey} is all {@code RSASSASigner} needs, and the
- * resource server reads the public half itself from {@code classpath:test-jwt-public.pem}.
+ * Mints a token no issuer in the system will accept — signed by a key Keycloak's JWKS will never publish.
+ * Its only remaining job is minting the token that {@code SecurityConfigIT#aTokenThisIssuerDidNotMintIsRefused}
+ * proves is refused, which shows the resource server actually validates against the container rather than
+ * merely still accepting what it always accepted.
  */
 public final class TestJwt {
 
-    /**
-     * The issuer both halves of the test setup agree on, and it is blank on purpose. Boot picks the
-     * network-free {@code public-key-location} decoder only when {@code issuer-uri} has no text, but it adds
-     * a {@code JwtIssuerValidator} whenever that property is merely non-{@code null} — so blanking the
-     * property is not enough on its own, and the minted token has to claim the same blank issuer. Measured,
-     * not assumed: see the task 3 report.
-     */
+    /** Blank, and now incidental: the token is refused on signature, not on issuer. */
     public static final String ISSUER = "";
 
     private static final RSAPrivateKey KEY = load();
