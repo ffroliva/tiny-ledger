@@ -212,6 +212,18 @@ public class LedgerSteps {
     }
 
     /**
+     * N20. Deliberately leaves {@code currentAccount} and every {@code lastMovement*} field alone: the
+     * scenario has to assert afterwards that the <em>original</em> account's movement still stands, and
+     * repointing them at the second account would quietly turn those assertions into claims about the
+     * wrong stream.
+     */
+    @When("the same deposit UID is reused against {string}")
+    public void theSameDepositUidIsReusedAgainst(String name) {
+        originalResponse = lastResponse;
+        lastResponse = put(depositPath(name, lastMovementUid), lastMovementBody);
+    }
+
+    /**
      * N21. Same mechanics as the deposit retry — the remembered path and body are verb-agnostic — but the
      * feature file has to name the verb it is retrying, or the scenario reads as being about deposits.
      */
