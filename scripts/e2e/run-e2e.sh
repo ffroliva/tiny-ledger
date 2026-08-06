@@ -101,4 +101,10 @@ scripts/e2e/wait-for.sh "$BASE_URL/api/v1/accounts" 401 "$READY_TIMEOUT" "tiny-l
 # -m e2e overrides pyproject's addopts, which excludes the marker by default. If this
 # ever reports "deselected" instead of running five tests, the override did not take
 # and the job is green having tested nothing.
-(cd ledger-cli && uv run pytest -m e2e -v)
+#
+# -s because the scenarios print what they actually observed — how many settled, how many version
+# conflicts were retried — and pytest shows captured stdout only on FAILURE. Those lines are the
+# evidence that a concurrency scenario exercised its race at all, and they are worth most on the
+# runs that pass: N19 passed on Windows for a week having never collided, and a suppressed "0
+# version conflicts retried" is exactly how that stayed invisible.
+(cd ledger-cli && uv run pytest -m e2e -v -s)

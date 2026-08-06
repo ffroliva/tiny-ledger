@@ -7,6 +7,7 @@ smoke flows spec §11 names directly (`edge-cases`, `rate-limit`), used by §9.6
 
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -169,18 +170,66 @@ def concurrent_withdrawals(
 
 
 def racing_replays(client: LedgerClient, console: Console, currency: str = "GBP") -> ScenarioResult:
-    """N19: the same movementUid deposited 5 times at once. §6.3 says the loser's unique-constraint
-    violation triggers a re-read by UID, so exactly one 201 and four 200s — credited once."""
+    """N19: the same movementUid deposited 5 times at once — credited exactly once.
+
+    §6.3 claims this needs no special path because "the loser's unique-constraint violation triggers
+    a re-read by UID". **Measured on CI 2026-08-07: that is not what happens.** All five racers read
+    the same stream version, so the four losers fail the event store's version check — which runs
+    *before* the uid check (`PostgresEventStore:66`, `InMemoryEventStore:21`) — and come back 409
+    `/errors/version-conflict`, not 200.
+
+    The DuplicateMovementException path §6.3 names is in fact unreachable for same-stream racers: a
+    racer that had read the *later* version would already have found the uid at
+    `RecordMovementService:68` and returned 200 without ever appending. Both facts live on the same
+    committed row, so there is no window where the version is fresh and the uid is not.
+
+    The guarantee still holds, one retry later. A bare 409 is not terminal (§6.3) — the same
+    contract N2 relies on — and the retry re-reads and finds the stored event. So the real contract
+    is **exactly one 201, four eventual 200s, credited once**, and this scenario asserts that
+    rather than the mechanism the spec guessed at.
+
+    Note this failed on CI while passing locally: on Windows the five threads did not overlap
+    tightly enough to collide, so every request read the post-winner version and took the
+    early-return path. A green run here was never evidence the race had happened.
+    """
     account_uid, name = _open_scratch_account(client, currency, "n19")
     console.print(f"[dim]opened {name} ({account_uid})[/dim]")
     movement_uid = str(uuid.uuid4())
 
+    # Release all five together. Without this the pool threads stagger — measurably so on Windows,
+    # where every request then read the post-winner version and took the early-return path, and the
+    # scenario passed while the race it names never happened. The account open above has already
+    # warmed the on-disk token cache, so no thread pays for a Keycloak round trip after the barrier.
+    start = threading.Barrier(5, timeout=30)
+
+    # Every retried version conflict, so the run says whether the race actually happened.
+    # `list.append` is atomic under CPython, which is all this needs — no lock for a counter.
+    #
+    # Reported, deliberately not asserted. Zero conflicts is a legitimate outcome: if the threads
+    # serialise, each request reads the post-winner version and takes RecordMovementService:68's
+    # early return, and "credited once" still holds. Asserting a collision would make this fail on a
+    # slow machine for a reason that is not a defect. But an unreported zero is how this scenario
+    # passed on Windows while proving nothing, so the number goes in the result either way.
+    conflicts: list[int] = []
+
     def deposit_same_uid() -> bool:
+        # One client per thread: httpx.Client is not documented thread-safe.
         with LedgerClient(client.settings) as own:
-            _, created = own.deposit(
-                account_uid, movement_uid, to_minor_units("30.00", currency), currency
-            )
-            return created
+            start.wait()
+            for _ in range(20):
+                try:
+                    _, created = own.deposit(
+                        account_uid, movement_uid, to_minor_units("30.00", currency), currency
+                    )
+                    return created
+                except LedgerApiError as exc:
+                    # version-conflict is retryable and expected here; idempotency-conflict is a
+                    # different 409 and a real failure, so it must not be swallowed by this loop.
+                    if exc.problem.status == 409 and exc.problem.type.endswith("version-conflict"):
+                        conflicts.append(1)
+                        continue
+                    raise
+            raise AssertionError("no terminal outcome for a racing replay in 20 attempts")
 
     outcomes = fan_out([deposit_same_uid] * 5)
     errors = [str(o.error) for o in outcomes if o.error is not None]
@@ -188,7 +237,10 @@ def racing_replays(client: LedgerClient, console: Console, currency: str = "GBP"
         return ScenarioResult("racing-replays", False, f"a racing replay raised: {errors[0]}")
 
     created_count = sum(1 for o in outcomes if o.value is True)
-    console.print(f"  {created_count} reported 201, {5 - created_count} reported 200")
+    console.print(
+        f"  {created_count} reported 201, {5 - created_count} reported 200 after retry; "
+        f"{len(conflicts)} version conflicts retried"
+    )
     if created_count != 1:
         return ScenarioResult(
             "racing-replays",
@@ -204,7 +256,13 @@ def racing_replays(client: LedgerClient, console: Console, currency: str = "GBP"
             False,
             f"credited more than once: expected {expected}, got {balance.amount.minor_units}",
         )
-    return ScenarioResult("racing-replays", True, "one 201, four 200s, credited exactly once")
+    return ScenarioResult(
+        "racing-replays",
+        True,
+        f"one 201, four 200s, credited exactly once "
+        f"({len(conflicts)} version conflicts retried — 0 means the threads did not collide "
+        f"and the race was not exercised on this run)",
+    )
 
 
 def consistency_boundary(
