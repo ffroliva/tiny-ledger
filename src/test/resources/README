@@ -1,4 +1,6 @@
 test-jwt-private.pem / test-jwt-public.pem are TEST-ONLY keys, generated for this repository and
-committed on purpose. They sign nothing outside the test suite, guard nothing, and are not a secret —
-see TestJwt for why the key has to be a file rather than one generated at class-init (ADR 0003: a
-generated key can only reach the context as a bean, and a per-class bean forks the `full` context).
+committed on purpose. Neither is a secret. The private half is still required: TestJwt signs a token
+with it that no issuer in the system will accept, proving the resource server actually validates against
+Keycloak rather than merely still accepting what it always accepted (see TestJwt). The public half is
+currently unused — nothing reads it or points at it — left committed rather than deleted since deleting
+an unused file that looks like it has a consumer is how the next person reintroduces one.
