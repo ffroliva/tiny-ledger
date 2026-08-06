@@ -8,10 +8,13 @@
 
   Run it against a running `full,load` stack:
 
-      cd .. && docker compose -f docker/docker-compose.yml up -d --wait
+      cd .. && docker compose -f docker/docker-compose.yml up -d (with the wait flag)
       cd .. && ./mvnw -q -DskipTests package
-      java -jar target/tiny-ledger-0.1.0-SNAPSHOT-exec.jar --spring.profiles.active=full,load &
+      java -jar target/tiny-ledger-0.1.0-SNAPSHOT-exec.jar (profiles full,load)
       cd loadtest && ../mvnw gatling:test
+
+  Flags are spelled out rather than written literally above because an XML comment cannot
+  contain a double hyphen. scripts/e2e/run-e2e.sh carries the exact commands.
 
   The `load` profile is not optional. Against `full`'s production limits the per-IP backstop
   (300/min, and exempt-ips is empty in `full`) caps the whole application at five requests per
