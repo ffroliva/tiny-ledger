@@ -94,13 +94,15 @@
   reachable by an unauthenticated request.
 - **Operator-managed IP exemptions** for rate limiting: empty by default, matched on
   `getRemoteAddr()` only and never a header, configuration-only with no runtime endpoint.
-- **The committed test signing key is removed, from the tree and from history.** `TestJwt` now
-  generates a keypair per JVM, which is strictly stronger — the issuer cannot know a key that did not
-  exist when the container started. The key was test-only, had no consumer and no issuer ever trusted
-  it, so no rotation was owed; history was nevertheless rewritten to remove the blob, because a
-  private key reachable in a payments repository is a finding whatever its provenance, and explaining
-  it is worth less than not having it. `.gitignore` refuses `*.pem` so the filename cannot silently
-  return.
+- **The committed test signing key is removed from the tree — not from history.** Deleted in
+  `58f2638`; the blob remains reachable through `f334f81`, and that is a deliberate decision rather
+  than an oversight. `TestJwt` now generates a keypair per JVM, which is strictly stronger — the
+  issuer cannot know a key that did not exist when the container started. The key was test-only, had
+  no consumer, and no issuer ever trusted it, so **no rotation is owed**. Rewriting history to drop
+  the blob was considered and rejected: it would force-push every branch and orphan every clone, to
+  remove a key that authenticates nothing. Should this repository ever be made public, revisit that
+  trade — the calculation changes with the audience, not with the key. `.gitignore:26` refuses
+  `*.pem`, so the filename cannot silently return.
 - **`full` temporarily refused both auditor operations with 403 until the `ledger:auditor` role
   existed.** `accountUid` is optional on the trail and `PostgresAuditTrail` builds `WHERE true`, so once
   `full` became authenticated *any* valid token could page every account's id, amount and reference —
