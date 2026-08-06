@@ -134,3 +134,95 @@ jobs:
             echo "- dependency-check: deferred. It's slow (fetches the full NVD feed) and needs its own"
             echo "  suppression-file pass for false positives — not a drive-by addition to this job."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Stage 8 (spec §12.1) — the Python CLI's own gate. Deliberately needs no Docker: a
+  # ruff or pyright failure should not cost a four-container stack to discover.
+  cli:
+    runs-on: ubuntu-latest
+    needs: gate
+    defaults:
+      run:
+        working-directory: ledger-cli
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # --locked fails on a stale lockfile rather than quietly resolving something else —
+      # the Python equivalent of the reproducibility this repo already demands of Maven.
+      - name: Sync the pinned environment
+        run: uv sync --locked
+
+      - name: Stage 8a — ruff
+        run: uv run ruff check .
+
+      - name: Stage 8b — pyright (strict)
+        run: uv run pyright
+
+      - name: Stage 8c — unit tests
+        run: uv run pytest -v
+
+      # Same guard as the unit and integration jobs: a run that collected nothing exits 0
+      # and is indistinguishable from a green one (AGENTS trap 4).
+      - name: CLI test count — a green build that ran nothing is not green
+        run: |
+          n=$(uv run pytest --collect-only -q 2>/dev/null | grep -cE '^tests/' || echo 0)
+          echo "### CLI tests collected: $n" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$n" -eq 0 ]; then echo "::error::pytest collected zero tests"; exit 1; fi
+
+  # Stage 9 (spec §12.1) — the five real, unmocked e2e scenarios against a running
+  # `full` stack. These tests shipped in f2c9965 and had never executed once: nothing
+  # started a Keycloak on 8081 and nothing ran the app as a process. This job is the
+  # runtime they were missing.
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [gate, cli]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: 25
+          cache: maven
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # --wait blocks on the healthchecks. Without it compose returns as soon as the
+      # containers exist and the app races Keycloak's realm import.
+      - name: Start the full stack (Postgres, Redis, Kafka, Keycloak)
+        run: docker compose -f docker/docker-compose.yml up -d --wait
+
+      - name: Build the application jar
+        run: ./mvnw -q -DskipTests package
+
+      - name: Sync the CLI environment
+        working-directory: ledger-cli
+        run: uv sync --locked
+
+      # LEDGER_PASSWORD is the committed TEST FIXTURE credential from
+      # docker/keycloak/realm-tiny-ledger.json, which is marked "never deploy". It stays
+      # in plain env deliberately: moving a published dev-only value into Secrets would
+      # imply it is one.
+      - name: Stage 9 — e2e scenarios
+        env:
+          LEDGER_PROFILE: full
+          LEDGER_BASE_URL: http://127.0.0.1:8080
+          LEDGER_ISSUER_URI: http://localhost:8081/realms/tiny-ledger
+          LEDGER_CLIENT_ID: ledger-test
+          LEDGER_USERNAME: alice
+          LEDGER_PASSWORD: dev-only
+        run: ./scripts/e2e/run-e2e.sh
+
+      - name: Compose logs on failure
+        if: failure()
+        run: docker compose -f docker/docker-compose.yml logs --no-color --tail 200
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose -f docker/docker-compose.yml down -v
