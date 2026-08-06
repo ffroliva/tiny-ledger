@@ -387,6 +387,45 @@ whole-branch pass even when every task is green.
 
 ---
 
+## 7c. Phase record — Plan 4 (admin on-behalf-of)
+
+Same pipeline, fourth plan. The counts below are from CI runs paired with their conclusion, never from
+implementer reports — a count without its exit code can describe a green that never happened (§5).
+
+| Stage | Outcome |
+|---|---|
+| Implementation | 6 tasks, one commit per task, explicit pathspecs |
+| Per-task reviews | Tasks 1–4 accepted. **Task 5 took three spec reviews and two quality reviews** |
+| Whole-branch review | APPROVED — 0 critical, 1 important (this document's sibling, `CHANGELOG.md`, carried no Plan 4 entry) |
+| Verification | CI run `31115997741`, conclusion `success`: **190** unit, **63** integration, counted from the uploaded XML artifacts |
+| Test growth | 190 unit unchanged, 54 → 63 integration |
+
+**The finding that justified the second review stage.** Task 5's quality reviewer found that
+`ledger:admin` reached production at exactly two call sites — `LedgerController:80` (deposit) and
+`:93` (withdraw) — as two independent positional booleans, and that **no test at any level drove the
+withdrawal path with an admin token.** The first fix covered only the safe direction. Flipping `:93`
+to a literal `true` — where every `ledger:writer` may withdraw from any account — still left the whole
+suite green, because the reader-refusal test dies at the filter chain on its role and the
+cross-account test is a *deposit*.
+
+Both directions are now proven by deliberate violation on CI, not asserted:
+
+| Flip at `LedgerController:93` | Failing test | Assertion |
+|---|---|---|
+| `true` | `SecurityConfigIT#aWriterWithoutAdminCannotWithdrawFromSomeoneElsesAccount` | `expected:<403> but was:<422>` |
+| `false` | `SecurityConfigIT#anAdminRecordsACrossAccountMovementAndTheAuditTrailAttributesItToHim:199` | `expected:<201> but was:<403>` |
+
+One failure out of 63 in each direction, each on the named test. The `422` is itself the evidence that
+the refusal is the *ownership* term and not something else: with the check widened, mallory clears
+ownership, misses idempotency on a fresh UID, and reaches `withdraw` on a zero-balance account.
+
+**`RoleAuthorizationIT:89-91` had already recorded this exact asymmetry once** — a deposit rule with
+two negative tests whose withdrawal twin had none. The repository wrote the lesson down and then
+reproduced it one level deeper: role coverage had both directions on both verbs, ownership coverage
+had both on deposit and one on withdrawal.
+
+---
+
 ## 8. How to audit any of this
 
 | Question | Where to look |
