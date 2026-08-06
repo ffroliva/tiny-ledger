@@ -630,6 +630,14 @@ An operator may exempt specific source IPs from every bucket via a configured li
 default**, matched against the same `getRemoteAddr()` source the buckets themselves read, never a
 header, and configuration-only: there is no endpoint to add or remove an entry at runtime.
 
+**Row 3's 20/minute governs only token-less traffic, not all unauthenticated traffic.** In `full`, a
+request carrying an unparseable, expired, or wrong-audience token is refused by
+`BearerTokenAuthenticationFilter` before `RateLimitFilter` ever runs, so it is metered only by the
+300/minute backstop (row 4) — 15× row 3's budget. This is inherent, not a defect (row 3 needs identity
+to know the caller is unauthenticated, so a rejected token can't be routed there), but a reader
+budgeting abuse capacity from this table alone will be wrong by 15×: sending garbage is strictly
+cheaper for an attacker than sending nothing.
+
 **In `standalone`, rate limiting is entirely inert, deliberately.** The profile binds
 `server.address=127.0.0.1` and its own `ledger.rate-limit.exempt-ips=127.0.0.1` exempts that same
 address, so every request in this mode — which can only ever arrive from loopback, by the bind above
@@ -1462,6 +1470,7 @@ Javadoc, because a reader checks the spec:
 |---|---|---|---|
 | `GET /api/v1/accounts/{accountUid}` for an account owned by someone else | 403 (§6.5, "wrong-owner access returns 403, not 404") | **404** — the controller filters by `accountsOwnedBy` and cannot distinguish absent from unowned | **Unassigned.** A wire-contract change; needs its own test and its own decision |
 | `GET /api/v1/accounts/{accountUid}/transactions` for an account that does not exist | 404 (§6.5) | **200 with an empty page** — the history service returns whatever the projection gives | **Unassigned.** As above |
+| §6.5's "no internal identifier crosses the API boundary" guarantee, for `/error` | Closed (v3.11: `ErrorMvcAutoConfiguration` excluded in both profiles) | **Only one instance is closed, not the class.** Excluding `ErrorMvcAutoConfiguration` removes Boot's `ErrorPageCustomizer`, so nothing escaping a filter reaches an error page this project owns — it falls through to Tomcat's own `ErrorReportValve`, which renders the path, the exception type, a **stack trace**, and the Tomcat version: strictly more than `BasicErrorController` ever leaked. No trigger is reachable today, so this is not live — but the guarantee now rests on "no filter throws" rather than on anything enforced, and `SecurityConfigIT#anErrorDispatchDoesNotEchoTheRequestPath` is a **MockMvc** test with no servlet container, structurally incapable of observing the valve | **Next plan.** Suggested remedy: a ~10-line `@RestController implements ErrorController` at `/error` returning a bare traced `ProblemDetail`, which keeps the container's dispatch pointed at code this project owns and closes the whole class |
 
 ## Revision history
 
