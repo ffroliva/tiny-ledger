@@ -82,20 +82,22 @@ public abstract class AbstractIntegrationTest {
      * *limit value* is one number shared by every principal's bucket, so lowering it affects
      * {@code alice} and {@code carol} too, not just {@code bob}. Grepped against every
      * {@code post(}/{@code put(} call site under {@code src/test} before picking this number: the
-     * heaviest existing writer is {@code alice} at 4 calls across {@code SecurityConfigIT}
-     * ({@code openAnAccountAs}, once per test method, accumulating in one shared bucket for her
-     * subject), then {@code carol} at 3 in {@code RoleAuthorizationIT}. {@code LOWERED_WRITE_LIMIT}
-     * stays comfortably above both so {@code RateLimitIT} is the only test that ever reaches it —
-     * {@code bob} is simply the one fixture user no other test's write call touches at all.
+     * heaviest existing writer is {@code alice} at 8 charged calls: seven
+     * {@code openAnAccountAs("alice")} paths in {@code SecurityConfigIT}, plus the account opened for
+     * N16 in {@code RoleAuthorizationIT}. {@code carol} is next at 3 charged paths in
+     * {@code RoleAuthorizationIT}. {@code LOWERED_WRITE_LIMIT} stays comfortably above both so
+     * {@code RateLimitIT} is the only test that ever reaches it — {@code bob} is simply the one
+     * fixture user no other test's write call touches at all.
      */
-    public static final int LOWERED_WRITE_LIMIT = 10;
+    public static final int LOWERED_WRITE_LIMIT = 20;
 
     /**
      * Review finding I5: every request any {@code *IT} test makes — not just writes — charges the
      * same {@code ip-backstop:127.0.0.1} bucket for the life of this shared context (MockMvc's
      * default remote address, uniform across every test class). Left at §6.1's real 300/minute, nine
-     * IT classes' combined ambient traffic (~40 requests, counted the same way as
-     * {@link #LOWERED_WRITE_LIMIT}'s margin) would stay under it comfortably — but
+     * IT classes' fixed call paths contribute 63 requests after P9 (counted from every
+     * {@code MockMvc.perform} path, including the 21-request write-limit proof), plus bounded retries
+     * from P9's audit Awaitility poll. That stays under it comfortably — but
      * {@code RateLimitIT}'s own flood test (C1) must deliberately exceed whatever this number is, so
      * it is raised well past anything ambient traffic could reach instead of left at the production
      * value: the flood test is what exercises the backstop's behaviour now, not this suite's default
@@ -134,7 +136,9 @@ public abstract class AbstractIntegrationTest {
 
         registry.add("ledger.rate-limit.write-per-principal.capacity", () -> String.valueOf(LOWERED_WRITE_LIMIT));
         registry.add("ledger.rate-limit.write-per-principal.burst", () -> "0");
-        registry.add("ledger.rate-limit.write-per-principal.period", () -> "60s");
+        // 30 seconds per greedily-refilled token: far longer than the 21-request proof itself, so
+        // the configured-capacity assertion cannot be erased by a token arriving mid-loop.
+        registry.add("ledger.rate-limit.write-per-principal.period", () -> "10m");
 
         registry.add("ledger.rate-limit.ip-backstop.capacity", () -> String.valueOf(RAISED_IP_BACKSTOP_LIMIT));
         registry.add("ledger.rate-limit.ip-backstop.burst", () -> "0");

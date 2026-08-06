@@ -162,14 +162,15 @@ Process discipline that does not rely on anyone being careful:
 |---|---|---|
 | Architecture cannot drift | `ApplicationModules.verify()` + ArchUnit in the build | A domain class importing Spring, JPA, Kafka or Redis |
 | API cannot drift | Controllers implement interfaces generated from `openapi.yaml` | An endpoint that no longer matches its contract |
-| CLI cannot drift | Pydantic models generated from the same `openapi.yaml` | A client that disagrees with the server |
-| Specification is executable | Gherkin features run by Cucumber (JVM) and pytest-bdd (Python) | A requirement everyone agreed to and nobody implemented |
-| Performance cannot regress | Gatling assertions as pipeline gates | A p99 that quietly doubles |
-| Secrets never land | `guard-secrets` + `gitleaks` + `detect-secrets` | The obvious catastrophe |
+| CLI cannot drift *(planned, not enforced)* | The Python CLI and its Pydantic generation are not built | — |
+| Committed specification evidence executes | `@standalone` Gherkin runs in Cucumber/JVM; full auth/admin acceptance runs as JUnit integration tests | A covered behaviour everyone agreed to and nobody implemented |
+| Full-catalogue E2E *(planned, not enforced)* | Stage 9's Python CLI and pytest-bdd binding are not built | — |
+| Performance cannot regress *(planned, not enforced)* | Gatling is not wired into CI | — |
+| Current-tree secrets scan | `gitleaks` in CI | A matching secret in the checked-out revision |
 
-Every one of these fails the **build**, not a checklist. The through-line: an agent writing code at
-speed needs mechanical boundaries, not good intentions — the same reason the domain layer has no
-framework imports.
+Rows with an active mechanism fail the **build**; rows explicitly marked planned do not. The
+through-line is to distinguish mechanical boundaries from intended ones — the same reason the domain
+layer's framework boundary is an ArchUnit rule rather than prose.
 
 ---
 

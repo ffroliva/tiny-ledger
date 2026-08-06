@@ -10,9 +10,10 @@ import org.junit.platform.suite.api.SelectClasspathResource;
 import org.junit.platform.suite.api.Suite;
 
 /**
- * Spec §9.3: the acceptance catalogue, run in-process against the standalone profile. Only the
- * {@code @standalone} subset runs here — {@code @full} rows need auth, Kafka and real Postgres, and
- * pytest-bdd re-runs the whole catalogue against the composed stack (§9.6).
+ * Spec §9.3: the committed standalone acceptance subset, run in-process against the standalone
+ * profile. Full-profile auth/admin acceptance is currently covered by JUnit integration tests; the
+ * Python CLI and pytest-bdd stage that would bind the whole catalogue to a composed stack are planned
+ * but not built (§9.6).
  */
 @Suite
 @IncludeEngines("cucumber")
