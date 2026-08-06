@@ -30,7 +30,11 @@ class FapiInteractionIdFilterTest {
     @Test
     void aNewlineBearingValueIsReplacedNotEchoed() throws Exception {
         String forged = "abc\nWARN  forged log line";
-        assertThat(echoed(forged)).doesNotContain("\n").isNotEqualTo(forged);
+        assertThat(echoed(forged))
+                .doesNotContain("\n")
+                .isNotEqualTo(forged)
+                .doesNotContain("abc")
+                .matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
     }
 
     @Test
