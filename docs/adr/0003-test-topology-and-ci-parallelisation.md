@@ -88,8 +88,9 @@ call against the arithmetic above, not a default.
 
 ### 3. Cheap gates fail fast, before expensive minutes are spent.
 
-`spotless:check` and the docs-governance script take seconds. They gate the expensive jobs, so a
-formatting slip never burns container minutes.
+`spotless:check` takes seconds. It gates the expensive jobs, so a formatting slip never burns
+container minutes. (A docs-governance script shared that job when this ADR was written; it was
+removed on 2026-08-06 — spec §8.4.)
 
 ### 4. If integration tests are ever sharded, build once and test many.
 
@@ -118,7 +119,7 @@ never a claim about the suite.
 > paired with one (AGENTS trap 3) and is not a current figure.
 
 **A gap this ADR exposes, and which invalidates the "CI will catch it" assumption:** `.github/workflows/ci.yml`
-currently runs `spotless:check`, `./mvnw -q verify` and the docs-governance script — and **never runs
+at the time ran `spotless:check`, `./mvnw -q verify` and a docs-governance script — and **never ran
 `-Pit` at all**. The 26 integration tests, the entire `full` stack, are gated by nothing. Until the
 two-job split above exists, "CI is the gate" is false, and any reasoning that relies on it is unsound.
 Fixing this is the first task of the Plan 3 CI work.

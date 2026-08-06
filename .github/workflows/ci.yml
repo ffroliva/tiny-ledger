@@ -15,11 +15,10 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: corretto, java-version: '25', cache: maven }
       - name: "Stage 1 — lint & format"
+        # Stage 6 (docs governance) used to run here. Removed 2026-08-06: the check it wrapped
+        # scanned the vendored skill's own directory, not this repository, so it reported
+        # "17 known, 0 new" whatever changed under docs/. See spec §8.4 and §12.1.
         run: ./mvnw -q spotless:check
-      - name: "Stage 6 — docs governance"
-        # SUBFAILED-line parsing assumes pytest's plain short-summary wording; only verified against
-        # the pytest version pinned in this repo, not proven stable across OS/pytest releases.
-        run: python scripts/ci/check_docs_governance.py
 
   unit:
     needs: gate

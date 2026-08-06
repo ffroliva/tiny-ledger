@@ -145,12 +145,18 @@ Every skill above is committed under `.claude/skills/`, with provenance and lice
 |---|---|---|---|
 | [obra/superpowers](https://github.com/obra/superpowers) | 6.2.0 | MIT | 14 skills — `brainstorming`, `writing-plans`, `executing-plans`, `subagent-driven-development`, `dispatching-parallel-agents`, `requesting-code-review`, `test-driven-development`, `verification-before-completion`, and others. The SDD pipeline in §2 is these skills in sequence. |
 | [jdubois/dr-jskill](https://github.com/jdubois/dr-jskill) | main @ 2026-07-30 | Apache-2.0 | Spring Boot project conventions and pinned versions (`versions.json`) — see `spec.md` §1.5 |
-| [ffroliva/iso-compliance](https://github.com/ffroliva/iso-compliance) | 1.0.0 | MIT | ISO 15289 / 27001 A.8 / 25010 assessment and governance enforcement (§10) |
 
-**Vendored, not referenced by URL — deliberately.** An agent skill that changes underneath a
-compliance run invalidates the evidence trail: a reviewer six months from now must be able to see
-the exact instructions that produced the artefacts, not whatever `main` says today. This is the same
-argument as a committed lockfile, applied to instructions. `VENDOR.md` records the upgrade procedure.
+A third skill, `ffroliva/iso-compliance`, was vendored here and has been **removed**. It installed a
+documentation-governance test into CI as stage 6, and that test resolved its repository root inside
+its own skill directory — so it scanned no file this repository owns and passed unconditionally. The
+gate and the skill were deleted rather than repaired: the seventeen ISO 15289 / 27001 artefacts it
+wanted are not appropriate scope for this exercise, and a green gate that verifies nothing is worse
+than no gate at all (`spec.md` §8.4, §12.1).
+
+**Vendored, not referenced by URL — deliberately.** An agent skill that changes underneath a review
+invalidates the evidence trail: a reviewer six months from now must be able to see the exact
+instructions that produced the artefacts, not whatever `main` says today. This is the same argument
+as a committed lockfile, applied to instructions. `VENDOR.md` records the upgrade procedure.
 
 ---
 
