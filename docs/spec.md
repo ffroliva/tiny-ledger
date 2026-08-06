@@ -1028,7 +1028,7 @@ build already runs.
    distinguished in §8.2.
 3. **Committed Gherkin is executable today.** README example extraction belongs to unbuilt stage 9
    (§8.3/§9.6).
-4. **Docs have a lifecycle** — an index, an archive, revision history, and an owner. This is a
+4. **Docs have a lifecycle** — an index, an archive, and a revision history (§8.5). This is a
    documentation convention; no gate enforces it.
 
 ### 8.1 Structure — Diátaxis
@@ -1109,16 +1109,22 @@ than no gate, because it reads as assurance; the honest state is the one recorde
 
 ### 8.5 Lifecycle
 
-- **`docs/INDEX.md`** routes every document — rebuilt once per release, never hand-maintained
-  incrementally.
-- **`docs/_archive/`** holds superseded documents, dated. Deleting documentation destroys the record
-  of why a decision was made; leaving it live makes it a lie. Archiving is the third option.
-- **`CHANGELOG.md`** — Keep a Changelog, **mandatory per change**. Earlier history stays in git and
-  is never retro-documented.
-- **Versioning** — document version derives from `versions.json`; pre-release strings never appear
-  in a governed document.
-- **Ownership** — every document names an owner in its metadata block. An unowned document is a
-  registered gap, not a document.
+- **`docs/INDEX.md`** routes every document, and is **hand-maintained**. Adding a document without
+  adding its row leaves a document nothing points at; nothing detects that.
+- **`docs/_archive/`** holds superseded documents and delivered working artifacts, dated. Deleting
+  documentation destroys the record of why a decision was made; leaving it live where a router points
+  at it makes it a lie. Archiving is the third option, and it is where the implementation plans live.
+- **`CHANGELOG.md`** — Keep a Changelog, per change. Earlier history stays in git and is never
+  retro-documented.
+- **Versioning** — this document's version is assigned by hand in its *Revision history*, one bump
+  per landed change to it. `versions.json` (§1.5) governs *dependency* versions and has nothing to do
+  with document versions; an earlier revision of this section claimed otherwise.
+- **Ownership** — **not done.** No document here names an owner, and for a single-author exercise
+  that would be ceremony. The claim that every document carries an owner was written aspirationally
+  and is withdrawn rather than left standing.
+
+None of the five is enforced by a gate. That is the whole list of documentation mechanisms in this
+repository, and §8.4 says why there is no sixth.
 
 ### 8.6 Docs travel with the code
 
@@ -1486,12 +1492,14 @@ mechanically, because they are exactly the class of error that reviews miss and 
 tolerate.
 
 **Stage numbers are not renumbered when a stage goes.** Slot 6 stays visible and struck through
-because the numbers are referenced by name — in workflow step titles, in ADR 0003, and throughout
-this document — and a silent shift would quietly repoint every one of those. The same reasoning
-governs ADR numbering (`docs/adr/`, where `0002` was never written and the gap is left standing).
-Nothing occupies slot 6; `spotless:check` at stage 1 is the whole of the `gate` job now, and no
-documentation regression is caught mechanically. §8.4 says why the check was deleted rather than
-fixed.
+because these numbers are cited by name elsewhere — `.github/workflows/ci.yml` names "Stage 7" at
+`:61` and "Stage 11" at `:88` and `:123`, `docs/INDEX.md:50` credits a plan with "CI stage 11", and
+§8.3, §8.2 and §5 of this document point at stages 8 and 9. Shifting 7–12 down one would silently
+repoint every one of them, and a rename is only proven by asserting the old name is gone — real work
+to erase a cosmetic gap. The same reasoning governs ADR numbering (`docs/adr/`, where `0002` was
+never written and the gap is left standing). Nothing occupies slot 6; `spotless:check` at stage 1 is
+the whole of the `gate` job now, and no documentation regression is caught mechanically. §8.4 says
+why the check was deleted rather than fixed.
 
 `resolve-drift` is currently a placeholder step that only echoes where the Python CLI drift job will
 land. The planned job will install from declared ranges rather than the lockfile and smoke-import the

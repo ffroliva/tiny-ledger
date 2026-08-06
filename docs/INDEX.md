@@ -6,7 +6,7 @@ that answers the question in front of it, rather than reading 200KB of specifica
 The rules you need *before* touching anything are not here — they are in **`../AGENTS.md`** (source of
 truth, vendor-neutral; every tool's convention file routes to it).
 
-Quadrants are Diátaxis, per spec §8.5.
+Quadrants are Diátaxis, per spec §8.1.
 
 ## Read this when…
 
@@ -22,20 +22,20 @@ Quadrants are Diátaxis, per spec §8.5.
 | `agentic-workflow.md` | Understanding how this was built — including §5, where the agents were wrong, and §7, the per-phase gate record | Explanation |
 | `_archive/plans/`, `_archive/specs/` | Tracing *why* a decision was taken, or auditing what an agent was actually instructed to do. **Working artifacts, not documentation** — see below | — |
 
-There is no `0002` in `adr/`. It was never written — the Postgres-event-store decision that
-`spec.md:337` and `:423` call "ADR-002" lives in the spec itself, and `0003` took the next free
-number rather than occupy one the spec already pointed elsewhere (`adr/0003:6-10`). ADR numbers are
-immutable identifiers; the gap stays, and this row is where a reader meets it instead of finding it
-ten lines into an unrelated ADR.
+**There is no `0002` in `adr/`, and there never was.** The Postgres-event-store decision that
+`spec.md` §4.2 and §4.3 call "ADR-002" was written into the spec instead of into its own file, and
+`0003` took the next free number rather than occupy one the spec already pointed elsewhere
+(`adr/0003`, numbering note). ADR numbers are identifiers, so the gap is permanent rather than
+tidied away — this is where a reader meets it, instead of finding it buried in an unrelated ADR.
 
-The Diátaxis quadrants above are the ones that have documents. `docs/` has no `how-to/` or
-`tutorial/` tree: the README is the tutorial and the operational how-tos are not written. Empty
-directories were removed rather than left as a promise (spec §8.1).
+The Diátaxis quadrants above (spec §8.1) are the ones that have documents. `docs/` has no `how-to/`
+or `tutorial/` tree: the README is the tutorial, and the operational how-tos are not written. Both
+directories held a `.gitkeep` and nothing else, and were removed rather than left as a promise.
 
 ## Archived plans, newest first
 
 **These are agent execution scripts, not documentation.** They read "Step 1: write the failing test",
-carry commit heredocs, and run to 8,838 lines against this specification's 1,583 — because they were
+carry commit heredocs, and run to 8,838 lines — over five times the length of `spec.md` — because they were
 written to be executed by a subagent, not read by a person. They are archived rather than deleted so
 the record of *why* each change was made survives, and so a reviewer can check the account in
 `agentic-workflow.md` against the instructions that actually produced the code. **Nothing here is
@@ -57,7 +57,7 @@ is being built next is §14 of `spec.md`, and what is known-open is its *Open is
 | `_archive/plans/2026-08-04-open-banking-standards-review.md` | Four items approved. **Contains two known errors** corrected by the Plan 3 research: the DPoP DSL is `@since 7.1` and opt-in, not "6.5+ auto-validated", and Keycloak is 26.7 |
 | `_archive/plans/2026-08-04-full-persistence.md` | Delivered (Plan 2) |
 | `_archive/plans/2026-08-03-standalone-core.md` | Delivered (Plan 1) |
-| `_archive/specs/2026-08-05-spec-v3.9-and-proposal-repair-design.md` | The design doc behind the v3.9 plan two rows above |
+| `_archive/specs/2026-08-05-spec-v3.9-and-proposal-repair-design.md` | The design doc behind `_archive/plans/2026-08-05-spec-v3.9-and-proposal-repair.md` |
 
 ## Keeping this honest
 
