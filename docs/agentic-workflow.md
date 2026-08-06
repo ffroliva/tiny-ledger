@@ -214,7 +214,9 @@ I overrode it. The reasoning:
 
 **The hedge that makes it safe:** the repository runs in two modes from one codebase.
 `./mvnw spring-boot:run` is in-memory, unauthenticated and dependency-free — the brief, satisfied
-exactly. `docker compose up` is the full stack. Same domain code, different adapters. A reviewer who
+exactly. `docker compose -f docker/docker-compose.yml up -d` plus the jar on the host is the `full`
+mode — Compose carries the infrastructure (Postgres, Redis, Kafka) and nothing else: no Keycloak
+service, no app service. Same domain code, different adapters. A reviewer who
 wants the tiny ledger gets the tiny ledger in one command; a reviewer who wants the depth has it.
 That the hedge is *possible at all* is the argument for the hexagonal boundaries in `spec.md` §4 —
 the architecture is what buys the option.
@@ -381,5 +383,5 @@ whole-branch pass even when every task is green.
 | What was decided, and why? | `docs/spec.md` and `docs/adr/` |
 | In what order was it built? | `docs/superpowers/plans/*.md`, and the commit history — one commit per task, each landing only after its review was accepted |
 | Was each step reviewed? | The per-task ledger, review packages and reviewer reports live under `.superpowers/sdd/<plan>/`, which is **session-local and gitignored** — deliberately, it is working state. What survives in the repo is §7 above, the commit messages, and this document |
-| Does it do what it claims? | `./mvnw verify` — unit, architecture, BDD, use-case (starts no containers); `./mvnw verify -Pit` — the 36 integration tests against real Postgres, Redis and Kafka; then `docker compose up` for the `full` stack |
+| Does it do what it claims? | `./mvnw verify` — unit, architecture, BDD, use-case (starts no containers); `./mvnw verify -Pit` — the integration suite against real Postgres, Redis, Kafka **and Keycloak**. No fixed count is quoted here on purpose: count `<testcase ` in that run's own `target/failsafe-reports/*.xml` and read it beside that run's exit code (§5, AGENTS trap 3) — a number carried in prose goes stale the next time a test is added. `docker compose -f docker/docker-compose.yml up -d` then starts the `full` profile's **infrastructure only** — Postgres, Redis, Kafka; there is no Keycloak service and no app service in that file — and the jar runs on the host against the published ports |
 | What was left out on purpose? | `docs/spec.md` §13 non-goals and §15 assumptions |
