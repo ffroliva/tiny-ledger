@@ -168,6 +168,45 @@ def concurrent_withdrawals(
     )
 
 
+def racing_replays(client: LedgerClient, console: Console, currency: str = "GBP") -> ScenarioResult:
+    """N19: the same movementUid deposited 5 times at once. §6.3 says the loser's unique-constraint
+    violation triggers a re-read by UID, so exactly one 201 and four 200s — credited once."""
+    account_uid, name = _open_scratch_account(client, currency, "n19")
+    console.print(f"[dim]opened {name} ({account_uid})[/dim]")
+    movement_uid = str(uuid.uuid4())
+
+    def deposit_same_uid() -> bool:
+        with LedgerClient(client.settings) as own:
+            _, created = own.deposit(
+                account_uid, movement_uid, to_minor_units("30.00", currency), currency
+            )
+            return created
+
+    outcomes = fan_out([deposit_same_uid] * 5)
+    errors = [str(o.error) for o in outcomes if o.error is not None]
+    if errors:
+        return ScenarioResult("racing-replays", False, f"a racing replay raised: {errors[0]}")
+
+    created_count = sum(1 for o in outcomes if o.value is True)
+    console.print(f"  {created_count} reported 201, {5 - created_count} reported 200")
+    if created_count != 1:
+        return ScenarioResult(
+            "racing-replays",
+            False,
+            f"expected exactly one 201 from 5 racing PUTs, got {created_count}",
+        )
+
+    balance = client.get_balance(account_uid, strong=True)
+    expected = to_minor_units("30.00", currency)
+    if balance.amount.minor_units != expected:
+        return ScenarioResult(
+            "racing-replays",
+            False,
+            f"credited more than once: expected {expected}, got {balance.amount.minor_units}",
+        )
+    return ScenarioResult("racing-replays", True, "one 201, four 200s, credited exactly once")
+
+
 def consistency_boundary(
     client: LedgerClient, console: Console, currency: str = "GBP"
 ) -> ScenarioResult:
@@ -294,6 +333,7 @@ SCENARIOS = {
     "movement-chain": movement_chain,
     "zero-boundary": zero_boundary,
     "concurrent-withdrawals": concurrent_withdrawals,
+    "racing-replays": racing_replays,
     "consistency-boundary": consistency_boundary,
     "edge-cases": edge_cases,
     "rate-limit": rate_limit,
