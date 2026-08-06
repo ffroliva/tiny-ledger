@@ -88,9 +88,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: "Stage 11 (partial) — secret scan (gitleaks)"
         # Pinned binary + published sha256, not the marketplace Action: this pipeline's own rule
-        # (§12.1 closing note) is that every gate reproduces locally in a fresh clone offline — a
-        # binary a reviewer can download and run themselves beats an Action of unclear license terms
-        # on a private repo. Pin bump = change both the version and the hash together, deliberately.
+        # (§12.1 closing note) is that a gate should be reproducible locally — a binary a reviewer can
+        # download and run themselves beats an Action of unclear license terms on a private repo. Not
+        # offline: the curl below fetches the release on every run, and no binary is vendored here.
+        # Pin bump = change both the version and the hash together, deliberately.
         #
         # --no-git scans the files at this commit, not the full git-log history. A history walk would
         # re-flag the same line in every past commit that ever touched it, on every future push,
