@@ -37,8 +37,10 @@
   boundary in the composition root. Writes and strong reads keep their in-service check, because that
   one authorises against the rehydrated aggregate — the system of record — which a boundary check
   cannot see. Absent answers 404, wrong-owner answers 403 (spec §6.5).
-- `x-fapi-interaction-id` echo-or-mint, ordered ahead of the security chain so the 401 and the
-  chain-level 403 are correlatable, and surfaced as the `traceId` on every problem response.
+- `x-fapi-interaction-id` **validate-or-mint**, ordered ahead of the security chain so the 401 and the
+  chain-level 403 are correlatable, and surfaced as the `traceId` on every problem response. A value
+  that is not an RFC 4122 UUID is **replaced**, not echoed and not sanitised — an allowlist cannot be
+  defeated by an encoding a stripper did not anticipate, and the rejected value is never logged.
 - One `full` Spring test context for the whole integration suite, and a CI split into
   `gate`/`unit`/`integration` — **the 26 integration tests were previously gated by nothing.**
 - `..shared..` fenced from frameworks alongside `..domain..`. ArchUnit checks *direct* dependencies,
@@ -46,6 +48,23 @@
   while a Spring import reached the domain's transitive compile path.
 
 ### Security
+- **Rate limiting (§6.1) exists.** Token buckets per principal and per IP, whichever is more
+  restrictive; Bucket4j over Redis in `full`, Caffeine in `standalone`; `429` with `Retry-After` and
+  the catalogued problem type. The per-IP backstop runs **ahead of authentication**, so a flood of
+  invalid bearer tokens is metered — placed behind it, the cheapest flood was unmetered. A Redis
+  outage fails **open** after a bounded 250 ms, rather than taking the API down.
+- **Token audience is validated.** With only `issuer-uri`, any token the realm issued was accepted —
+  including one minted for a different client.
+- **Boot's `/error` no longer echoes the request path** (§6.5 forbids internal identifiers crossing
+  the boundary). Excluded in both properties files, because a profile declaration shadows the base
+  entirely rather than appending to it.
+- **A forged `x-fapi-interaction-id` can no longer write log lines.** The header was echoed verbatim
+  into the response and the MDC, and the filter runs ahead of the security chain — so log forging was
+  reachable by an unauthenticated request.
+- **Operator-managed IP exemptions** for rate limiting: empty by default, matched on
+  `getRemoteAddr()` only and never a header, configuration-only with no runtime endpoint.
+- **The committed test signing key is gone.** `TestJwt` generates a keypair per JVM, which is
+  strictly stronger — the issuer cannot know a key that did not exist when the container started.
 - **`full` temporarily refused both auditor operations with 403 until the `ledger:auditor` role
   existed.** `accountUid` is optional on the trail and `PostgresAuditTrail` builds `WHERE true`, so once
   `full` became authenticated *any* valid token could page every account's id, amount and reference —
