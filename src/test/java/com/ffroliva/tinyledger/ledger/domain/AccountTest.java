@@ -47,6 +47,30 @@ class AccountTest {
         assertThat(deposited.balanceAfter()).isEqualTo(new Money(GBP, 10_000));
     }
 
+    @Test // §2.3/§2.4: the use case stamps the caller onto every event it emits, as `actor`
+    void depositStampsTheCallerAsActor() {
+        Account account = openedWith(0);
+        List<LedgerEvent> events = account.deposit(
+                new Deposit("alice", account.id(), UUID.randomUUID(), new Money(GBP, 10_000), "rent"), T);
+        MoneyDeposited deposited = (MoneyDeposited) events.getFirst();
+        assertThat(deposited.actor()).isEqualTo("alice");
+    }
+
+    @Test // AccountOpened has no on-behalf-of form (§15.8) — actor is always the owner, never a component
+    void accountOpenedDerivesActorFromOwner() {
+        List<LedgerEvent> events = Account.open(AccountId.random(), new OpenAccount("alice", "ACC-001", GBP), T);
+        AccountOpened opened = (AccountOpened) events.getFirst();
+        assertThat(opened.actor()).isEqualTo("alice");
+    }
+
+    @Test // a rejection is audit-relevant too (§2.3) — it also carries who attempted it
+    void rejectionStampsTheCallerAsActor() {
+        Account account = openedWith(5_000);
+        List<LedgerEvent> events = account.withdraw(
+                new Withdraw("alice", account.id(), UUID.randomUUID(), new Money(GBP, 10_000), null), T);
+        assertThat(((MovementRejected) events.getFirst()).actor()).isEqualTo("alice");
+    }
+
     @Test
     void withdrawalBeyondBalanceEmitsMovementRejectedNotAnException() {
         List<LedgerEvent> history = historyWith(5_000);
@@ -104,7 +128,8 @@ class AccountTest {
                 .isInstanceOf(IllegalArgumentException.class);
         List<LedgerEvent> gapped = historyWith(0);
         AccountId id = gapped.getFirst().accountId();
-        gapped.add(new MoneyDeposited(id, 3, T, UUID.randomUUID(), new Money(GBP, 100), null, new Money(GBP, 100)));
+        gapped.add(
+                new MoneyDeposited(id, 3, T, UUID.randomUUID(), new Money(GBP, 100), null, new Money(GBP, 100), null));
         assertThatThrownBy(() -> Account.rehydrate(gapped)).isInstanceOf(IllegalStateException.class);
     }
 

@@ -125,9 +125,17 @@ Immutable Java `record`s, versioned by schema:
 | Event | Emitted when |
 |---|---|
 | `AccountOpened` | Account created. Carries the initial `currency`, the **`owner`** (caller principal) and the account **`name`** — ownership and naming are facts of the stream, not sidecar state. |
-| `MoneyDeposited` | Funds credited. |
-| `MoneyWithdrawn` | Funds debited after invariant checks pass. |
-| `MovementRejected` | A command failed a business invariant. Recorded, not thrown away — rejections are audit-relevant. |
+| `MoneyDeposited` | Funds credited. Carries the **`actor`**. |
+| `MoneyWithdrawn` | Funds debited after invariant checks pass. Carries the **`actor`**. |
+| `MovementRejected` | A command failed a business invariant. Recorded, not thrown away — rejections are audit-relevant. Carries the **`actor`**. |
+
+Every event answers **`actor()`** — the principal that issued the command — declared on the sealed
+`LedgerEvent` interface beside `accountId`, `version` and `occurredAt`, so the audit projection maps
+one accessor instead of switching on type. On the three movement events it is a record component; on
+`AccountOpened` it is derived from `owner`, because an account has no owner to act on behalf of until
+it exists (§15.8). For an owner-initiated movement `actor` equals the stream's `owner`; when an admin
+acts on the owner's behalf (§6.4) the pair `(actor, owner)` is the whole record of the delegation —
+one immutable row answering both *who acted* and *whose account it was*.
 
 Events are the write model's source of truth. Nothing else is.
 
@@ -135,7 +143,9 @@ Events are the write model's source of truth. Nothing else is.
 
 `OpenAccount`, `Deposit`, `Withdraw`. Every command carries the **caller principal** (the JWT
 subject; a fixed local principal in `standalone`) — authorisation is a use-case concern (§6.4), and
-a use case cannot check what it never receives. `Deposit` and `Withdraw` also carry a
+a use case cannot check what it never receives. The principal is not only checked: the use case
+stamps it onto every event it emits as the `actor` (§2.3), so *who acted* survives in the log rather
+than only in a request that is already gone. `Deposit` and `Withdraw` also carry a
 **client-generated movement UID** — at once the idempotency key and the movement's permanent
 identity (§6.3) — and an optional free-text `reference` that travels to the feed item (§7).
 
@@ -328,7 +338,8 @@ infrastructure failure and should not acquire one.
 3. Movement UID checked **globally** via `findByMovementUid` (§4.2's unique index) — a replay is
    answered from the existing event, never re-applied; a UID found on a *different* stream is an
    idempotency conflict (§6.3).
-4. Command applied; the aggregate emits events or rejects.
+4. Command applied; the aggregate emits events or rejects — each emitted event stamped with the
+   caller principal as its `actor` (§2.3).
 5. Events appended to the store **with an optimistic-concurrency check on stream version**;
    a conflict returns `409` and the caller retries.
 6. Events published to subscribers via the transactional outbox (§4.3).

@@ -12,5 +12,6 @@ public record MovementRejected(
         UUID movementUid,
         MovementType type,
         Money amount,
-        String reason)
+        String reason,
+        String actor)
         implements LedgerEvent {}

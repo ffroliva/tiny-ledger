@@ -38,11 +38,18 @@ public final class Account {
         requirePositive(cmd.amount());
         if (!currency.equals(cmd.amount().currency())) {
             return List.of(new MovementRejected(
-                    id, version + 1, now, cmd.movementUid(), MovementType.DEPOSIT, cmd.amount(), "currency-mismatch"));
+                    id,
+                    version + 1,
+                    now,
+                    cmd.movementUid(),
+                    MovementType.DEPOSIT,
+                    cmd.amount(),
+                    "currency-mismatch",
+                    cmd.caller()));
         }
         Money after = balance().plus(cmd.amount());
-        return List.of(
-                new MoneyDeposited(id, version + 1, now, cmd.movementUid(), cmd.amount(), cmd.reference(), after));
+        return List.of(new MoneyDeposited(
+                id, version + 1, now, cmd.movementUid(), cmd.amount(), cmd.reference(), after, cmd.caller()));
     }
 
     public List<LedgerEvent> withdraw(Withdraw cmd, Instant now) {
@@ -55,7 +62,8 @@ public final class Account {
                     cmd.movementUid(),
                     MovementType.WITHDRAWAL,
                     cmd.amount(),
-                    "currency-mismatch"));
+                    "currency-mismatch",
+                    cmd.caller()));
         }
         Money after = balance().minus(cmd.amount());
         if (!OverdraftPolicy.permits(after)) {
@@ -66,10 +74,11 @@ public final class Account {
                     cmd.movementUid(),
                     MovementType.WITHDRAWAL,
                     cmd.amount(),
-                    "insufficient-funds"));
+                    "insufficient-funds",
+                    cmd.caller()));
         }
-        return List.of(
-                new MoneyWithdrawn(id, version + 1, now, cmd.movementUid(), cmd.amount(), cmd.reference(), after));
+        return List.of(new MoneyWithdrawn(
+                id, version + 1, now, cmd.movementUid(), cmd.amount(), cmd.reference(), after, cmd.caller()));
     }
 
     private void apply(LedgerEvent event) {

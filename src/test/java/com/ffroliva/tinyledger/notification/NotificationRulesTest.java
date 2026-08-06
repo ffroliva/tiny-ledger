@@ -25,7 +25,7 @@ class NotificationRulesTest {
     void depositAboveThresholdProducesLargeMovementNotification() {
         UUID movementUid = UUID.randomUUID();
         MoneyDeposited event = new MoneyDeposited(
-                account, 2, T0, movementUid, new Money(GBP, 1_500_000), "ref", new Money(GBP, 1_500_000));
+                account, 2, T0, movementUid, new Money(GBP, 1_500_000), "ref", new Money(GBP, 1_500_000), null);
 
         Notification notification = rules.evaluate(event).orElseThrow();
 
@@ -39,7 +39,7 @@ class NotificationRulesTest {
     @Test
     void depositBelowThresholdProducesNoNotification() {
         MoneyDeposited event = new MoneyDeposited(
-                account, 2, T0, UUID.randomUUID(), new Money(GBP, 2_000), "ref", new Money(GBP, 2_000));
+                account, 2, T0, UUID.randomUUID(), new Money(GBP, 2_000), "ref", new Money(GBP, 2_000), null);
 
         assertThat(rules.evaluate(event)).isEmpty();
     }
@@ -53,7 +53,8 @@ class NotificationRulesTest {
                 UUID.randomUUID(),
                 new Money(GBP, THRESHOLD_MINOR_UNITS),
                 "ref",
-                new Money(GBP, THRESHOLD_MINOR_UNITS));
+                new Money(GBP, THRESHOLD_MINOR_UNITS),
+                null);
 
         assertThat(rules.evaluate(event)).isPresent();
     }
@@ -61,7 +62,7 @@ class NotificationRulesTest {
     @Test // spec §3: "single movement" is not deposit-only
     void withdrawalAboveThresholdProducesLargeMovementNotification() {
         MoneyWithdrawn event = new MoneyWithdrawn(
-                account, 2, T0, UUID.randomUUID(), new Money(GBP, 1_500_000), "ref", new Money(GBP, 0));
+                account, 2, T0, UUID.randomUUID(), new Money(GBP, 1_500_000), "ref", new Money(GBP, 0), null);
 
         assertThat(rules.evaluate(event)).isPresent();
         assertThat(rules.evaluate(event).orElseThrow().kind()).isEqualTo("LARGE_MOVEMENT");
@@ -71,7 +72,7 @@ class NotificationRulesTest {
     void everyMovementRejectedProducesRejectionNotificationRegardlessOfAmount() {
         UUID movementUid = UUID.randomUUID();
         MovementRejected event = new MovementRejected(
-                account, 2, T0, movementUid, MovementType.WITHDRAWAL, new Money(GBP, 500), "insufficient-funds");
+                account, 2, T0, movementUid, MovementType.WITHDRAWAL, new Money(GBP, 500), "insufficient-funds", null);
 
         Notification notification = rules.evaluate(event).orElseThrow();
 

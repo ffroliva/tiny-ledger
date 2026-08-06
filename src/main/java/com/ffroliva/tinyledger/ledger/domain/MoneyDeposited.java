@@ -12,5 +12,6 @@ public record MoneyDeposited(
         UUID movementUid,
         Money amount,
         String reference,
-        Money balanceAfter)
+        Money balanceAfter,
+        String actor)
         implements LedgerEvent {}

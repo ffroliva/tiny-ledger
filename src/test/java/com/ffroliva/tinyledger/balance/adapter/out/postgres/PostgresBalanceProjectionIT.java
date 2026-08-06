@@ -61,8 +61,8 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
         UUID movementUid = UUID.randomUUID();
 
         projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
-        projection.apply(
-                new MoneyDeposited(id, 2, t1, movementUid, Money.of("GBP", 5000), "salary", Money.of("GBP", 5000)));
+        projection.apply(new MoneyDeposited(
+                id, 2, t1, movementUid, Money.of("GBP", 5000), "salary", Money.of("GBP", 5000), null));
 
         BalanceView balance = projection.balance(id).orElseThrow();
         assertThat(balance.amount().minorUnits()).isEqualTo(5000);
@@ -82,7 +82,7 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
 
         projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
         projection.apply(new MoneyDeposited(
-                id, 2, t1, UUID.randomUUID(), Money.of("GBP", 5000), "salary", Money.of("GBP", 5000)));
+                id, 2, t1, UUID.randomUUID(), Money.of("GBP", 5000), "salary", Money.of("GBP", 5000), null));
         projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP)); // replay of the opening
 
         BalanceView balance = projection.balance(id).orElseThrow();
@@ -107,7 +107,7 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
         long version = 2;
         for (UUID uid : descending) {
             projection.apply(new MoneyDeposited(
-                    id, version++, t0.plusSeconds(60), uid, Money.of("GBP", 100), "tx", Money.of("GBP", 100)));
+                    id, version++, t0.plusSeconds(60), uid, Money.of("GBP", 100), "tx", Money.of("GBP", 100), null));
         }
 
         HistoryPage page = projection.history(id, new HistoryQuery(null, 10, null, null));
@@ -124,7 +124,14 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
 
         Instant microsecondPrecision = t0.plusSeconds(60).plusNanos(500_000);
         projection.apply(new MoneyDeposited(
-                id, 2, microsecondPrecision, UUID.randomUUID(), Money.of("GBP", 100), "tx", Money.of("GBP", 100)));
+                id,
+                2,
+                microsecondPrecision,
+                UUID.randomUUID(),
+                Money.of("GBP", 100),
+                "tx",
+                Money.of("GBP", 100),
+                null));
 
         HistoryPage page = projection.history(id, new HistoryQuery(null, 10, microsecondPrecision, null));
 
@@ -142,7 +149,7 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
 
         Instant storedAt = t0.plusSeconds(60).plusNanos(700_000);
         projection.apply(new MoneyDeposited(
-                id, 2, storedAt, UUID.randomUUID(), Money.of("GBP", 100), "tx", Money.of("GBP", 100)));
+                id, 2, storedAt, UUID.randomUUID(), Money.of("GBP", 100), "tx", Money.of("GBP", 100), null));
 
         Instant earlierInTheSameMilli = t0.plusSeconds(60).plusNanos(200_000);
         HistoryPage page = projection.history(id, new HistoryQuery(null, 10, null, earlierInTheSameMilli));
@@ -165,7 +172,8 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
                     UUID.randomUUID(),
                     Money.of("GBP", 100 * (i + 1)),
                     "tx-" + i,
-                    Money.of("GBP", 100 * (i + 1) * (i + 1))));
+                    Money.of("GBP", 100 * (i + 1) * (i + 1)),
+                    null));
         }
 
         // Page 1: limit 2
@@ -203,7 +211,8 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
                     movementUid,
                     Money.of("GBP", 100 * i),
                     "tx-" + i,
-                    Money.of("GBP", 100 * i)));
+                    Money.of("GBP", 100 * i),
+                    null));
         }
 
         HistoryPage page1 = projection.history(id, new HistoryQuery(null, 2, null, null));

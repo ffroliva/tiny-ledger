@@ -25,7 +25,7 @@ public interface EventStoreContract {
 
     private static MoneyDeposited deposit(AccountId id, long version, UUID uid) {
         Money amount = new Money(GBP, 1_000);
-        return new MoneyDeposited(id, version, T, uid, amount, null, new Money(GBP, 1_000 * (version - 1)));
+        return new MoneyDeposited(id, version, T, uid, amount, null, new Money(GBP, 1_000 * (version - 1)), null);
     }
 
     @Test

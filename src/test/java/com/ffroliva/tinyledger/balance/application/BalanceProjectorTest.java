@@ -82,7 +82,8 @@ class BalanceProjectorTest {
                 UUID.randomUUID(),
                 MovementType.WITHDRAWAL,
                 new Money(GBP, 99_000),
-                "insufficient-funds"));
+                "insufficient-funds",
+                null));
 
         // the feed shows settled movements only; the raw event stream is the auditor's view
         BalanceView view = projection.balance(account).orElseThrow();
@@ -192,11 +193,11 @@ class BalanceProjectorTest {
 
     private static MoneyDeposited deposit(AccountId id, long version, long amount, long balanceAfter, Instant at) {
         return new MoneyDeposited(
-                id, version, at, UUID.randomUUID(), new Money(GBP, amount), "ref", new Money(GBP, balanceAfter));
+                id, version, at, UUID.randomUUID(), new Money(GBP, amount), "ref", new Money(GBP, balanceAfter), null);
     }
 
     private static MoneyWithdrawn withdraw(AccountId id, long version, long amount, long balanceAfter, Instant at) {
         return new MoneyWithdrawn(
-                id, version, at, UUID.randomUUID(), new Money(GBP, amount), "ref", new Money(GBP, balanceAfter));
+                id, version, at, UUID.randomUUID(), new Money(GBP, amount), "ref", new Money(GBP, balanceAfter), null);
     }
 }
