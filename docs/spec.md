@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.9
+**Version:** 3.10
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -695,10 +695,11 @@ constrains where code may live, not where a check may be made.
 
 #### Test users
 
-To be provisioned by `docker/keycloak/realm-tiny-ledger.json`, imported on container start — fixtures,
+Provisioned by `docker/keycloak/realm-tiny-ledger.json`, imported on container start — fixtures,
 not credentials: passwords are `dev-only` throughout and the realm is never deployed anywhere but a
-laptop and CI. **Not built at v3.9** — neither the realm file nor a Keycloak service exists yet; the
-table below is the intended fixture set, not a description of the tree.
+laptop and CI. **Built:** the realm file exists and `AbstractIntegrationTest` imports it into a real
+Keycloak container for every IT (§9.4); the table below is the intended fixture set, not a description
+of the tree.
 
 | User | Roles | Owns | Exists to prove |
 |---|---|---|---|
@@ -715,8 +716,8 @@ ownership check against the JWT subject stops her reading `ACC-001`. A test suit
 
 `ACC-001`…`ACC-900` are account *names* (Starling's `AccountV2.name`), not identifiers — the API
 knows only `accountUid`s, pinned to deterministic UUIDs by `docker/keycloak/realm-tiny-ledger.json`
-plus a seed script the compose stack runs once, so scenarios can reference them — neither the realm
-file nor the seed script is built at v3.9 (see the gaps table).
+plus a seed script the compose stack runs once, so scenarios can reference them — the realm file is
+built; **the seed script is still not**.
 
 **The ownership mechanism, end to end:** `AccountOpened` records the `owner` (§2.3), so ownership
 is a fact of the event stream, not sidecar state; every command and query carries the caller
@@ -1171,9 +1172,9 @@ Postgres, because an in-memory store can pass it for the wrong reason — which 
 port contract test in §9.2b is there to rule out.
 
 ### 9.4 Integration — Spring Boot Test + Testcontainers
-Real Postgres, Kafka and Redis in containers. Keycloak is **not** among them at v3.9 — the suite
-trusts a committed test key via `public-key-location`, so the production `issuer-uri` decoder branch
-is unexercised (see the gaps table). Event-store concurrency semantics, event externalisation,
+Real Postgres, Kafka, Redis **and Keycloak** in containers: the production `issuer-uri` decoder
+branch is exercised by every IT, and `AbstractIntegrationTest` mints tokens against the real realm
+rather than trusting a committed test key. Event-store concurrency semantics, event externalisation,
 projection updates, cache eviction on events, JWT validation.
 
 Integration tests are named **`*IT`** and run by **Failsafe** at the `verify` phase; `*Test` stays
@@ -1317,7 +1318,7 @@ after the load test.
 | 4 | **Contract** | OpenAPI-generated interfaces compile; port contract suites (§9.2b) | every push |
 | 5 | BDD in-process | Cucumber, the `@standalone`-tagged subset (§9.3) — auth/Kafka scenarios are `@full` and run at stages 7 and 9 | every push |
 | 6 | **Documentation** | `test_docs_governance.py`: artefact presence, the seven ISO markers, no pre-release version strings, every `TODO(25010)` registered, no unlinked SoA gap row. Plus link check, generated-artefact freshness, and the §8.6 docs-travel-with-code prompt | **every push** |
-| 7 | Integration | Testcontainers: Postgres, Kafka, Redis | every push |
+| 7 | Integration | Testcontainers: Postgres, Kafka, Redis, Keycloak | every push |
 | 8 | Python CLI | `pytest` matrix on **3.11, 3.12, 3.13**; `pyright` strict; `ruff` | on `ledger-cli/**` |
 | 9 | E2E | `docker compose up`, then pytest-bdd over the full catalogue + `ledger-cli scenario run` (§9.6) — **including the README's extracted `curl` examples** (§8.3) | PR + main |
 | 10 | Load | Gatling; p99 write <150 ms, p99 cached read <20 ms, errors <0.1% | main + nightly |
@@ -1433,23 +1434,19 @@ Tracked in the council review reports (`.superpowers/sdd/`) and §15's assumptio
 three rounds against this document; every confirmed finding is closed as of v3.3, and the report
 records the history. When an escalations section is non-empty, it is the canonical list.
 
-**Known divergences between this document and the code at v3.9.** Recorded here rather than left in
+**Known divergences between this document and the code at v3.10.** Recorded here rather than left in
 Javadoc, because a reader checks the spec:
 
 | Gap | Spec says | Code does | Owner |
 |---|---|---|---|
 | `GET /api/v1/accounts/{accountUid}` for an account owned by someone else | 403 (§6.5, "wrong-owner access returns 403, not 404") | **404** — the controller filters by `accountsOwnedBy` and cannot distinguish absent from unowned | **Unassigned.** A wire-contract change; needs its own test and its own decision |
 | `GET /api/v1/accounts/{accountUid}/transactions` for an account that does not exist | 404 (§6.5) | **200 with an empty page** — the history service returns whatever the projection gives | **Unassigned.** As above |
-| `POST /api/v1/accounts` | §7 annotates it `ledger:writer` | Authorised by **authentication alone** — no role check exists anywhere in the codebase | The roles plan, which introduces role checks |
-| Both auditor operations in `full` | §7: `ledger:auditor` only | **403 to every caller.** A temporary denial: `accountUid` is optional on the trail, so once `full` became authenticated any valid token could page every account's id, amount and reference. Lifted by *replacing* the matchers with a `ledger:auditor` check, never by deleting them | The roles plan |
 | **Rate limiting** | §6.1 is a section on it; §6.5 lists the 429; §3's module table makes `platform` responsible for it; §9.6 describes an e2e test that rate-limits and confirms the 429 | **Nothing exists.** The only occurrence in `src/main` is `ErrorCode.RATE_LIMIT_EXCEEDED`, which has no producer | Unassigned — an abuse control, not a nicety |
 | **Token audience** | not specified | **Not validated.** Only `issuer-uri` is configured, so any token the realm issues — including one minted for a different client — is accepted | The Keycloak plan |
 | **`x-fapi-interaction-id`** | echoed per OB | Echoed **unvalidated and unbounded** into the response header and the MDC, so a newline-bearing value forges log lines. FAPI expects a UUID | The FAPI-hardening plan |
 | **`/error`** | §6.5: no internal identifiers cross the boundary | Boot's `BasicErrorController` is live — no exclusion, no override — and its body echoes the request `path` | Unassigned |
-| **The Keycloak realm and its test users** | §6.4 provisions the test users and their roles from a committed `docker/keycloak/realm-tiny-ledger.json` | **Neither exists.** No `docker/keycloak/` directory, no realm file, and no Keycloak service in `docker/docker-compose.yml`; every IT authenticates through the `public-key-location` decoder branch instead | The roles plan |
 
-No role check exists in `src/main` at v3.9. §6.4's role table and §7's per-endpoint annotations
-describe the intended model, not enforced behaviour. **Nor does any rate limiter**, despite §6.1.
+**No rate limiter exists in `src/main`**, despite §6.1.
 
 ## Revision history
 
@@ -1466,3 +1463,4 @@ describe the intended model, not enforced behaviour. **Nor does any rate limiter
 | 3.7 | 2026-08-04 | Migration tool selection update: user explicitly requested Liquibase changelogs for schema migrations instead of Flyway |
 | 3.8 | 2026-08-04 | Plan 2 close-out truth alignment (`/code-review` CR14): the spec still promised the mechanism ADR 0001 replaced. Kafka routing is a programmatic `EventExternalizationConfiguration` bean, not `@Externalized` on the events (§4.3, §2 tree, tech table, §4.3 division-of-labour, audit consumer note); the in-process legs (`balance`, `notification`) are plain synchronous `@EventListener` in **both** run modes and carry no publication row, so v3.5's "the annotation returns when full mode wires the registry" is retired rather than fulfilled; §9.7's trace-boundary count drops from three to two because the projection never leaves the publishing thread. No behaviour changed — the code was already this; only the spec was stale |
 | 3.9 | 2026-08-05 | Plan 3 close-out truth alignment: §6.4 claimed a single authorisation decorator while the code enforces at four sites, so the mechanism is restated principle-first — every decision is made by the component holding the state it needs — with the four sites enumerated and the list closed against a fifth; §6.4 claimed §9.2 forbids `@PreAuthorize` while §4.5 claimed it forbids framework annotations in the application layer at all, and both were false — that rule names exactly three, `@Service`, `@Component` and `@Transactional`, of which only the first two are stereotypes — so both sites now cite §4.5's design rule; nine known gaps recorded under *Open issues* — the `getAccount` 404-for-unowned and `/transactions` 200-for-absent divergences from §6.5, `POST /accounts` authorised by authentication alone, `full`'s temporary 403 on both auditor operations, the Keycloak realm and its test users, which §6.4 described as committed while neither the realm file nor a Keycloak service exists, and four security gaps: no rate limiter despite §6.1, no `aud` validation, an unvalidated and unbounded `x-fapi-interaction-id`, and Boot's `/error` echoing the request path; new §7.2 Open Banking / FAPI 2.0 alignment table carrying per-row build status, because a verdict of Adopt is not a claim of conformance. No behaviour changed — only the document was stale |
+| 3.10 | 2026-08-06 | Roles and Keycloak realm plan close-out truth alignment: `KeycloakRealmRolesConverter` maps `realm_access.roles` to bare Spring authorities and `SecurityConfig` enforces `ledger:auditor` on `/api/v1/audit/**` and `/api/v1/accounts/*/events`, `ledger:writer` on `POST /accounts` and both movement `PUT` routes, and `ledger:reader` on `/api/v1/accounts/**` (§6.4, §7); `AbstractIntegrationTest` now starts a real Keycloak container importing `docker/keycloak/realm-tiny-ledger.json`, so every IT exercises the production `issuer-uri` decoder branch instead of a committed test key (§9.4, §12.1 stage 7); three gaps-table rows are deleted rather than softened, under *Open issues* — the Keycloak realm and its test users, `POST /accounts` authorised by authentication alone, and the temporary 403 on both auditor operations; the seed script that pins deterministic `accountUid`s to the realm's fixture users is still not built (§6.4); the `aud`, rate-limiting, `x-fapi-interaction-id` and `/error` gaps are unchanged, still owned by Plan 3 |
