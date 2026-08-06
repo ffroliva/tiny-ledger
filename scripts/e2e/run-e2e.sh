@@ -17,6 +17,22 @@ if [ ! -f "$JAR" ]; then
   exit 1
 fi
 
+# Refuse to start against a stack that is not fully up. Without this the app boots
+# anyway and connects to whatever else holds the port — measured: with an unrelated
+# Postgres on 5432 our container stayed in `Created` while the app connected to the
+# OTHER database and failed Liquibase on credentials. Different credentials are the
+# only reason that was visible; a matching ledger/ledger user elsewhere would have
+# been read and written silently. Fail here, loudly, with the likely cause named.
+COMPOSE="docker compose -f docker/docker-compose.yml"
+unhealthy=$($COMPOSE ps -a --format '{{.Service}} {{.Status}}' 2>/dev/null | grep -v '(healthy)' || true)
+if [ -n "$unhealthy" ]; then
+  echo "::error::the full stack is not healthy — refusing to run e2e against a partial stack" >&2
+  echo "$unhealthy" >&2
+  echo "A service stuck in 'Created' usually means its host port is already taken." >&2
+  echo "Postgres is the usual culprit; set TINY_LEDGER_PG_PORT to a free port and retry." >&2
+  exit 1
+fi
+
 APP_PID=""
 cleanup() {
   rc=$?
@@ -42,8 +58,29 @@ trap cleanup EXIT
 #
 # This is a launch argument, never a properties-file edit: production defaults stay
 # untouched and this override cannot leak into a real deployment.
+PG_PORT=${TINY_LEDGER_PG_PORT:-5432}
+
+# Every host below is 127.0.0.1, never `localhost`, and that is load-bearing rather
+# than stylistic. Measured on a Windows host: `localhost` resolves to ::1 first,
+# Docker Desktop publishes on both 0.0.0.0 and [::], but the IPv6 path does not
+# route — `/dev/tcp/::1/6379` times out while `/dev/tcp/127.0.0.1/6379` is open.
+#
+# That matters more than it looks. RateLimitConfig gives the Lettuce client a 250 ms
+# command timeout so rate limiting can FAIL OPEN during a Redis outage — but the same
+# timeout gates connection *initialization*, so an IPv6-preferring host does not get a
+# degraded limiter, it gets an application that cannot boot:
+#
+#   RedisConnectionException: Unable to connect to localhost/<unresolved>:6379
+#   Caused by: RedisCommandTimeoutException: Connection initialization timed out after 250 millisecond(s)
+#
+# The integration suite never sees this because Testcontainers hands out an IP, not a
+# hostname. Pinning IPv4 here is a no-op on the Linux CI runner and the difference
+# between working and not on a developer machine.
 java -jar "$JAR" \
   --spring.profiles.active=full \
+  --spring.datasource.url="jdbc:postgresql://127.0.0.1:${PG_PORT}/tiny_ledger" \
+  --spring.data.redis.host=127.0.0.1 \
+  --spring.kafka.bootstrap-servers=127.0.0.1:9092 \
   --ledger.rate-limit.ip-backstop.capacity=10000 \
   > "$APP_LOG" 2>&1 &
 APP_PID=$!
