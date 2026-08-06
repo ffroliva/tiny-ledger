@@ -111,12 +111,32 @@ public abstract class AbstractIntegrationTest {
      * (23 direct + 9 helper = 32), plus {@code RoleAuthorizationIT} (14), {@code AudienceValidationIT} (2) and
      * {@code RateLimitIT}'s 21-request write-limit proof; {@code RateLimitIT}'s flood test is excluded
      * because it sets {@code 203.0.113.222} and charges a different bucket, and the other five IT
-     * classes make no HTTP request at all — plus bounded retries from P9's audit Awaitility poll.
+     * classes make no HTTP request at all.
      *
-     * <p><strong>Two ceilings, and the 69 is quoted against both — the comparison below is a
+     * <p><strong>69 requests, 68 of them charged.</strong>
+     * {@code SecurityConfigIT#anErrorDispatchDoesNotEchoTheRequestPath} sets
+     * {@code ERROR_REQUEST_URI}, and both limiters ({@code RateLimitFilter},
+     * {@code IpBackstopFilter}) extend {@code OncePerRequestFilter}, whose {@code skipDispatch} treats
+     * the presence of that attribute as an error dispatch and skips the filter — the same mechanism
+     * that test's own javadoc documents as measured for {@code BearerTokenAuthenticationFilter}. So it
+     * issues a request and is charged nothing. Both numbers are given because a future recount will
+     * land on 69 and should not think it has found a discrepancy.
+     *
+     * <p><strong>Plus P9's audit Awaitility poll, which dominates the fixed count.</strong> Read out of
+     * the pinned {@code awaitility-4.3.0} jar with {@code javap}, not from the documentation:
+     * {@code Awaitility.<clinit>} sets {@code DEFAULT_POLL_DELAY = null} (meaning "use the poll
+     * interval") and {@code DEFAULT_POLL_INTERVAL = new FixedPollInterval(ONE_HUNDRED_MILLISECONDS)},
+     * and {@code Durations.ONE_HUNDRED_MILLISECONDS} is {@code Duration.ofMillis(100)}. Over this
+     * suite's {@code atMost(30s)} that is a ceiling of ~300 polled requests, one per attempt —
+     * <em>more than four times the enumerated 68</em>, for a worst case near <strong>368</strong>. Not
+     * a flake risk: a run that actually polls 300 times has already failed on the 30s timeout, and the
+     * trail normally arrives in about a second. But "69 against 1000" would read as 931 of headroom
+     * when the true figure is nearer 630, so the bound is stated rather than left as "bounded retries".
+     *
+     * <p><strong>Two ceilings, and the count is quoted against both — the comparison below is a
      * counterfactual, not a description of what runs.</strong> §6.1's production value is 300/minute,
-     * and 69 would fit under it with room to spare; that is the reassurance a future editor wants
-     * before adding a request. But this bucket is deliberately <em>not</em> left at 300, because
+     * and 68 charged would fit under it with room to spare; that is the reassurance a future editor
+     * wants before adding a request. But this bucket is deliberately <em>not</em> left at 300, because
      * {@code RateLimitIT}'s flood test (C1) must exhaust whatever this constant is — so it is raised
      * to the value below, far past anything ambient traffic could reach. Nothing in this suite ever
      * runs against 300: the flood test exercises the backstop's behaviour now, and the production

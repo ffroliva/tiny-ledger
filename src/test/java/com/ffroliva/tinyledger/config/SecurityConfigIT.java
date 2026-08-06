@@ -184,11 +184,14 @@ class SecurityConfigIT extends AbstractIntegrationTest {
                         .content("{\"amount\":{\"currency\":\"GBP\",\"minorUnits\":10000}}"))
                 .andExpect(status().isCreated());
 
-        // The withdrawal half of the same clause, and the only test at any level that reaches it.
-        // LedgerController wires callerPrincipal.isAdmin() into Deposit (:80) and Withdraw (:93) as two
-        // independent positional booleans, so the deposit above is no evidence for this line: flip :93 to
-        // a literal `true` and every ledger:writer could withdraw from any account they do not own, with
-        // every other test still green. Every `new Withdraw(...)` in the unit tree passes false.
+        // The withdrawal half of the same clause, and the only test that reaches Withdraw's admin-TRUE
+        // branch — LedgerController wires callerPrincipal.isAdmin() into Deposit (:80) and Withdraw (:93)
+        // as two independent positional booleans, so the deposit above is no evidence for this line, and
+        // every `new Withdraw(...)` in the unit tree passes false. This assertion catches the :93 -> literal
+        // `false` slip, which silently removes admin withdrawal. The opposite slip, :93 -> literal `true` —
+        // the one that lets every ledger:writer withdraw from any account — is invisible here, because
+        // trent is an admin under both values; aWriterWithoutAdminCannotWithdrawFromSomeoneElsesAccount
+        // below is the test that goes red on it. Neither direction is covered without both tests.
         mvc.perform(put("/api/v1/accounts/{a}/withdrawals/{w}", alicesAccount, UUID.randomUUID())
                         .header("Authorization", bearer("trent"))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -213,7 +216,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     /**
      * P9's other half, split out of it on review. These two 403s are the sole coverage of two independent
      * production comparison points — the projection-backed read, and the strong read decided separately in
-     * {@code StrongBalanceService:29} — and inside P9 they only ran if the deposit succeeded, so reverting
+     * {@code StrongBalanceService:28} — and inside P9 they only ran if the deposit succeeded, so reverting
      * the write-side clause hid three untested claims behind one failure. Acting for the owner must not
      * silently make the admin an owner on either read path.
      */
