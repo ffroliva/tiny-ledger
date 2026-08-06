@@ -5,40 +5,39 @@ import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.crypto.RSASSASigner;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.security.KeyFactory;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
 import java.security.interfaces.RSAPrivateKey;
-import java.security.spec.PKCS8EncodedKeySpec;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.Date;
 
 /**
- * Mints a token no issuer in the system will accept — signed by a key Keycloak's JWKS will never publish.
- * Its only remaining job is minting the token that {@code SecurityConfigIT#aTokenThisIssuerDidNotMintIsRefused}
- * proves is refused, which shows the resource server actually validates against the container rather than
- * merely still accepting what it always accepted.
+ * Mints a token no issuer in the system will accept — signed by a key generated fresh in this JVM,
+ * which Keycloak's JWKS cannot have published because the key did not exist until this class loaded.
+ * Its only job is minting the token that {@code SecurityConfigIT#aTokenThisIssuerDidNotMintIsRefused}
+ * proves is refused, which shows the resource server actually validates against the container rather
+ * than merely still accepting what it always accepted.
+ *
+ * <p>Generated per-JVM rather than loaded from a committed key file: a key nobody else ever holds is
+ * unknowable to Keycloak by construction, so there is nothing here for a secret scanner to flag and no
+ * committed keypair that could ever leak.
  */
 public final class TestJwt {
 
     /** Blank, and now incidental: the token is refused on signature, not on issuer. */
     public static final String ISSUER = "";
 
-    private static final RSAPrivateKey KEY = load();
+    private static final RSAPrivateKey KEY = generate();
 
     private TestJwt() {}
 
-    private static RSAPrivateKey load() {
-        try (InputStream in = TestJwt.class.getResourceAsStream("/test-jwt-private.pem")) {
-            if (in == null) throw new IllegalStateException("test-jwt-private.pem is not on the test classpath");
-            String pem = new String(in.readAllBytes(), StandardCharsets.UTF_8)
-                    .replace("-----BEGIN PRIVATE KEY-----", "")
-                    .replace("-----END PRIVATE KEY-----", "");
-            byte[] der = Base64.getMimeDecoder().decode(pem);
-            return (RSAPrivateKey) KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(der));
-        } catch (Exception e) {
-            throw new IllegalStateException("could not read the committed test signing key", e);
+    private static RSAPrivateKey generate() {
+        try {
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+            generator.initialize(2048);
+            return (RSAPrivateKey) generator.generateKeyPair().getPrivate();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("could not generate the test signing key", e);
         }
     }
 
