@@ -49,6 +49,12 @@ def test_concurrent_withdrawals(client: LedgerClient) -> None:
     assert result.ok, result.detail
 
 
+def test_racing_replays(client: LedgerClient) -> None:
+    """N19. Five concurrent PUTs of the same movementUid — credited once."""
+    result = scenarios.racing_replays(client, Console())
+    assert result.ok, result.detail
+
+
 def test_consistency_boundary(client: LedgerClient) -> None:
     """Deposit/read sequence crossing the eventual-consistency boundary, §4.4 (third axis)."""
     result = scenarios.consistency_boundary(client, Console())
