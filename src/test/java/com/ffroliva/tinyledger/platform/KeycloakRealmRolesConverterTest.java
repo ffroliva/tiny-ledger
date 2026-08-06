@@ -37,4 +37,10 @@ class KeycloakRealmRolesConverterTest {
         Jwt jwt = jwtWith(Map.of("scope", "openid"));
         assertThat(converter.convert(jwt).getAuthorities()).isEmpty();
     }
+
+    @Test
+    void aRealmAccessClaimThatIsNotAMapYieldsNoAuthorities() {
+        Jwt jwt = jwtWith(Map.of("realm_access", "not-a-map-at-all"));
+        assertThat(converter.convert(jwt).getAuthorities()).isEmpty();
+    }
 }
