@@ -1,7 +1,11 @@
 """Real sequence tests against a running app — no mock, no fake, the actual `LedgerClient` over
-real HTTP. Excluded from the default run (`pyproject.toml`'s `addopts`); this file could not be
-executed in this environment (no running app, no e2e CI job — see NOTES.md), so it is written and
-reviewable but unverified.
+real HTTP. Excluded from the default run (`pyproject.toml`'s `addopts`).
+
+**Executed for the first time on 2026-08-06**, against the real jar under the `full` profile on a
+docker-compose stack: 7 passed, 52 deselected. Until then this file carried a note saying it was
+"written and reviewable but unverified" — that note is now false and is gone. The run found one
+real defect, in the harness rather than the ledger: `scripts/e2e/run-e2e.sh` changed directory
+before invoking pytest, so its EXIT trap could not find the application log it exists to dump.
 
 Run against a `standalone` instance::
 
