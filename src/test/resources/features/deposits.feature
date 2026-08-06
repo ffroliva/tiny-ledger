@@ -38,6 +38,24 @@ Feature: Deposits credit the account
     Then the request is rejected with 400 "/errors/invalid-amount"
     And nothing is appended to the stream of "ACC-001"
 
+  # N23, the case the battle-testing plan carried as "V3" before it had a catalogue id — it needed one,
+  # because the traceability sweep matches P/N/E and a @V3 tag was invisible to it.
+  #
+  # `minorUnits` is an int64 with `minimum: 1` in the contract, so this value is *well-formed* —
+  # bean validation passes it and the OpenAPI schema admits it. It is only unrepresentable once added
+  # to an existing balance, where Money.plus's Math.addExact throws ArithmeticException. That is not a
+  # TinyLedgerException and not an ErrorResponse, so ErrorHandlingAdvice's catch-all claims it.
+  #
+  # The question this pins is whether a client can reach a 500 with input the contract permits. §6.5
+  # reserves 500 for "a genuine surprise"; an amount the ledger cannot represent is a refusal it can
+  # foresee, so it belongs in the catalogue rather than in the unhandled bucket.
+  @N23
+  Scenario: A deposit that would overflow the balance is refused, not a server error
+    Given an account "ACC-001" in GBP with a balance of 50.00
+    When a deposit with a raw minorUnits value of 9223372036854775807 is requested into "ACC-001"
+    Then the request is rejected with 400 "/errors/invalid-amount"
+    And nothing is appended to the stream of "ACC-001"
+
   @N5
   Scenario: A movement in a currency the account does not hold is refused
     Given an account "ACC-001" in GBP with a balance of 50.00
