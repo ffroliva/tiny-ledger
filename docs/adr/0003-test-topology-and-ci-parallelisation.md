@@ -97,6 +97,12 @@ never a claim about the suite.
 
 ## Consequences
 
+> **Superseded 2026-08-06 — the paragraph below is the state at the time of writing, not now.** The
+> two-job split landed: `.github/workflows/ci.yml` declares an `integration` job that runs
+> `./mvnw -q verify -Pit` on every push (`:55-67`) with a zero-test-count guard (`:69-75`). Its test
+> count is whatever that run's own failsafe XML reports beside its exit code; the "26" below was never
+> paired with one (AGENTS trap 3) and is not a current figure.
+
 **A gap this ADR exposes, and which invalidates the "CI will catch it" assumption:** `.github/workflows/ci.yml`
 currently runs `spotless:check`, `./mvnw -q verify` and the docs-governance script — and **never runs
 `-Pit` at all**. The 26 integration tests, the entire `full` stack, are gated by nothing. Until the
