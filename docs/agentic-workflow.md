@@ -266,6 +266,7 @@ role check or leave the hole, `full` now refuses both operations outright. The e
 live before it was closed: both new tests failed `expected:<403> but was:<200>` on an ordinary token.
 The stopgap is named in the code, in both profiles' tests, in the OpenAPI descriptions, and in the
 follow-up's opening scope — five places, because a denial that outlives its reason becomes a mystery.
+**Closed on `phase-4-plan2-roles-keycloak`: `full` now enforces `ledger:auditor`.**
 
 **Decision (Plan 3): absent must not read as unowned.** The authorization decorator originally scanned
 the caller's accounts and refused anything absent from the list — making an unknown account a 403 where

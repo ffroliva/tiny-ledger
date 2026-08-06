@@ -1442,7 +1442,7 @@ Javadoc, because a reader checks the spec:
 | `GET /api/v1/accounts/{accountUid}` for an account owned by someone else | 403 (§6.5, "wrong-owner access returns 403, not 404") | **404** — the controller filters by `accountsOwnedBy` and cannot distinguish absent from unowned | **Unassigned.** A wire-contract change; needs its own test and its own decision |
 | `GET /api/v1/accounts/{accountUid}/transactions` for an account that does not exist | 404 (§6.5) | **200 with an empty page** — the history service returns whatever the projection gives | **Unassigned.** As above |
 | **Rate limiting** | §6.1 is a section on it; §6.5 lists the 429; §3's module table makes `platform` responsible for it; §9.6 describes an e2e test that rate-limits and confirms the 429 | **Nothing exists.** The only occurrence in `src/main` is `ErrorCode.RATE_LIMIT_EXCEEDED`, which has no producer | Unassigned — an abuse control, not a nicety |
-| **Token audience** | not specified | **Not validated.** Only `issuer-uri` is configured, so any token the realm issues — including one minted for a different client — is accepted | The Keycloak plan |
+| **Token audience** | not specified | **Not validated.** Only `issuer-uri` is configured, so any token the realm issues — including one minted for a different client — is accepted | Plan 3 |
 | **`x-fapi-interaction-id`** | echoed per OB | Echoed **unvalidated and unbounded** into the response header and the MDC, so a newline-bearing value forges log lines. FAPI expects a UUID | The FAPI-hardening plan |
 | **`/error`** | §6.5: no internal identifiers cross the boundary | Boot's `BasicErrorController` is live — no exclusion, no override — and its body echoes the request `path` | Unassigned |
 

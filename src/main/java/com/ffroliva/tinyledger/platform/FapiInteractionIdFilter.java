@@ -22,8 +22,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * {@code Ordered.LOWEST_PRECEDENCE}, while {@code springSecurityFilterChain} registers at
  * {@code SecurityFilterProperties.DEFAULT_FILTER_ORDER = -100} (Boot 4.1 moved that constant off
  * {@code SecurityProperties}, which now holds only {@code getUser()} — verified against the jar). Without it
- * every 401 and every chain-level
- * {@code denyAll()} 403 is written by the security chain <em>before</em> this filter runs — no header, and an
+ * every 401 and every chain-level role-refusal 403 (a {@code hasAuthority} matcher failing in
+ * {@code fullChain}) is written by the security chain <em>before</em> this filter runs — no header, and an
  * empty MDC for {@link SecurityProblemHandler} to read — so the claim above would be false for exactly the
  * error responses FAPI requires the header on. Measured: removing the annotation turns
  * {@code SecurityConfigIT#anUnauthenticatedRefusalStillCarriesTheInteractionId} red.

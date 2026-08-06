@@ -125,7 +125,7 @@ question, so you read the one authority you need rather than all of them. The es
 
 | Question | Where |
 |---|---|
-| What is the contract? | `docs/spec.md` (v3.8) |
+| What is the contract? | `docs/spec.md` (v3.10) |
 | Why is delivery shaped this way? | `docs/adr/0001-kafka-delivery-path.md` |
 | Why one test context, and how does CI split? | `docs/adr/0003-test-topology-and-ci-parallelisation.md` |
 | What is being built next? | `docs/superpowers/plans/` (newest first, listed in the index) |
