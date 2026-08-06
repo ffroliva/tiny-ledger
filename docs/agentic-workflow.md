@@ -31,7 +31,6 @@ where I overruled them.** §6 is that record, and it is the most useful part of 
 | Layer | What | Role here |
 |---|---|---|
 | Harness | Claude Code (CLI), Opus | Runs the loop, holds context, executes tools |
-| Profiles | `.claude-flavio`, `.claude` | Separate skill sets and settings per working context; this project runs under `.claude-flavio` |
 | Skills | Markdown procedures loaded on demand | Domain expertise injected at the moment it is needed, instead of one bloated system prompt |
 | Subagents | Task-scoped agents with their own context | Parallel execution and independent review; each starts cold, so briefs must be self-contained |
 | MCP connectors | Gmail, Google Drive, Chrome | Read the assignment and its context from source rather than by retyping |
@@ -46,7 +45,7 @@ It is the same argument as lazy loading, applied to instructions.
 ## 2. The pipeline
 
 Adapted from the **superpowers** SDD workflow (obra/superpowers, v4.3.1), already proven on prior
-projects. Its artefact trail lives in `.superpowers/sdd/`.
+projects. The review artefacts it produced are kept under `docs/_archive/reviews/`.
 
 ```
   intake  ──►  spec  ──►  plan  ──►  task briefs  ──►  execute  ──►  review  ──►  integrate
@@ -142,17 +141,20 @@ judgement I would otherwise have made from memory, under time pressure, at 22:00
 | `guard-secrets` | Continuous | Pre-commit gate. Authoritative — it has blocked five commits in one session and been right every time. |
 | superpowers SDD | Plan → Integrate | The task-brief / execute / independent-review / ledger loop described in §2. |
 
-### Skills are vendored into this repository
+### Where these skills came from
 
-Every skill above is committed under `.claude/skills/`, with provenance and licences in
-`.claude/skills/VENDOR.md`:
+The skills are agent *tooling*, not part of the deliverable, so they are not committed here — a ledger
+exercise carrying ~150 files of another project's repository is noise, and its licence obligations are
+someone else's to carry. What is committed is the trail they produced: the council reports and
+assessments under `docs/_archive/reviews/`, the per-task commits, and this document. Provenance and
+licences, because a process claim you cannot trace is marketing:
 
 | Source | Version | Licence | Provides |
 |---|---|---|---|
 | [obra/superpowers](https://github.com/obra/superpowers) | 6.2.0 | MIT | 14 skills — `brainstorming`, `writing-plans`, `executing-plans`, `subagent-driven-development`, `dispatching-parallel-agents`, `requesting-code-review`, `test-driven-development`, `verification-before-completion`, and others. The SDD pipeline in §2 is these skills in sequence. |
 | [jdubois/dr-jskill](https://github.com/jdubois/dr-jskill) | main @ 2026-07-30 | Apache-2.0 | Spring Boot project conventions and pinned versions (`versions.json`) — see `spec.md` §1.5 |
 
-A third skill, `ffroliva/iso-compliance`, was vendored here and has been **removed**. It installed a
+A third skill, `ffroliva/iso-compliance`, was used here and has been **abandoned**. It installed a
 documentation-governance test into CI as stage 6, and that test resolved its repository root inside
 its own skill directory — so it scanned no file this repository owns and passed unconditionally. The
 gate and the skill were deleted rather than repaired: the seventeen ISO 15289 / 27001 artefacts it
@@ -433,6 +435,6 @@ had both on deposit and one on withdrawal.
 | What was actually asked for? | `docs/spec.md` §1 and §13 — the brief PDFs themselves are the assessor's material and are gitignored, not committed (§2, Stage 1) |
 | What was decided, and why? | `docs/spec.md` and `docs/adr/` |
 | In what order was it built? | `docs/_archive/plans/*.md`, and the commit history — one commit per task, each landing only after its review was accepted |
-| Was each step reviewed? | The per-task ledger, review packages and reviewer reports live under `.superpowers/sdd/<plan>/`, which is **session-local and gitignored** — deliberately, it is working state. What survives in the repo is §7 above, the commit messages, and this document |
+| Was each step reviewed? | The council reports and assessments are committed under `docs/_archive/reviews/`. The per-task ledger and review packages that produced them are session-local working state and are not — what survives in the repo is those reports, §7 above, the commit messages, and this document |
 | Does it do what it claims? | `./mvnw verify` — unit, architecture, BDD, use-case (starts no containers); `./mvnw verify -Pit` — the integration suite against real Postgres, Redis, Kafka **and Keycloak**. No fixed count is quoted here on purpose: count `<testcase ` in that run's own `target/failsafe-reports/*.xml` and read it beside that run's exit code (§5, AGENTS trap 3) — a number carried in prose goes stale the next time a test is added. `docker compose -f docker/docker-compose.yml up -d` then starts the `full` profile's **infrastructure only** — Postgres, Redis, Kafka; there is no Keycloak service and no app service in that file — and the jar runs on the host against the published ports |
 | What was left out on purpose? | `docs/spec.md` §13 non-goals and §15 assumptions |
