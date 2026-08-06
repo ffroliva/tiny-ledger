@@ -211,6 +211,27 @@ public class LedgerSteps {
         lastResponse = put(lastMovementPath, amountBody(currencyOf(currentAccount), minorUnits));
     }
 
+    /**
+     * N21. Same mechanics as the deposit retry — the remembered path and body are verb-agnostic — but the
+     * feature file has to name the verb it is retrying, or the scenario reads as being about deposits.
+     */
+    @When("the same withdrawal PUT is retried")
+    public void theSameWithdrawalPutIsRetried() {
+        theSameDepositPutIsRetried();
+    }
+
+    /**
+     * N21's top-up. Deliberately <em>not</em> routed through the ordinary deposit step: that one records the
+     * deposit as "the last movement", and the next step has to retry the <em>withdrawal</em> refused before
+     * it. Leaving {@code lastMovement*} alone is the entire reason this step exists.
+     */
+    @When("{string} is topped up by {money}")
+    public void theAccountIsToppedUp(String name, long minorUnits) {
+        ResponseEntity<String> response =
+                put(depositPath(name, UUID.randomUUID()), amountBody(currencyOf(name), minorUnits));
+        assertThat(response.getStatusCode().value()).isEqualTo(201);
+    }
+
     @When("a withdrawal of {money} is requested")
     public void aWithdrawalIsRequested(long minorUnits) {
         aWithdrawalIsRequestedFrom(minorUnits, currentAccount);
