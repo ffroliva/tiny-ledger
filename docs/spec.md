@@ -593,7 +593,8 @@ different and is stated rather than inferred:
 
 1. **`docs/api/openapi.yaml`** — OpenAPI 3.1, hand-written first. The build generates request/response
    DTOs and server interfaces from it; controllers implement generated interfaces, so a controller
-   that drifts from the contract fails compilation. `springdoc` validates the live app against it.
+   that drifts from the contract fails compilation. Live-application validation through `springdoc`
+   is not built: there is no `springdoc` dependency or runtime validation gate.
 2. **`src/test/resources/features/*.feature`** — the committed `@standalone` Gherkin subset, executed
    by Cucumber/JVM inside `verify`. Catalogue rows without a feature are not represented as Gherkin;
    current full-profile evidence is JUnit (§9.3).
@@ -1041,8 +1042,8 @@ a current gate.
 | Artefact | Generated from | By |
 |---|---|---|
 | C4 component diagrams, module canvas | The module graph | Spring Modulith `Documenter` |
-| API reference + Swagger UI | `openapi.yaml` | springdoc |
-| CLI reference | `openapi.yaml` | Pydantic model generation (§11) |
+| API reference + Swagger UI (planned) | `openapi.yaml` | `springdoc` is not a dependency or current gate; OpenAPI-generated interfaces are the enforcement that exists (§5) |
+| CLI reference (planned) | `openapi.yaml` | Pydantic generation belongs to the unbuilt CLI toolchain (§11/§12.1 stage 8) |
 | Traceability matrix rows (planned) | Catalogue labels in features and Java tests | No generator exists yet; the governance script does not harvest requirement tags |
 | Coverage tables | JaCoCo | report merge |
 | Dependency inventory / SBOM | The build | CycloneDX |
@@ -1190,11 +1191,15 @@ Steps drive the HTTP API, not internal classes — the specification must not de
 
 The rows below are the contract's requirement catalogue; a row does not imply that a like-named
 `.feature` file exists. The currently committed Gherkin subset is tagged **`@standalone`** and runs
-in-process on every push (§12.1 stage 5). P9 and N6–N17 have real-stack JUnit evidence extending
-`AbstractIntegrationTest`, against Postgres, Redis, Kafka and Keycloak at stage 7. N18 is different:
-its executable evidence is the repository-level `AuditKafkaListenerTest`, not a full-stack
-authentication scenario (§15.10). Stage 9's pytest-bdd binding of the whole catalogue is still
-unbuilt (§9.6).
+in-process on every push (§12.1 stage 5); N11 is one exact scenario in that subset. P9 and N13–N17
+have full-profile integration tests extending `AbstractIntegrationTest`. N15 deliberately injects
+JWT authorities because the filter-chain matcher — specifically the `ledger:admin` and
+`ledger:writer` conjunction — is the unit under test; the shared full context supplies the rest of
+the application, but that test is not evidence for Keycloak decoding. N12 has controller and
+projection unit coverage, but no exact `mallory` HTTP acceptance test, so none is claimed here. N18
+is different again: its executable evidence is the repository-level `AuditKafkaListenerTest`, not a
+full-stack authentication scenario (§15.10). Stage 9's pytest-bdd binding of the whole catalogue is
+still unbuilt (§9.6).
 
 The auth scenarios N6–N10 and N12–N17, shared-limiter N9, Kafka E6, auditor P7, on-behalf-of P9,
 restart-persistence E7 and real-Postgres N2 are classified **`@full`** by necessity: a mode with no
@@ -1357,6 +1362,9 @@ a skill changing underneath a compliance run cannot invalidate the evidence trai
 
 `ledger-cli` — the e2e driver and a genuine operator tool.
 
+**This section defines the planned CLI contract.** No `ledger-cli/` tree or Python CLI toolchain is
+built or running in CI yet (§12.1 stage 8).
+
 **House style is settled here rather than per-file, so the choices below are conventions, not
 preferences.** Re-deciding them file-by-file would produce drift for no gain. Conventions:
 
@@ -1420,17 +1428,17 @@ either.
   (§1.5) documents every variable.
 ### 12.1 Pipeline (GitHub Actions)
 
-Ordered cheapest-and-most-informative first, so a broken build fails in under two minutes rather than
-after the load test.
+Active stages are ordered cheapest-and-most-informative first. The load stage remains planned, so it
+is not part of today's failure ordering.
 
 | # | Stage | Gate | Runs on |
 |---|---|---|---|
-| 1 | Lint & format | `ruff` (pinned), `spotless:check` | every push |
+| 1 | Lint & format | `spotless:check`; `ruff` belongs to the unbuilt Python CLI stage | every push (Spotless only) |
 | 2 | Compile + unit | JUnit, JaCoCo ≥90% line / 85% branch on `domain` | every push |
 | 3 | **Architecture** | `ApplicationModules.verify()` + ArchUnit (§9.2) | every push |
 | 4 | **Contract** | OpenAPI-generated interfaces compile; port contract suites (§9.2b) | every push |
 | 5 | BDD in-process | Cucumber, the committed `@standalone` subset (§9.3); full auth/admin acceptance currently runs as JUnit ITs at stage 7, with the stage-9 binding still planned | every push |
-| 6 | **Documentation** | `test_docs_governance.py`: artefact presence, the seven ISO markers, no pre-release version strings, every `TODO(25010)` registered, no unlinked SoA gap row. Plus link check, generated-artefact freshness, and the §8.6 docs-travel-with-code prompt | **every push** |
+| 6 | **Documentation** | `test_docs_governance.py`: artefact presence, the seven ISO markers, no pre-release version strings, every `TODO(25010)` registered, and no unlinked SoA gap row. Link checking, generated-artefact freshness and the §8.6 docs-travel prompt are planned, not wired | **every push** (the five governance checks only) |
 | 7 | Integration | Testcontainers: Postgres, Kafka, Redis, Keycloak | every push |
 | 8 | Python CLI (planned) | `pytest` matrix on **3.11, 3.12, 3.13**; `pyright` strict; `ruff` | not yet wired; no `ledger-cli/` tree |
 | 9 | E2E (planned) | `docker compose up`, then pytest-bdd over the full catalogue + `ledger-cli scenario run` (§9.6) — **including the README's extracted `curl` examples** (§8.3) | not yet wired |
@@ -1448,14 +1456,14 @@ cheap to fix; discovering them after a twelve-minute Testcontainers run trains e
 them. Position in a pipeline is a statement about priority, and this is the one that makes "first-class
 citizen" true rather than aspirational.
 
-`resolve-drift` job: install the Python CLI from declared ranges rather than the lockfile, and
-smoke-import it, so a range that has drifted fails loudly here instead of surfacing only when a user
-installs fresh — the failure a committed `uv.lock` would otherwise hide.
+`resolve-drift` is currently a placeholder step that only echoes where the Python CLI drift job will
+land. The planned job will install from declared ranges rather than the lockfile and smoke-import the
+CLI; no dependency-range drift is detected today.
 
-**No SonarQube/SonarCloud, deliberately.** Its ground is held by tools a reviewer can run offline
-in a fresh clone — spotless, JaCoCo's failing thresholds, ArchUnit, gitleaks/Trivy/dependency-check,
-ruff/pyright — and every quality gate in this pipeline reproducing locally is worth more to this
-artefact than a SaaS badge that needs an account and a token to verify.
+**No SonarQube/SonarCloud, deliberately.** The current ground is held by Spotless, JaCoCo's failing
+thresholds, ArchUnit and the CI `gitleaks` scan. `ruff`, `pyright`, Trivy and `dependency-check` are
+specified but unwired and do not count as present coverage. A gate that can be reproduced locally is
+still preferred to a SaaS badge that needs an account and token to verify.
 
 ---
 
