@@ -86,9 +86,13 @@ class RoleAuthorizationIT extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
-    // Review #2: the deposit rule had two negative tests through the chain and its withdrawal twin had
+    // N6. Review #2: the deposit rule had two negative tests through the chain and its withdrawal twin had
     // none — a typo in the withdrawal pattern would fail open into anyRequest().authenticated() and all
     // 43 tests would have stayed green.
+    //
+    // §12 N6 says "403; no event". Only the 403 is asserted, and deliberately: the refusal happens at the
+    // filter chain, so no handler — and therefore no event store call — is reached at all. Asserting the
+    // absence of an event here would be asserting that a code path that never ran did not run.
     @Test
     void aReaderMayNotWithdraw() throws Exception {
         mockMvc.perform(put("/api/v1/accounts/" + ANY_UID + "/withdrawals/" + UUID.randomUUID())
@@ -98,7 +102,7 @@ class RoleAuthorizationIT extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
-    @Test
+    @Test // N8: auditors observe, never mutate
     void anAuditorMayNotMoveMoney() throws Exception {
         mockMvc.perform(put("/api/v1/accounts/" + ANY_UID + "/deposits/" + UUID.randomUUID())
                         .header(HttpHeaders.AUTHORIZATION, bearer("dave"))
