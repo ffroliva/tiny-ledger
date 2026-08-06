@@ -2,6 +2,7 @@ package com.ffroliva.tinyledger.config;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -174,17 +175,26 @@ class SecurityConfigIT extends AbstractIntegrationTest {
      * <em>container-level</em> forward — a Filter throwing, or a raw {@code sendError} — that carries this
      * request's failure as two request attributes rather than as a Java exception. {@code requestAttr}
      * reproduces exactly that forward without depending on finding a component that currently triggers one:
-     * the point is that {@code BasicErrorController} answers it this way for any future trigger, not
-     * just ones that exist today. A bearer token is required to even reach it: {@code /error} falls under
-     * {@code fullChain}'s {@code anyRequest().authenticated()}, so an unauthenticated attempt is refused by
-     * {@code SecurityProblemHandler} before {@code BasicErrorController} ever runs — which would make the
-     * assertion below pass for the wrong reason.
+     * the point is that {@code BasicErrorController} answers it this way for any future trigger, not just
+     * ones that exist today.
+     *
+     * <p>{@code .with(jwt())} rather than a real {@code bearer(...)} header — measured, not assumed:
+     * {@code OncePerRequestFilter.shouldNotFilterErrorDispatch()} defaults to {@code true}, and Boot 4.1's
+     * {@code skipDispatch} treats the mere <em>presence</em> of the {@code ERROR_REQUEST_URI} attribute as
+     * proof this is an error dispatch — not {@code getDispatcherType()}. That silently skips
+     * {@code BearerTokenAuthenticationFilter} itself (also a {@code OncePerRequestFilter}), so a real bearer
+     * header is never re-validated on this path. That is correct production behaviour, not a bug: a genuine
+     * container forward carries the SAME request object as the original call, so the {@code SecurityContext}
+     * the first pass already established survives the forward and there is nothing to re-authenticate.
+     * {@code with(jwt())} reproduces exactly that already-authenticated state directly, the same way the
+     * survived context would; a real header here would incorrectly imply bearer re-validation happens on
+     * this path, which — measured — it does not.
      */
     @Test
     void anErrorDispatchDoesNotEchoTheRequestPath() throws Exception {
         String leakedPath = "/api/v1/accounts/91b1d1c2-aaaa-4f2b-9c3d-abcdefabcdef";
         mvc.perform(get("/error")
-                        .header("Authorization", bearer("alice"))
+                        .with(jwt())
                         .requestAttr(RequestDispatcher.ERROR_STATUS_CODE, 500)
                         .requestAttr(RequestDispatcher.ERROR_REQUEST_URI, leakedPath))
                 .andExpect(content().string(not(containsString(leakedPath))));
