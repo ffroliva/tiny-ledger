@@ -45,8 +45,8 @@ It is the same argument as lazy loading, applied to instructions.
 
 ## 2. The pipeline
 
-Adapted from the **superpowers** SDD workflow (obra/superpowers, v4.3.1), which is the process I use
-on `gflow-cli`. Its artefact trail lives in `.superpowers/sdd/`.
+Adapted from the **superpowers** SDD workflow (obra/superpowers, v4.3.1), already proven on prior
+projects. Its artefact trail lives in `.superpowers/sdd/`.
 
 ```
   intake  ──►  spec  ──►  plan  ──►  task briefs  ──►  execute  ──►  review  ──►  integrate
@@ -223,10 +223,10 @@ the log itself. I changed it against my earlier position because Kafka offers no
 on a stream, and therefore cannot enforce the one invariant a ledger exists to protect. Recorded here
 because changing your mind on your own prior design is worth more than defending it.
 
-**Decision: Python 3.11–3.13, and gflow-cli's conventions verbatim.** click over Typer, pyright over
-mypy, hatchling, PEP 735 dependency groups, ruff pinned exactly. Not because each is uniquely
-correct, but because a second house style in the same estate is a maintenance tax with no offsetting
-benefit. Consistency is a decision, and this is it.
+**Decision: Python 3.11–3.13, click over Typer, pyright over mypy, hatchling, PEP 735 dependency
+groups, ruff pinned exactly.** Not because each is uniquely correct, but because a second house style
+in the same estate is a maintenance tax with no offsetting benefit. Consistency is a decision, and
+this is it.
 
 **Decision: hold the scope; move the deadline.** The submission window is self-imposed — nothing
 fixes it except the interview slot chosen after it. When the spec's scope collided with a two-day

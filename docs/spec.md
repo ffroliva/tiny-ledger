@@ -713,6 +713,12 @@ Keycloak as OAuth2/OIDC provider; the app is a resource server validating JWTs.
 | `ledger:auditor` | Read the audit trail across all accounts; no writes |
 | `ledger:admin` | Widen `ledger:writer` to **any** account for change operations, acting on behalf of its owner; never widens `ledger:reader` — reads, including `?consistency=strong`, stay owner-scoped. Grants no operation on its own, and no access to the audit trail |
 
+Owner-scoped reads stay a decision, not an absolute: the change operation's own response necessarily
+carries the resulting `balanceAfter` (§7), so an admin who deposits into an account they do not own
+learns that account's new balance as a side effect of the deposit. That is inherent to permitting the
+change at all, not a gap in the read boundary — you cannot record a movement without knowing what it
+left the account holding.
+
 Authorisation is never an annotation on an application class — the application layer carries no
 Spring annotations (§4.5). Where each decision *is* made follows from the principle below, not from
 a single mechanism.
@@ -726,7 +732,7 @@ across four sites, and **this list is closed — a sixth requires an ADR.**
 | Changes state (`PUT .../deposits/*`, `PUT .../withdrawals/*`) | In `RecordMovementService`, against the rehydrated aggregate, before the idempotency lookup (§6.3). Ownership admits the caller if the account's `owner` matches **or** the caller holds `ledger:admin` — the one comparison point `ledger:admin` widens | The decision must be taken against the same state, at the same version, the command is applied to |
 | Reads at the aggregate's version (`?consistency=strong`) | In `StrongBalanceService`, against the rehydrated aggregate — the same in-service mechanism as the row above, **not widened**: a strong read is still a read | The strong read is the write-side escape hatch (§4.4) — only `ledger` can promise read-your-writes, so it authorises against the same aggregate state a write would; `ledger:admin` is a change-operation grant, not a read grant, so this comparison is untouched |
 | Reads a read model for one named account | A decorator wrapping the inbound port (§4.5), **not widened** | The read model is the authority for a question the read model answers |
-| Returns a collection the caller sees only part of | The port takes the visibility scope as a parameter (`accountsOwnedBy`) — the scope *is* the authorisation, **not widened** (D8) | There is no set to decorate; widening it is a port-signature change |
+| Returns a collection the caller sees only part of | The port takes the visibility scope as a parameter (`accountsOwnedBy`) — the scope *is* the authorisation, **not widened** | There is no set to decorate; widening it is a port-signature change |
 | Depends on role alone, with no account subject (`/audit/**`, `/accounts/*/events`) | The security filter chain in `config` — `ledger:admin` is absent from both matchers | There is no subject to compare and no inbound port to decorate |
 
 Absent is never answered as unowned: an account that does not exist is §6.5's 404, whoever asks —
@@ -796,7 +802,7 @@ RFC 7807 `ProblemDetail` throughout, via Spring's built-in support
 | Reused movement UID, different payload | 409 | `/errors/idempotency-conflict` |
 | Rate limit exceeded | 429 | `/errors/rate-limit-exceeded` |
 | Unauthenticated | 401 | `/errors/unauthenticated` |
-| Forbidden — wrong role, or (on a change operation) wrong owner without `ledger:admin` | 403 | `/errors/forbidden` |
+| Forbidden — wrong role, or wrong owner — widened on a change operation only, and only by `ledger:admin` | 403 | `/errors/forbidden` |
 | Unknown account | 404 | `/errors/account-not-found` |
 | Event store unreachable | 503 | `/errors/event-store-unavailable`, with `Retry-After` |
 | Auditor operation invoked in standalone | 501 | `/errors/not-available-in-standalone` |
@@ -1303,8 +1309,8 @@ a skill changing underneath a compliance run cannot invalidate the evidence trai
 
 `ledger-cli` — the e2e driver and a genuine operator tool.
 
-**House style is gflow-cli's.** That project already settled these questions; re-deciding them here
-would produce a second convention to maintain for no gain. Conventions adopted verbatim:
+**House style is settled here rather than per-file, so the choices below are conventions, not
+preferences.** Re-deciding them file-by-file would produce drift for no gain. Conventions:
 
 | Concern | Choice |
 |---|---|
@@ -1323,10 +1329,11 @@ would produce a second convention to maintain for no gain. Conventions adopted v
 | Testing | **pytest** + **pytest-bdd** + **pytest-cov** + **respx**; **testcontainers** in the `containers` group |
 | Markers | `unit` (default), `integration`, `containers`, `e2e`, `live`, `smoke`; `addopts` excludes everything but `unit`/`integration` so the default run is fast and offline |
 | Temp files | `--basetemp=tmp/pytest`, so tests never litter the repo root on Windows |
-| Secrets | `detect-secrets` baseline + `gitleaks` + `pre-commit`, as in gflow-cli |
+| Secrets | `detect-secrets` baseline + `gitleaks`, run via `pre-commit` so a leak is caught before it is committed, not after |
 
 Dependency ranges get upper bounds **only where a bump is load-bearing**, with a comment stating what
-broke and when — the gflow-cli convention. Unbounded elsewhere.
+broke and when, so a future reader knows why the ceiling exists rather than guessing. Unbounded
+elsewhere.
 
 ```bash
 ledger-cli account open --currency GBP
@@ -1393,9 +1400,9 @@ cheap to fix; discovering them after a twelve-minute Testcontainers run trains e
 them. Position in a pipeline is a statement about priority, and this is the one that makes "first-class
 citizen" true rather than aspirational.
 
-`resolve-drift` job, borrowed from `gflow-cli`: install the Python CLI from declared ranges rather
-than the lockfile, and smoke-import it. Catches the unbounded-dependency break that a committed
-`uv.lock` hides until a user installs fresh.
+`resolve-drift` job: install the Python CLI from declared ranges rather than the lockfile, and
+smoke-import it, so a range that has drifted fails loudly here instead of surfacing only when a user
+installs fresh — the failure a committed `uv.lock` would otherwise hide.
 
 **No SonarQube/SonarCloud, deliberately.** Its ground is held by tools a reviewer can run offline
 in a fresh clone — spotless, JaCoCo's failing thresholds, ArchUnit, gitleaks/Trivy/dependency-check,

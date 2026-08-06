@@ -1838,7 +1838,7 @@ two in `SecurityConfigIT` for P9, two more for N13/N14, one for N17, plus N16/N1
 
 ---
 
-## Task 6: Spec version — 3.10 → 3.11
+## Task 6: Spec version — 3.11 → 3.12
 
 **Files:**
 - Modify: `docs/spec.md` (header, revision history)
@@ -1851,23 +1851,23 @@ commit as the code it describes. This task records that a coherent version now e
 Current:
 ```
 **Author:** Flávio Oliva
-**Version:** 3.10
+**Version:** 3.11
 **Status:** Contract for implementation
 ```
 
 Replace with:
 ```
 **Author:** Flávio Oliva
-**Version:** 3.11
+**Version:** 3.12
 **Status:** Contract for implementation
 ```
 
 ### Step 2: Add the revision-history row
 
-Determine today's UTC date: `date -u +%F`. Add, after the `3.10` row:
+Determine today's UTC date: `date -u +%F`. Add, after the `3.11` row:
 
 ```
-| 3.11 | <date from `date -u +%F`> | Admin on-behalf-of: `ledger:admin` widens the ownership term at one comparison point — `RecordMovementService`'s in-service check — for change operations only, never for reads, whether the read-model decorator, `StrongBalanceService`'s strong read, or the account collection (D8), and never the role term; every event records the acting principal as `actor` (§2.3/§2.4/§4.1) and the audit entry surfaces it (§7); admin is not an auditor — separation of duties kept; test user `trent`, scenarios P9/N13–N18, error row (§6.5), assumptions 8–9, delegation protocols declared a non-goal (§13); `audit_entries.actor` added by changeset 005 |
+| 3.12 | <date from `date -u +%F`> | Admin on-behalf-of: `ledger:admin` widens the ownership term at one comparison point — `RecordMovementService`'s in-service check — for change operations only, never for reads, whether the read-model decorator, `StrongBalanceService`'s strong read, or the account collection (D8), and never the role term; every event records the acting principal as `actor` (§2.3/§2.4/§4.1) and the audit entry surfaces it (§7); admin is not an auditor — separation of duties kept; test user `trent`, scenarios P9/N13–N18, error row (§6.5), assumptions 8–9, delegation protocols declared a non-goal (§13); `audit_entries.actor` added by changeset 005 |
 ```
 
 ### Step 3: Confirm the existing gaps table needs no change
@@ -1884,7 +1884,7 @@ Expected: green, unit count **174**, unchanged from Task 4 (this task adds no co
 
 ```bash
 git commit -F - -- docs/spec.md <<'EOF'
-docs: bump spec to 3.11 — admin on-behalf-of lands
+docs: bump spec to 3.12 — admin on-behalf-of lands
 
 Header and revision-history row only; every behavioural sentence already landed in Tasks 1–5's own
 commits, in the section it describes.
@@ -1895,8 +1895,8 @@ git push
 gh run watch
 ```
 
-Verify: `git log -1 --format='%s'` prints `docs: bump spec to 3.11 — admin on-behalf-of lands`.
+Verify: `git log -1 --format='%s'` prints `docs: bump spec to 3.12 — admin on-behalf-of lands`.
 Confirm the CI run conclusion is `success` and the final state is: **174 unit / 59 integration**,
 `ledger:admin` widening exactly `RecordMovementService`, `trent` refused every read and both auditor
 routes, `mallory` still refused cross-account, N15's conjunction proven, D8 proven, and `docs/spec.md`
-at 3.11 with no section describing behaviour the code does not have.
+at 3.12 with no section describing behaviour the code does not have.
