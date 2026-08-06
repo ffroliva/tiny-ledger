@@ -31,7 +31,7 @@ class RecordMovementServiceTest {
     @Test
     void firstDepositIsCreatedAndPublished() {
         MovementResult result =
-                service.deposit(new Deposit("alice", opened, UUID.randomUUID(), new Money(GBP, 10_000), "rent"));
+                service.deposit(new Deposit("alice", false, opened, UUID.randomUUID(), new Money(GBP, 10_000), "rent"));
         assertThat(result.outcome()).isEqualTo(Outcome.CREATED);
         assertThat(result.balanceAfter()).isEqualTo(new Money(GBP, 10_000));
         assertThat(published).hasSize(2); // AccountOpened + MoneyDeposited
@@ -40,7 +40,7 @@ class RecordMovementServiceTest {
     @Test
     void replaySameUidSamePayloadReturnsReplayedWithoutSecondCredit() {
         UUID uid = UUID.randomUUID();
-        Deposit cmd = new Deposit("alice", opened, uid, new Money(GBP, 10_000), null);
+        Deposit cmd = new Deposit("alice", false, opened, uid, new Money(GBP, 10_000), null);
         service.deposit(cmd);
         MovementResult replay = service.deposit(cmd);
         assertThat(replay.outcome()).isEqualTo(Outcome.REPLAYED);
@@ -50,23 +50,65 @@ class RecordMovementServiceTest {
     @Test
     void sameUidDifferentAmountIsAnIdempotencyConflict() {
         UUID uid = UUID.randomUUID();
-        service.deposit(new Deposit("alice", opened, uid, new Money(GBP, 10_000), null));
-        assertThatThrownBy(() -> service.deposit(new Deposit("alice", opened, uid, new Money(GBP, 999), null)))
+        service.deposit(new Deposit("alice", false, opened, uid, new Money(GBP, 10_000), null));
+        assertThatThrownBy(() -> service.deposit(new Deposit("alice", false, opened, uid, new Money(GBP, 999), null)))
                 .isInstanceOf(IdempotencyConflictException.class);
     }
 
     @Test
     void foreignCallerIsRefusedBeforeAnyIdempotencyAnswer() {
         UUID uid = UUID.randomUUID();
-        service.deposit(new Deposit("alice", opened, uid, new Money(GBP, 10_000), null));
-        assertThatThrownBy(() -> service.deposit(new Deposit("mallory", opened, uid, new Money(GBP, 10_000), null)))
+        service.deposit(new Deposit("alice", false, opened, uid, new Money(GBP, 10_000), null));
+        assertThatThrownBy(
+                        () -> service.deposit(new Deposit("mallory", false, opened, uid, new Money(GBP, 10_000), null)))
                 .isInstanceOf(OwnershipException.class); // NOT IdempotencyConflict — §4.1 ordering
+    }
+
+    @Test // §6.4 D1: the ONE comparison point ledger:admin widens — a change operation, not a read
+    void adminCanDepositOnAnAccountTheyDoNotOwn() {
+        MovementResult result =
+                service.deposit(new Deposit("trent", true, opened, UUID.randomUUID(), new Money(GBP, 10_000), null));
+        assertThat(result.outcome()).isEqualTo(Outcome.CREATED);
+    }
+
+    @Test // the actor stamped is the admin who acted — the owner on the stream never changes
+    void adminDepositRecordsTheAdminAsActorAndLeavesTheOwnerUnchanged() {
+        service.deposit(new Deposit("trent", true, opened, UUID.randomUUID(), new Money(GBP, 10_000), null));
+
+        MoneyDeposited deposited = (MoneyDeposited) published.getLast();
+        assertThat(deposited.actor()).isEqualTo("trent");
+
+        AccountOpened openedEvent = (AccountOpened) store.read(opened).getFirst();
+        assertThat(openedEvent.owner()).isEqualTo("alice");
+    }
+
+    @Test // the control: same caller, same account, callerIsAdmin=false — proves the flag gates the widening
+    void nonAdminCallerStillCannotDepositOnAnAccountTheyDoNotOwn() {
+        assertThatThrownBy(() -> service.deposit(
+                        new Deposit("mallory", false, opened, UUID.randomUUID(), new Money(GBP, 10_000), null)))
+                .isInstanceOf(OwnershipException.class);
+    }
+
+    @Test // a movement is recorded as an event only the FIRST time it succeeds (§4.1/§4.5): the log
+    // records who first performed it, not everyone who later retries the same movementUid+payload —
+    // even when the retrier is an admin. RecordMovementService returns the replay before emitting
+    // anything, and replayOf's samePayload check never compares the caller.
+    void adminReplayingSomeoneElsesMovementUidDoesNotChangeTheRecordedActor() {
+        UUID uid = UUID.randomUUID();
+        service.deposit(new Deposit("alice", false, opened, uid, new Money(GBP, 10_000), null));
+
+        MovementResult replay = service.deposit(new Deposit("trent", true, opened, uid, new Money(GBP, 10_000), null));
+
+        assertThat(replay.outcome()).isEqualTo(Outcome.REPLAYED);
+        assertThat(published).hasSize(2); // AccountOpened + the ONE MoneyDeposited — trent's retry emitted nothing
+        MoneyDeposited onlyDeposit = (MoneyDeposited) published.getLast();
+        assertThat(onlyDeposit.actor()).isEqualTo("alice"); // NOT trent
     }
 
     @Test
     void insufficientFundsIsRecordedAndReportedAsRejected() {
         MovementResult result =
-                service.withdraw(new Withdraw("alice", opened, UUID.randomUUID(), new Money(GBP, 5_000), null));
+                service.withdraw(new Withdraw("alice", false, opened, UUID.randomUUID(), new Money(GBP, 5_000), null));
         assertThat(result.outcome()).isEqualTo(Outcome.REJECTED);
         assertThat(result.rejectionReason()).isEqualTo("insufficient-funds");
         assertThat(store.read(opened)).hasSize(2); // MovementRejected IS on the stream
@@ -75,15 +117,16 @@ class RecordMovementServiceTest {
     @Test
     void retryingARejectedUidReplaysTheRejection() {
         UUID uid = UUID.randomUUID();
-        service.withdraw(new Withdraw("alice", opened, uid, new Money(GBP, 5_000), null));
-        MovementResult replay = service.withdraw(new Withdraw("alice", opened, uid, new Money(GBP, 5_000), null));
+        service.withdraw(new Withdraw("alice", false, opened, uid, new Money(GBP, 5_000), null));
+        MovementResult replay =
+                service.withdraw(new Withdraw("alice", false, opened, uid, new Money(GBP, 5_000), null));
         assertThat(replay.outcome()).isEqualTo(Outcome.REJECTED_REPLAYED);
     }
 
     @Test
     void unknownAccountIs404Shaped() {
         assertThatThrownBy(() -> service.deposit(
-                        new Deposit("alice", AccountId.random(), UUID.randomUUID(), new Money(GBP, 1), null)))
+                        new Deposit("alice", false, AccountId.random(), UUID.randomUUID(), new Money(GBP, 1), null)))
                 .isInstanceOf(AccountNotFoundException.class);
     }
 

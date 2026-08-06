@@ -27,6 +27,7 @@ public class RecordMovementService implements RecordMovementUseCase {
     public MovementResult deposit(Deposit cmd) {
         return record(
                 cmd.caller(),
+                cmd.callerIsAdmin(),
                 cmd.accountId(),
                 cmd.movementUid(),
                 account -> account.deposit(cmd, clock.now()),
@@ -39,6 +40,7 @@ public class RecordMovementService implements RecordMovementUseCase {
     public MovementResult withdraw(Withdraw cmd) {
         return record(
                 cmd.caller(),
+                cmd.callerIsAdmin(),
                 cmd.accountId(),
                 cmd.movementUid(),
                 account -> account.withdraw(cmd, clock.now()),
@@ -49,6 +51,7 @@ public class RecordMovementService implements RecordMovementUseCase {
 
     private MovementResult record(
             String caller,
+            boolean callerIsAdmin,
             AccountId accountId,
             UUID movementUid,
             java.util.function.Function<Account, List<LedgerEvent>> action,
@@ -58,7 +61,10 @@ public class RecordMovementService implements RecordMovementUseCase {
         List<LedgerEvent> history = store.read(accountId); // ①
         if (history.isEmpty()) throw new AccountNotFoundException(accountId);
         Account account = Account.rehydrate(history); // ②
-        if (!account.owner().equals(caller)) throw new OwnershipException(caller, accountId); // ③
+        // §6.4 D1: the role check already ran in the filter chain (SecurityConfig, ledger:writer).
+        // This is the ownership term alone — ledger:admin widens it, and only it. The role term is
+        // untouched: an admin without ledger:writer never reaches this line at all (N15).
+        if (!account.owner().equals(caller) && !callerIsAdmin) throw new OwnershipException(caller, accountId); // ③
         Optional<LedgerEvent> existing = store.findByMovementUid(movementUid); // ④ (after authz)
         if (existing.isPresent()) return replayOf(existing.get(), accountId, type, amount, reference);
         List<LedgerEvent> events = action.apply(account); // ⑤

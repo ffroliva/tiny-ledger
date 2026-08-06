@@ -82,7 +82,8 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
         var opened = openAccount.open(new OpenAccount("alice", "ACC-AUDIT", Currency.getInstance("GBP")));
         UUID accountId = opened.accountId().value();
 
-        movements.deposit(new Deposit("alice", opened.accountId(), UUID.randomUUID(), Money.of("GBP", 2500), "salary"));
+        movements.deposit(
+                new Deposit("alice", false, opened.accountId(), UUID.randomUUID(), Money.of("GBP", 2500), "salary"));
 
         await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
             List<AuditTrailPort.AuditEntry> entries =
@@ -102,7 +103,8 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
         var opened = openAccount.open(new OpenAccount("carol", "ACC-TRAIL", Currency.getInstance("GBP")));
         UUID accountId = opened.accountId().value();
 
-        movements.deposit(new Deposit("carol", opened.accountId(), UUID.randomUUID(), Money.of("GBP", 700), "gift"));
+        movements.deposit(
+                new Deposit("carol", false, opened.accountId(), UUID.randomUUID(), Money.of("GBP", 700), "gift"));
 
         await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
             var first = trail.trail(new AuditTrailPort.TrailQuery(accountId, null, 1, null, null));

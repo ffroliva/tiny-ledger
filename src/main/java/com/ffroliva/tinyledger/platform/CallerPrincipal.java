@@ -42,4 +42,16 @@ public class CallerPrincipal {
         }
         return StandalonePrincipal.NAME;
     }
+
+    /**
+     * §6.4: whether the caller holds {@code ledger:admin} — the one fact
+     * {@code RecordMovementService} needs to widen its ownership check. {@code standalone} has no
+     * {@link Authentication} at all (permitAll, no bearer token), so this is always {@code false}
+     * there — consistent with §15.8: on-behalf-of has no meaning where there is only one principal.
+     */
+    public boolean isAdmin() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth instanceof JwtAuthenticationToken jwt
+                && jwt.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ledger:admin"));
+    }
 }

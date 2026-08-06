@@ -3,9 +3,11 @@ package com.ffroliva.tinyledger.platform;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -53,5 +55,30 @@ class CallerPrincipalTest {
         // share one principal. It takes the same path as no authentication at all.
         assertThatThrownBy(() -> under("full").current()).isInstanceOf(IllegalStateException.class);
         assertThat(under("standalone").current()).isEqualTo("local");
+    }
+
+    @Test // §6.4: the one fact RecordMovementService widens on — detected from the JWT's authorities
+    void isAdminIsTrueWhenTheJwtCarriesLedgerAdmin() {
+        Jwt jwt = Jwt.withTokenValue("t").header("alg", "none").subject("trent").build();
+        SecurityContextHolder.getContext()
+                .setAuthentication(
+                        new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("ledger:admin"))));
+
+        assertThat(under("full").isAdmin()).isTrue();
+    }
+
+    @Test // ledger:writer alone — the ordinary caller — must not be mistaken for the widening authority
+    void isAdminIsFalseWithoutTheLedgerAdminAuthority() {
+        Jwt jwt = Jwt.withTokenValue("t").header("alg", "none").subject("alice").build();
+        SecurityContextHolder.getContext()
+                .setAuthentication(
+                        new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("ledger:writer"))));
+
+        assertThat(under("full").isAdmin()).isFalse();
+    }
+
+    @Test // standalone has no Authentication at all — isAdmin() must fail closed to false, not throw
+    void isAdminIsFalseWithNoAuthentication() {
+        assertThat(under("standalone").isAdmin()).isFalse();
     }
 }
