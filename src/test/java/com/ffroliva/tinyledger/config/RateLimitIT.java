@@ -23,7 +23,9 @@ import org.springframework.test.web.servlet.MvcResult;
  * ADR 0003), which is only safe because {@code bob} is the one Keycloak fixture user no other
  * {@code *IT} test authenticates as for a write call — grep-verified against every {@code post(}/
  * {@code put(} call site in {@code src/test} before picking the number. See the comment on that
- * override for the margin kept above what {@code alice}/{@code carol} legitimately use.
+ * override for the margin kept above what the other writing principals legitimately use — currently
+ * {@code alice} 9, {@code mallory} 4, {@code carol} 3, {@code trent} 2, recounted there rather than
+ * duplicated here.
  */
 class RateLimitIT extends AbstractIntegrationTest {
 
