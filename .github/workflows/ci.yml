@@ -78,3 +78,57 @@ jobs:
         with: { name: failsafe-reports, path: target/failsafe-reports/*.xml, if-no-files-found: warn }
       - name: "resolve-drift placeholder"
         run: echo "python CLI drift job lands in Plan 4 (spec §12.1)"
+
+  security:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Stage 11 (partial) — secret scan (gitleaks)"
+        # Pinned binary + published sha256, not the marketplace Action: this pipeline's own rule
+        # (§12.1 closing note) is that every gate reproduces locally in a fresh clone offline — a
+        # binary a reviewer can download and run themselves beats an Action of unclear license terms
+        # on a private repo. Pin bump = change both the version and the hash together, deliberately.
+        #
+        # --no-git scans the files at this commit, not the full git-log history. A history walk would
+        # re-flag the same line in every past commit that ever touched it, on every future push,
+        # forever — noise that trains people to ignore the gate. Current-tree-only means whatever
+        # fails today is fixable today, and a leak that gets deleted in the next commit stops failing.
+        run: |
+          set -euo pipefail
+          curl -sSL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks detect --source . --no-git --redact -v
+
+      - name: "docker/keycloak/realm-tiny-ledger.json — evaluated, not allowlisted"
+        if: always()
+        # This fixture seeds six Keycloak test users with one literal password: "dev-only", repeated
+        # verbatim six times. Checked against this job's exact pinned ruleset with a real scan run
+        # locally before this workflow was written, not assumed: zero findings on this path. The
+        # literal is 8 bytes, low-entropy, and reused across every identity — the opposite of what a
+        # leaked credential looks like, and below every bundled rule's shape/entropy threshold.
+        #
+        # Deliberately no allowlist entry for it. There is no active finding here to suppress, and a
+        # standing path allowlist would quietly cover any future content pasted into this same file —
+        # including a real secret pasted in by mistake. If a rule update ever does start matching it,
+        # fix that with either (a) an allowlist naming the specific rule ID, not a blanket file
+        # exemption, or (b) swapping the literal for a non-password-shaped fixture value (a boolean
+        # "seeded" flag), since the app never authenticates against Keycloak with this string outside
+        # local dev anyway.
+        run: echo "see workflow comment — no action needed, this is documentation"
+
+      - name: "Stage 11 — still incomplete"
+        if: always()
+        run: |
+          {
+            echo "### Stage 11 (spec §12.1) — partial"
+            echo "- gitleaks: above, every push."
+            echo "- detect-secrets: not added. It covers the same class of finding as gitleaks; running"
+            echo "  both without a documented reason (e.g. one catches something the other's ruleset"
+            echo "  misses) is redundant scanning, not extra safety."
+            echo "- Trivy image scan: no image exists to scan. Stage 12 (publish) is unbuilt — building"
+            echo "  an image just to feed Trivy would be scope creep past this stage."
+            echo "- dependency-check: deferred. It's slow (fetches the full NVD feed) and needs its own"
+            echo "  suppression-file pass for false positives — not a drive-by addition to this job."
+          } >> "$GITHUB_STEP_SUMMARY"
