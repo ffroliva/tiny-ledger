@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.10
+**Version:** 3.11
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -604,13 +604,21 @@ in-memory bucket.
 
 | Scope | Limit |
 |---|---|
-| Write endpoints, per principal | 100 / minute, burst 20 |
+| Write endpoints, per principal | 100 / minute |
 | Read endpoints, per principal | 1000 / minute |
 | Unauthenticated, per IP | 20 / minute |
 | Any traffic, per IP (backstop) | 300 / minute |
 
 Exceeding returns `429` with `Retry-After` and a `RateLimitExceeded` problem detail. Limits are
 configuration, not constants.
+
+**`burst` is configured but has no operative effect.** `RateLimitProperties.Limit` still carries a
+`burst` field, and `application.properties` still declares
+`ledger.rate-limit.write-per-principal.burst=20` — but `RateLimitFilter#probe` builds the bucket's
+`Bandwidth` from `capacity()` alone; `burst` is never added to it. §9.3's N9 (`alice` exceeds 100
+writes in a minute → 429) requires the **101st** write to be refused, which a capacity-plus-burst
+reading of the old "100/minute, burst 20" row would have contradicted by refusing only the 121st.
+`grep "burst()"` over `src/main` returns zero call sites.
 
 Two production details the naive version gets wrong. **Client IP is `getRemoteAddr()`, never a raw
 `X-Forwarded-For`** — the forwarded-header strategy is enabled only when a trusted proxy fronts the
@@ -621,6 +629,14 @@ in `standalone`, Redis TTL in `full`) so unauthenticated traffic cannot grow mem
 An operator may exempt specific source IPs from every bucket via a configured list — **empty by
 default**, matched against the same `getRemoteAddr()` source the buckets themselves read, never a
 header, and configuration-only: there is no endpoint to add or remove an entry at runtime.
+
+**In `standalone`, rate limiting is entirely inert, deliberately.** The profile binds
+`server.address=127.0.0.1` and its own `ledger.rate-limit.exempt-ips=127.0.0.1` exempts that same
+address, so every request in this mode — which can only ever arrive from loopback, by the bind above
+— matches the exemption and skips both buckets. The blast radius is nil: there is no remote caller
+this could expose. Recorded here because §9.2b's mode-parity rule treats a behavioural difference
+between `standalone` and `full` as a defect unless this document says otherwise — so this is that
+statement.
 
 ### 6.2 Caching
 
@@ -681,12 +697,13 @@ Spring annotations (§4.5). Where each decision *is* made follows from the princ
 a single mechanism.
 
 **Every authorisation decision is made by the component that holds the state the decision needs.**
-That principle decides where a new operation's check belongs. It yields four sites, and **this list
-is closed — a fifth requires an ADR.**
+That principle decides where a new operation's check belongs. It yields five sites, and **this list
+is closed — a sixth requires an ADR.**
 
 | The operation | Authorised | Because |
 |---|---|---|
-| Changes state, or reads at the aggregate's version (`?consistency=strong`) | In the service, against the rehydrated aggregate, before the idempotency lookup (§6.3) | The decision must be taken against the same state, at the same version, the command is applied to |
+| Changes state | In `RecordMovementService`, against the rehydrated aggregate, before the idempotency lookup (§6.3) | The decision must be taken against the same state, at the same version, the command is applied to |
+| Reads at the aggregate's version (`?consistency=strong`) | In `StrongBalanceService`, against the rehydrated aggregate | The strong read is the write-side escape hatch (§4.4) — only `ledger` can promise read-your-writes, so it authorises against the same aggregate state a write would |
 | Reads a read model for one named account | A decorator wrapping the inbound port (§4.5) | The read model is the authority for a question the read model answers |
 | Returns a collection the caller sees only part of | The port takes the visibility scope as a parameter (`accountsOwnedBy`) — the scope *is* the authorisation | There is no set to decorate; widening it is a port-signature change |
 | Depends on role alone, with no account subject (`/audit/**`, `/accounts/*/events`) | The security filter chain in `config` | There is no subject to compare and no inbound port to decorate |
@@ -1438,19 +1455,13 @@ Tracked in the council review reports (`.superpowers/sdd/`) and §15's assumptio
 three rounds against this document; every confirmed finding is closed as of v3.3, and the report
 records the history. When an escalations section is non-empty, it is the canonical list.
 
-**Known divergences between this document and the code at v3.10.** Recorded here rather than left in
+**Known divergences between this document and the code at v3.11.** Recorded here rather than left in
 Javadoc, because a reader checks the spec:
 
 | Gap | Spec says | Code does | Owner |
 |---|---|---|---|
 | `GET /api/v1/accounts/{accountUid}` for an account owned by someone else | 403 (§6.5, "wrong-owner access returns 403, not 404") | **404** — the controller filters by `accountsOwnedBy` and cannot distinguish absent from unowned | **Unassigned.** A wire-contract change; needs its own test and its own decision |
 | `GET /api/v1/accounts/{accountUid}/transactions` for an account that does not exist | 404 (§6.5) | **200 with an empty page** — the history service returns whatever the projection gives | **Unassigned.** As above |
-| **Rate limiting** | §6.1 is a section on it; §6.5 lists the 429; §3's module table makes `platform` responsible for it; §9.6 describes an e2e test that rate-limits and confirms the 429 | **Nothing exists.** The only occurrence in `src/main` is `ErrorCode.RATE_LIMIT_EXCEEDED`, which has no producer | Unassigned — an abuse control, not a nicety |
-| **Token audience** | not specified | **Not validated.** Only `issuer-uri` is configured, so any token the realm issues — including one minted for a different client — is accepted | Plan 3 |
-| **`x-fapi-interaction-id`** | echoed per OB | Echoed **unvalidated and unbounded** into the response header and the MDC, so a newline-bearing value forges log lines. FAPI expects a UUID | The FAPI-hardening plan |
-| **`/error`** | §6.5: no internal identifiers cross the boundary | Boot's `BasicErrorController` is live — no exclusion, no override — and its body echoes the request `path` | Unassigned |
-
-**No rate limiter exists in `src/main`**, despite §6.1.
 
 ## Revision history
 
@@ -1468,3 +1479,4 @@ Javadoc, because a reader checks the spec:
 | 3.8 | 2026-08-04 | Plan 2 close-out truth alignment (`/code-review` CR14): the spec still promised the mechanism ADR 0001 replaced. Kafka routing is a programmatic `EventExternalizationConfiguration` bean, not `@Externalized` on the events (§4.3, §2 tree, tech table, §4.3 division-of-labour, audit consumer note); the in-process legs (`balance`, `notification`) are plain synchronous `@EventListener` in **both** run modes and carry no publication row, so v3.5's "the annotation returns when full mode wires the registry" is retired rather than fulfilled; §9.7's trace-boundary count drops from three to two because the projection never leaves the publishing thread. No behaviour changed — the code was already this; only the spec was stale |
 | 3.9 | 2026-08-05 | Plan 3 close-out truth alignment: §6.4 claimed a single authorisation decorator while the code enforces at four sites, so the mechanism is restated principle-first — every decision is made by the component holding the state it needs — with the four sites enumerated and the list closed against a fifth; §6.4 claimed §9.2 forbids `@PreAuthorize` while §4.5 claimed it forbids framework annotations in the application layer at all, and both were false — that rule names exactly three, `@Service`, `@Component` and `@Transactional`, of which only the first two are stereotypes — so both sites now cite §4.5's design rule; nine known gaps recorded under *Open issues* — the `getAccount` 404-for-unowned and `/transactions` 200-for-absent divergences from §6.5, `POST /accounts` authorised by authentication alone, `full`'s temporary 403 on both auditor operations, the Keycloak realm and its test users, which §6.4 described as committed while neither the realm file nor a Keycloak service exists, and four security gaps: no rate limiter despite §6.1, no `aud` validation, an unvalidated and unbounded `x-fapi-interaction-id`, and Boot's `/error` echoing the request path; new §7.2 Open Banking / FAPI 2.0 alignment table carrying per-row build status, because a verdict of Adopt is not a claim of conformance. No behaviour changed — only the document was stale |
 | 3.10 | 2026-08-06 | Roles and Keycloak realm plan close-out truth alignment: `KeycloakRealmRolesConverter` maps `realm_access.roles` to bare Spring authorities and `SecurityConfig` enforces `ledger:auditor` on `/api/v1/audit/**` and `/api/v1/accounts/*/events`, `ledger:writer` on `POST /accounts` and both movement `PUT` routes, and `ledger:reader` on `/api/v1/accounts/**` (§6.4, §7); `AbstractIntegrationTest` now starts a real Keycloak container importing `docker/keycloak/realm-tiny-ledger.json`, so every IT exercises the production `issuer-uri` decoder branch instead of a committed test key (§9.4, §12.1 stage 7); three gaps-table rows are deleted rather than softened, under *Open issues* — the Keycloak realm and its test users, `POST /accounts` authorised by authentication alone, and the temporary 403 on both auditor operations; the seed script that pins deterministic `accountUid`s to the realm's fixture users is still not built (§6.4); the `aud`, rate-limiting, `x-fapi-interaction-id` and `/error` gaps are unchanged, still owned by Plan 3 |
+| 3.11 | 2026-08-06 | Plan 3 security-hardening close-out truth alignment: four gaps-table rows deleted as closed rather than softened, under *Open issues* — `x-fapi-interaction-id` validates by RFC 4122 full match and replaces (never strips, never logs) a non-conforming value with a minted UUID, already recorded `Built` at §7.2; `ErrorMvcAutoConfiguration` excluded in both `application.properties` and `application-standalone.properties`, since profile files shadow rather than merge, closing the internal-identifier leak §6.5 forbids; `spring.security.oauth2.resourceserver.jwt.audiences` set in `application-full.properties`, validated by Boot's own auto-configured decoder; `RateLimitFilter` (identity buckets) and `IpBackstopFilter` (per-IP backstop, ahead of authentication) implement §6.1 on Bucket4j, Redis in `full` / Caffeine in `standalone`; three corrections within §6.1 itself — `burst` recorded as configured but with no operative effect on bucket capacity, since §9.3 N9 requires the 101st write to be refused; the `exempt-ips` contract (empty by default, `getRemoteAddr()` only, configuration-only) described; `standalone`'s rate limiting stated as deliberately inert under the loopback bind, per §9.2b's mode-parity rule; §6.4's enforcement-sites table splits the row conflating `RecordMovementService` (writes) and `StrongBalanceService` (`?consistency=strong` reads) into two, so a future admin-role decision can attach to the correct one, with the intro count corrected from four sites to five accordingly |
