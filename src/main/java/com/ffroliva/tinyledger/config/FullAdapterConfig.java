@@ -101,7 +101,8 @@ public class FullAdapterConfig {
                         event -> Map.of(
                                 "event-type", event.getClass().getSimpleName(),
                                 "stream-version", String.valueOf(event.version()),
-                                "occurred-at", event.occurredAt().toString()))
+                                "occurred-at", event.occurredAt().toString(),
+                                "actor", event.actor()))
                 .build();
     }
 

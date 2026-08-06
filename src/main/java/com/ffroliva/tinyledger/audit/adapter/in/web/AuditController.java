@@ -134,11 +134,12 @@ public class AuditController implements AuditApi {
 
     private static AuditEntry auditEntry(AuditTrailPort.AuditEntry entry) {
         return new AuditEntry(
-                entry.accountId(),
-                entry.streamVersion(),
-                AuditEntry.TypeEnum.fromValue(entry.eventType()),
-                at(entry.occurredAt()),
-                at(entry.recordedAt()));
+                        entry.accountId(),
+                        entry.streamVersion(),
+                        AuditEntry.TypeEnum.fromValue(entry.eventType()),
+                        at(entry.occurredAt()),
+                        at(entry.recordedAt()))
+                .actor(entry.actor());
     }
 
     private static OffsetDateTime at(Instant instant) {

@@ -799,6 +799,13 @@ components:
           type: string
           format: date-time
           description: When the audit module recorded it — later than `occurredAt` by the Kafka hop.
+        actor:
+          type: string
+          description: |
+            The principal that issued the command (§2.3/§2.4). Equal to the account's owner for an
+            owner-initiated movement; different for an admin acting on behalf of the owner (§6.4).
+            Absent on entries recorded before the cutover instant §15.10 records, where it reads as
+            the owner; absent on or after it is a defect, and the trail reports it as `"unknown"`.
         traceId:
           type: string
           description: Correlates the entry to the request that caused it (§6.6).

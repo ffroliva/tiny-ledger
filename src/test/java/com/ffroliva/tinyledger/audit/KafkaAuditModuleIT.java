@@ -30,6 +30,8 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Utils;
@@ -152,6 +154,38 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
         await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(
                         trail.eventStream(opened.accountId().value(), null, 50).entries())
                 .isNotEmpty());
+    }
+
+    /**
+     * §15.11: the event payload is the record; a header that disagrees with it is a fault, not a value
+     * to silently prefer. {@code AuditKafkaListenerTest} proves the throw with no Kafka involved — this
+     * proves the other half, that the throw actually reaches the operational alarm: the record is
+     * parked on the DLT rather than landing in the trail with a value nobody can trust.
+     */
+    @Test
+    void aRecordWhoseActorHeaderDisagreesWithItsPayloadIsParkedOnTheDlt() throws Exception {
+        String key = UUID.randomUUID().toString();
+        List<Header> headers = List.of(
+                new RecordHeader("event-type", "MoneyDeposited".getBytes(StandardCharsets.UTF_8)),
+                new RecordHeader("stream-version", "1".getBytes(StandardCharsets.UTF_8)),
+                new RecordHeader("occurred-at", Instant.now().toString().getBytes(StandardCharsets.UTF_8)),
+                new RecordHeader("actor", "trent".getBytes(StandardCharsets.UTF_8)));
+
+        try (Consumer<String, String> dlt = probe(DLT_TOPIC);
+                Producer<String, String> producer = producer()) {
+            dlt.poll(Duration.ofMillis(200)); // subscribe before anything is sent
+
+            producer.send(new ProducerRecord<>("ledger.events", null, key, "{\"actor\":\"alice\"}", headers))
+                    .get();
+
+            List<String> parked = new ArrayList<>();
+            await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
+                dlt.poll(Duration.ofSeconds(1)).forEach(record -> parked.add(record.key()));
+                assertThat(parked).contains(key);
+            });
+        }
+
+        assertThat(trail.eventStream(UUID.fromString(key), null, 50).entries()).isEmpty();
     }
 
     /**

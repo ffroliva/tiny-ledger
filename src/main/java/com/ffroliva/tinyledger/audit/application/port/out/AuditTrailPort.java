@@ -22,7 +22,8 @@ public interface AuditTrailPort {
             long streamVersion,
             Instant occurredAt,
             Instant recordedAt,
-            String payload) {}
+            String payload,
+            String actor) {}
 
     /** A {@code null} bound is an absent filter; {@code null} {@code accountId} spans every account. */
     record TrailQuery(UUID accountId, String cursor, int limit, Instant from, Instant to) {}
