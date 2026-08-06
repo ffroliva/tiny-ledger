@@ -2,17 +2,21 @@ package com.ffroliva.tinyledger.testsupport;
 
 import com.ffroliva.tinyledger.TinyLedgerApplication;
 import com.redis.testcontainers.RedisContainer;
+import java.time.Duration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
+import org.testcontainers.utility.MountableFile;
 
 /**
- * {@code @AutoConfigureMockMvc} is here, on the shared base, for the same reason the JWT key is: a per-class
+ * {@code @AutoConfigureMockMvc} is here, on the shared base, for the same reason the Keycloak container is: a per-class
  * declaration would change the context cache key and fork the {@code full} context (ADR 0003). It is what makes
  * an autowired {@code MockMvc} assemble its filter chain from the application's filter <em>registrations</em> —
  * {@code SpringBootMockMvcBuilderCustomizer$FilterRegistrationBeans extends ServletContextInitializerBeans},
@@ -37,10 +41,34 @@ public abstract class AbstractIntegrationTest {
 
     public static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.0"));
 
+    public static final GenericContainer<?> KEYCLOAK = new GenericContainer<>(
+                    DockerImageName.parse("quay.io/keycloak/keycloak:26.4"))
+            .withEnv("KC_BOOTSTRAP_ADMIN_USERNAME", "admin")
+            .withEnv("KC_BOOTSTRAP_ADMIN_PASSWORD", "admin")
+            .withCopyFileToContainer(
+                    MountableFile.forHostPath("docker/keycloak/realm-tiny-ledger.json"),
+                    "/opt/keycloak/data/import/realm-tiny-ledger.json")
+            .withCommand("start-dev", "--import-realm")
+            .withExposedPorts(8080)
+            .waitingFor(Wait.forHttp("/realms/tiny-ledger/.well-known/openid-configuration")
+                    .forPort(8080)
+                    .forStatusCode(200)
+                    .withStartupTimeout(Duration.ofMinutes(3)));
+
     static {
         POSTGRES.start();
         REDIS.start();
         KAFKA.start();
+        KEYCLOAK.start();
+    }
+
+    protected static String issuerUri() {
+        return "http://" + KEYCLOAK.getHost() + ":" + KEYCLOAK.getMappedPort(8080) + "/realms/tiny-ledger";
+    }
+
+    /** A real `Authorization` header value for one of the realm's fixture users. */
+    protected static String bearer(String username) {
+        return "Bearer " + KeycloakTokens.accessToken(issuerUri(), username);
     }
 
     @DynamicPropertySource
@@ -55,21 +83,8 @@ public abstract class AbstractIntegrationTest {
 
         registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
 
-        // The resource server trusts the committed test key instead of a Keycloak the suite does not run.
-        // It lives here, on the shared base, rather than on SecurityConfigIT: a per-class @Import or
-        // @TestConfiguration supplying a JwtDecoder bean would change the context cache key and fork the
-        // `full` context (ADR 0003).
-        //
-        // The issuer must be blanked, and that is measured rather than assumed. Boot's KeyValueCondition
-        // matches only when public-key-location has text AND neither jwk-set-uri nor issuer-uri does —
-        // so with application-full.properties' issuer-uri still in play, IssuerUriCondition won and the
-        // context got a SupplierJwtDecoder pointed at a Keycloak that is not running. It failed lazily, on
-        // first decode, which means only aValidTokenIsAccepted caught it: both 401 assertions passed
-        // because an absent token never reaches the decoder. Blanking it is necessary but not sufficient —
-        // JwtDecoderConfiguration#getValidator adds a JwtIssuerValidator on `getIssuerUri() != null`, not on
-        // hasText, so the minted token claims the same blank issuer. TestJwt.ISSUER is the single value.
-        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> TestJwt.ISSUER);
         registry.add(
-                "spring.security.oauth2.resourceserver.jwt.public-key-location", () -> "classpath:test-jwt-public.pem");
+                "spring.security.oauth2.resourceserver.jwt.issuer-uri",
+                () -> "http://" + KEYCLOAK.getHost() + ":" + KEYCLOAK.getMappedPort(8080) + "/realms/tiny-ledger");
     }
 }

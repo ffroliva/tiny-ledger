@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ffroliva.tinyledger.testsupport.AbstractIntegrationTest;
+import com.ffroliva.tinyledger.testsupport.KeycloakTokens;
 import com.ffroliva.tinyledger.testsupport.TestJwt;
 import com.jayway.jsonpath.JsonPath;
 import java.util.UUID;
@@ -67,10 +68,20 @@ class SecurityConfigIT extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.traceId").value("abc-123"));
     }
 
+    // A boot proof, not just a unit-level check: a broken issuer-uri context starts clean and both 401
+    // assertions above pass without the decoder ever running, so acceptance has to be asserted positively too.
     @Test // and a valid token gets through, so the refusal above is not just "everything 401s"
-    void aValidTokenIsAccepted() throws Exception {
-        mvc.perform(get("/api/v1/accounts").header("Authorization", "Bearer " + TestJwt.token("alice")))
+    void aTokenFromTheRealIssuerIsAccepted() throws Exception {
+        String token = KeycloakTokens.accessToken(issuerUri(), "alice");
+        mvc.perform(get("/api/v1/accounts").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk());
+    }
+
+    @Test // the differential half: the old locally-minted token is now refused, proving the decoder moved
+    // to the container rather than merely still working
+    void aTokenThisIssuerDidNotMintIsRefused() throws Exception {
+        mvc.perform(get("/api/v1/accounts").header("Authorization", "Bearer " + TestJwt.token("alice")))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test // §6.4: the decorator is wired, not merely written — mallory holds a valid token and is
@@ -78,8 +89,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     void aValidTokenForTheWrongOwnerIsForbidden() throws Exception {
         UUID alicesAccount = openAnAccountAs("alice");
 
-        mvc.perform(get("/api/v1/accounts/{a}/balance", alicesAccount)
-                        .header("Authorization", "Bearer " + TestJwt.token("mallory")))
+        mvc.perform(get("/api/v1/accounts/{a}/balance", alicesAccount).header("Authorization", bearer("mallory")))
                 .andExpect(status().isForbidden())
                 // §6.5: the refusal must be a problem document, the same as the 401 above. These two 403s
                 // are the only ones the suite asserts, so nothing else proves the content type.
@@ -91,8 +101,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     void theOwnerReadsHerOwnBalance() throws Exception {
         UUID alicesAccount = openAnAccountAs("alice");
 
-        mvc.perform(get("/api/v1/accounts/{a}/balance", alicesAccount)
-                        .header("Authorization", "Bearer " + TestJwt.token("alice")))
+        mvc.perform(get("/api/v1/accounts/{a}/balance", alicesAccount).header("Authorization", bearer("alice")))
                 .andExpect(status().isOk());
     }
 
@@ -100,8 +109,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     void aValidTokenForTheWrongOwnerCannotPageTheHistory() throws Exception {
         UUID alicesAccount = openAnAccountAs("alice");
 
-        mvc.perform(get("/api/v1/accounts/{a}/transactions", alicesAccount)
-                        .header("Authorization", "Bearer " + TestJwt.token("mallory")))
+        mvc.perform(get("/api/v1/accounts/{a}/transactions", alicesAccount).header("Authorization", bearer("mallory")))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.type").value("/errors/forbidden"));
@@ -121,7 +129,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     @Test
     void theAuditTrailIsRefusedToAnOrdinaryToken() throws Exception {
         mvc.perform(get("/api/v1/audit/entries")
-                        .header("Authorization", "Bearer " + TestJwt.token("alice"))
+                        .header("Authorization", bearer("alice"))
                         .header("x-fapi-interaction-id", "abc-123"))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
@@ -137,8 +145,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     void theRawEventStreamIsRefusedToAnOrdinaryToken() throws Exception {
         UUID alicesAccount = openAnAccountAs("alice");
 
-        mvc.perform(get("/api/v1/accounts/{a}/events", alicesAccount)
-                        .header("Authorization", "Bearer " + TestJwt.token("alice")))
+        mvc.perform(get("/api/v1/accounts/{a}/events", alicesAccount).header("Authorization", bearer("alice")))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.type").value("/errors/forbidden"));
@@ -146,8 +153,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
 
     @Test // §6.5: and an account nobody owns is still a 404, not a 403
     void anUnknownAccountIsNotFoundRatherThanForbidden() throws Exception {
-        mvc.perform(get("/api/v1/accounts/{a}/balance", UUID.randomUUID())
-                        .header("Authorization", "Bearer " + TestJwt.token("alice")))
+        mvc.perform(get("/api/v1/accounts/{a}/balance", UUID.randomUUID()).header("Authorization", bearer("alice")))
                 .andExpect(status().isNotFound());
     }
 
@@ -158,7 +164,7 @@ class SecurityConfigIT extends AbstractIntegrationTest {
      */
     private UUID openAnAccountAs(String owner) throws Exception {
         String body = mvc.perform(post("/api/v1/accounts")
-                        .header("Authorization", "Bearer " + TestJwt.token(owner))
+                        .header("Authorization", bearer(owner))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"ACC-%s\",\"currency\":\"GBP\"}".formatted(owner)))
                 .andExpect(status().isCreated())

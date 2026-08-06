@@ -1,0 +1,43 @@
+{
+  "realm": "tiny-ledger",
+  "enabled": true,
+  "sslRequired": "none",
+  "accessTokenLifespan": 900,
+  "roles": {
+    "realm": [
+      { "name": "ledger:reader",  "description": "Read balance and history for owned accounts" },
+      { "name": "ledger:writer",  "description": "Record movements on owned accounts" },
+      { "name": "ledger:auditor", "description": "Read the audit trail across all accounts; no writes" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "ledger-test",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "protocol": "openid-connect"
+    }
+  ],
+  "users": [
+    { "id": "00000000-0000-4000-8000-000000000001", "username": "alice",   "enabled": true,
+      "credentials": [{ "type": "password", "value": "dev-only", "temporary": false }],
+      "realmRoles": ["ledger:writer", "ledger:reader"] },
+    { "id": "00000000-0000-4000-8000-000000000002", "username": "bob",     "enabled": true,
+      "credentials": [{ "type": "password", "value": "dev-only", "temporary": false }],
+      "realmRoles": ["ledger:writer", "ledger:reader"] },
+    { "id": "00000000-0000-4000-8000-000000000003", "username": "carol",   "enabled": true,
+      "credentials": [{ "type": "password", "value": "dev-only", "temporary": false }],
+      "realmRoles": ["ledger:reader"] },
+    { "id": "00000000-0000-4000-8000-000000000004", "username": "dave",    "enabled": true,
+      "credentials": [{ "type": "password", "value": "dev-only", "temporary": false }],
+      "realmRoles": ["ledger:auditor"] },
+    { "id": "00000000-0000-4000-8000-000000000005", "username": "mallory", "enabled": true,
+      "credentials": [{ "type": "password", "value": "dev-only", "temporary": false }],
+      "realmRoles": ["ledger:writer", "ledger:reader"] },
+    { "id": "00000000-0000-4000-8000-000000000006", "username": "nobody",  "enabled": true,
+      "credentials": [{ "type": "password", "value": "dev-only", "temporary": false }],
+      "realmRoles": [] }
+  ]
+}
