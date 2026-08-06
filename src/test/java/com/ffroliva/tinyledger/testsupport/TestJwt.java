@@ -13,7 +13,6 @@ import java.security.spec.PKCS8EncodedKeySpec;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Date;
-import java.util.List;
 
 /**
  * Mints a token no issuer in the system will accept — signed by a key Keycloak's JWKS will never publish.
@@ -43,12 +42,11 @@ public final class TestJwt {
         }
     }
 
-    public static String token(String subject, String... roles) {
+    public static String token(String subject) {
         try {
             JWTClaimsSet claims = new JWTClaimsSet.Builder()
                     .subject(subject)
                     .issuer(ISSUER)
-                    .claim("roles", List.of(roles))
                     .issueTime(new Date())
                     .expirationTime(Date.from(Instant.now().plusSeconds(300)))
                     .build();
