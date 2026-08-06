@@ -73,6 +73,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
+        if (isExempt(properties, request.getRemoteAddr())) {
+            chain.doFilter(request, response);
+            return;
+        }
+
         boolean write = isWrite(request.getMethod());
 
         String identityKey;
@@ -107,6 +112,22 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private static boolean isWrite(String httpMethod) {
         return !("GET".equals(httpMethod) || "HEAD".equals(httpMethod));
+    }
+
+    /**
+     * Shared by {@link IpBackstopFilter}: an exempt IP skips both buckets — identity and backstop —
+     * entirely, so the check has to happen, and mean the same thing, in both filters. See
+     * {@link RateLimitProperties}'s javadoc for why this is empty by default, why it is matched
+     * against {@code getRemoteAddr()} and nothing else, and why it must never default to loopback.
+     * DEBUG rather than WARN: an exemption *firing* is expected, routine traffic once configured —
+     * {@code RateLimitConfig} logs WARN once, loudly, at startup for the configuration itself.
+     */
+    static boolean isExempt(RateLimitProperties properties, String ip) {
+        boolean exempt = properties.exemptIps().contains(ip);
+        if (exempt) {
+            log.debug("rate limit exemption matched for {}", ip);
+        }
+        return exempt;
     }
 
     /**

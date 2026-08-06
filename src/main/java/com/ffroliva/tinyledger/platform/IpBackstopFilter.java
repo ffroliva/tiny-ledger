@@ -33,6 +33,9 @@ import tools.jackson.databind.ObjectMapper;
  * one, and every real caller falls into the 20/minute unauthenticated bucket instead of their own
  * 100 or 1000/minute one — catastrophically more restrictive than intended. Only the IP-keyed,
  * identity-free backstop can move; the identity buckets stay exactly where they were.
+ *
+ * <p>{@code RateLimitProperties.exemptIps} is checked here too, via {@link RateLimitFilter#isExempt}
+ * — an exempt IP skips this bucket as well as {@link RateLimitFilter}'s, not just one of the two.
  */
 public class IpBackstopFilter extends OncePerRequestFilter {
 
@@ -52,7 +55,13 @@ public class IpBackstopFilter extends OncePerRequestFilter {
         // §6.1: getRemoteAddr(), never a raw X-Forwarded-For — an operator fronting the app with a
         // trusted proxy sets server.forward-headers-strategy, which rewrites what this call returns
         // before this filter ever runs; this filter never parses the header itself.
-        String key = "ip-backstop:" + request.getRemoteAddr();
+        String ip = request.getRemoteAddr();
+        if (RateLimitFilter.isExempt(properties, ip)) {
+            chain.doFilter(request, response);
+            return;
+        }
+
+        String key = "ip-backstop:" + ip;
         ConsumptionProbe probe = RateLimitFilter.probe(store, key, properties.ipBackstop());
         if (!probe.isConsumed()) {
             RateLimitFilter.reject(response, mapper, probe);

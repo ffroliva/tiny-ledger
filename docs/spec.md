@@ -618,6 +618,10 @@ app and that proxy overwrites the header; an unconfigured deployment must not le
 their way past the per-IP bucket. And **per-IP buckets live in a bounded, expiring store** (Caffeine
 in `standalone`, Redis TTL in `full`) so unauthenticated traffic cannot grow memory without bound.
 
+An operator may exempt specific source IPs from every bucket via a configured list — **empty by
+default**, matched against the same `getRemoteAddr()` source the buckets themselves read, never a
+header, and configuration-only: there is no endpoint to add or remove an entry at runtime.
+
 ### 6.2 Caching
 
 | Cache | Store | TTL | Invalidation |

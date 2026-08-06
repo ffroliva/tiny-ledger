@@ -13,7 +13,10 @@ import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.codec.RedisCodec;
 import io.lettuce.core.codec.StringCodec;
 import java.time.Duration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -38,6 +41,26 @@ import org.springframework.context.annotation.Profile;
 @Configuration
 @EnableConfigurationProperties(RateLimitProperties.class)
 public class RateLimitConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(RateLimitConfig.class);
+
+    /**
+     * Product-owner addition: {@code ledger.rate-limit.exempt-ips} is the setting most likely to be
+     * added during an incident and never reverted, so a non-empty list is announced loudly — once,
+     * at startup, naming every entry — rather than only discoverable by reading configuration. Does
+     * not itself decide anything; {@link com.ffroliva.tinyledger.platform.RateLimitFilter#isExempt}
+     * is the enforcement point, this is only the operator-visible record that it is active.
+     */
+    @Bean
+    ApplicationRunner logRateLimitExemptions(RateLimitProperties properties) {
+        return args -> {
+            if (!properties.exemptIps().isEmpty()) {
+                log.warn(
+                        "rate limiting is NOT enforced for these IPs (ledger.rate-limit.exempt-ips): {}",
+                        properties.exemptIps());
+            }
+        };
+    }
 
     @Bean
     @Profile("standalone")
