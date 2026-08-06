@@ -23,7 +23,7 @@ unless the spec says otherwise (§9.2b).
 
 ```bash
 ./mvnw -q verify          # unit, architecture, BDD — MUST start ZERO containers
-./mvnw -q verify -Pit     # the integration suite against real Postgres/Redis/Kafka
+./mvnw -q verify -Pit     # the integration suite against real Postgres/Redis/Kafka/Keycloak
 ```
 
 Both must be green before any commit. `spotless:check` runs inside `verify`.
