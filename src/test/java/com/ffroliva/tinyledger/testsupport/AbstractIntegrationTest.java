@@ -91,10 +91,12 @@ public abstract class AbstractIntegrationTest {
      * {@code alice} and {@code carol} too, not just {@code bob}. Grepped against every
      * {@code post(}/{@code put(} call site under {@code src/test} before picking this number, and
      * recounted after every change to these classes: the heaviest existing writer is {@code alice} at
-     * 8 charged calls: seven {@code openAnAccountAs("alice")} paths in {@code SecurityConfigIT}, plus
-     * the account opened for N16 in {@code RoleAuthorizationIT}. {@code carol} is next at 3 charged
-     * paths in {@code RoleAuthorizationIT}, then {@code mallory} at 3 and {@code trent} at 2 in
-     * {@code SecurityConfigIT}. {@code LOWERED_WRITE_LIMIT} stays comfortably above all of them so
+     * 9 charged calls: eight {@code openAnAccountAs("alice")} paths in {@code SecurityConfigIT}, plus
+     * the account opened for N16 in {@code RoleAuthorizationIT}. {@code mallory} is next at 4 in
+     * {@code SecurityConfigIT} (her own account, the deposit into it, and the cross-account deposit and
+     * withdrawal she is refused — a refused write still charges the bucket, the limiter runs ahead of
+     * authorisation), then {@code carol} at 3 in {@code RoleAuthorizationIT} and {@code trent} at 2.
+     * {@code LOWERED_WRITE_LIMIT} stays comfortably above all of them so
      * {@code RateLimitIT} is the only test that ever reaches it — {@code bob} is simply the one
      * fixture user no other test's write call touches at all.
      */
@@ -104,16 +106,16 @@ public abstract class AbstractIntegrationTest {
      * Review finding I5: every request any {@code *IT} test makes — not just writes — charges the
      * same {@code ip-backstop:127.0.0.1} bucket for the life of this shared context (MockMvc's
      * default remote address, uniform across every test class). Nine IT classes' fixed call paths
-     * contribute <strong>67</strong> requests — counted from every {@code MockMvc.perform} path,
-     * expanding {@code SecurityConfigIT}'s {@code openAnAccountAs} helper against its call sites (30),
-     * plus {@code RoleAuthorizationIT} (14), {@code AudienceValidationIT} (2) and
+     * contribute <strong>69</strong> requests — counted from every {@code MockMvc.perform} path,
+     * expanding {@code SecurityConfigIT}'s {@code openAnAccountAs} helper against its call sites
+     * (23 direct + 9 helper = 32), plus {@code RoleAuthorizationIT} (14), {@code AudienceValidationIT} (2) and
      * {@code RateLimitIT}'s 21-request write-limit proof; {@code RateLimitIT}'s flood test is excluded
      * because it sets {@code 203.0.113.222} and charges a different bucket, and the other five IT
      * classes make no HTTP request at all — plus bounded retries from P9's audit Awaitility poll.
      *
-     * <p><strong>Two ceilings, and the 67 is quoted against both — the comparison below is a
+     * <p><strong>Two ceilings, and the 69 is quoted against both — the comparison below is a
      * counterfactual, not a description of what runs.</strong> §6.1's production value is 300/minute,
-     * and 67 would fit under it with room to spare; that is the reassurance a future editor wants
+     * and 69 would fit under it with room to spare; that is the reassurance a future editor wants
      * before adding a request. But this bucket is deliberately <em>not</em> left at 300, because
      * {@code RateLimitIT}'s flood test (C1) must exhaust whatever this constant is — so it is raised
      * to the value below, far past anything ambient traffic could reach. Nothing in this suite ever

@@ -273,6 +273,33 @@ class SecurityConfigIT extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    /**
+     * N17's withdrawal mirror, and the only test that can catch the slip that loses money. The ownership
+     * term is wired into {@code Withdraw} at {@code LedgerController:93} independently of
+     * {@code Deposit}'s at {@code :80}: widen {@code :93} unconditionally — a literal {@code true}, the
+     * plausible copy-paste on a positional boolean — and every {@code ledger:writer} may withdraw from
+     * any account in the system. Nothing else here sees it. P9's withdrawal passes either way, because
+     * trent is an admin under both values; {@code RoleAuthorizationIT#aReaderMayNotWithdraw} passes
+     * because carol is refused on her <em>role</em> at the filter chain and never reaches
+     * {@code RecordMovementService:67}; and N17 above is a deposit, wired at the other line. mallory is
+     * the principal for the same reason she is N17's: {@code ledger:writer} without {@code ledger:admin},
+     * with her own-account control already established there.
+     *
+     * <p>alice's account is opened here rather than shared: nothing in this class holds one across
+     * methods, and the balance is irrelevant — {@code RecordMovementService} decides ownership at ③
+     * before it applies the movement at ⑤, so a zero balance never turns this into a 422.
+     */
+    @Test
+    void aWriterWithoutAdminCannotWithdrawFromSomeoneElsesAccount() throws Exception {
+        UUID alicesAccount = openAnAccountAs("alice");
+
+        mvc.perform(put("/api/v1/accounts/{a}/withdrawals/{w}", alicesAccount, UUID.randomUUID())
+                        .header("Authorization", bearer("mallory"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":{\"currency\":\"GBP\",\"minorUnits\":1000}}"))
+                .andExpect(status().isForbidden());
+    }
+
     @Test // §6.5: and an account nobody owns is still a 404, not a 403
     void anUnknownAccountIsNotFoundRatherThanForbidden() throws Exception {
         mvc.perform(get("/api/v1/accounts/{a}/balance", UUID.randomUUID()).header("Authorization", bearer("alice")))
