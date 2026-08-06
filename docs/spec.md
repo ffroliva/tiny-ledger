@@ -793,10 +793,19 @@ admin-performed movement carries both halves of the answer an investigation need
 `mallory`'s N7 is a test of the comparison, not of a role. `trent` has both unit and real-stack
 coverage: `RecordMovementServiceTest#adminCanDepositOnAnAccountTheyDoNotOwn` proves the widened write
 predicate directly, while
-`SecurityConfigIT#anAdminRecordsACrossAccountMovementAndTheAuditTrailAttributesItToHim` performs the
-cross-account deposit against Postgres/Redis/Kafka/Keycloak, keeps `alice`'s strong balance readable,
-refuses `trent` on both eventual and strong reads of that same account UID, and finds `trent` as the
-audit actor without assuming row order. A pytest-bdd/Cucumber `@full` binding is not built (§9.3).
+two `SecurityConfigIT` tests carry the real-stack half between them, deliberately split so a
+regression in the write clause cannot hide the read refusals behind its own failure:
+`#anAdminRecordsACrossAccountMovementAndTheAuditTrailAttributesItToHim` performs the cross-account
+deposit **and withdrawal** against Postgres/Redis/Kafka/Keycloak — the two are wired into
+`LedgerController` independently, so each needs its own evidence — keeps `alice`'s strong balance
+readable at the net figure, and finds `trent` as the audit actor without assuming row order;
+`#anAdminCannotReadTheBalanceOfAnAccountHeDoesNotOwn` refuses `trent` on both the eventual and the
+strong read of an account he does not own. Each opens its own account, so the claim is "an account
+`trent` does not own", not one shared UID. The refusal in the other direction —
+`mallory`, a writer without `ledger:admin`, on both verbs — is
+`#aWriterWithoutAdminCannotDepositIntoSomeoneElsesAccount` and
+`#aWriterWithoutAdminCannotWithdrawFromSomeoneElsesAccount`. A pytest-bdd/Cucumber `@full` binding is
+not built (§9.3).
 
 ### 6.5 Error handling
 
@@ -1242,7 +1251,7 @@ auth cannot assert a `403` or an admin, and a mode that loses state on restart c
 | P6 | `alice` retries the same deposit `PUT` (same `depositUid`) | `200` not `201`, body identical to the original; **balance credited once** |
 | P7 | `dave` reads the audit trail after `alice`'s deposit | `200`; the trail contains the corresponding entry — the auditor role gets a positive proof, not only refusals |
 | P8 | `alice` deposits 15 000.00 (≥ the large-movement threshold, §3) | A notification record (structured log entry) carrying the movement UID is produced; a 20.00 deposit produces none |
-| P9 | `trent` (admin) deposits 100.00 into `alice`'s account, addressed by its `accountUid` — not the `ACC-001` name | `201`; balance 100.00; `MoneyDeposited` on the stream carrying `actor=trent` while the stream's `owner` stays `alice`; the audit entry for that version reports the same `actor` — the movement is attributable to the person, not merely to "an admin". `trent`'s own read of that balance is refused: `403`, same as any non-owner's — admin widens change operations only, never reads |
+| P9 | `trent` (admin) deposits 100.00 into `alice`'s account and then withdraws 40.00 from it, each addressed by its `accountUid` — not the `ACC-001` name | `201` on both; balance 60.00, a figure neither movement produces alone. **Both verbs are asserted because they are wired separately** — `LedgerController` passes the admin flag into `Deposit` and `Withdraw` as two independent arguments, so proving one proves nothing about the other. `MoneyDeposited`/`MoneyWithdrawn` on the stream carry `actor=trent` while the stream's `owner` stays `alice`; the audit entry for that version reports the same `actor` — the movement is attributable to the person, not merely to "an admin". `trent`'s own read of that balance is refused: `403`, same as any non-owner's — admin widens change operations only, never reads |
 
 **Negative**
 
