@@ -83,9 +83,12 @@ consequences, and the alternatives rejected. An ADR exists so that a future read
 
 ### Stage 3 — Plan
 
-`docs/superpowers/plans/YYYY-MM-DD-<slug>/PLAN.md`. The spec says what the system is; the plan says
-in what order it gets built and what "done" looks like at each step. `spec.md` §14 is the coarse
-version of this.
+`docs/superpowers/plans/YYYY-MM-DD-<slug>.md` while in flight, archived to `docs/_archive/plans/`
+once delivered — which is where all eleven of this repository's plans now sit, listed newest-first in
+`docs/INDEX.md`. The spec says what the system is; the plan says in what order it gets built and what
+"done" looks like at each step. `spec.md` §14 is the coarse version of this. **A plan is an execution
+script for an agent, not documentation**, which is why they are archived rather than routed to as
+current material.
 
 ### Stage 4 — Task briefs
 
@@ -390,7 +393,7 @@ whole-branch pass even when every task is green.
 |---|---|
 | What was actually asked for? | `docs/spec.md` §1 and §13 — the brief PDFs themselves are the assessor's material and are gitignored, not committed (§2, Stage 1) |
 | What was decided, and why? | `docs/spec.md` and `docs/adr/` |
-| In what order was it built? | `docs/superpowers/plans/*.md`, and the commit history — one commit per task, each landing only after its review was accepted |
+| In what order was it built? | `docs/_archive/plans/*.md`, and the commit history — one commit per task, each landing only after its review was accepted |
 | Was each step reviewed? | The per-task ledger, review packages and reviewer reports live under `.superpowers/sdd/<plan>/`, which is **session-local and gitignored** — deliberately, it is working state. What survives in the repo is §7 above, the commit messages, and this document |
 | Does it do what it claims? | `./mvnw verify` — unit, architecture, BDD, use-case (starts no containers); `./mvnw verify -Pit` — the integration suite against real Postgres, Redis, Kafka **and Keycloak**. No fixed count is quoted here on purpose: count `<testcase ` in that run's own `target/failsafe-reports/*.xml` and read it beside that run's exit code (§5, AGENTS trap 3) — a number carried in prose goes stale the next time a test is added. `docker compose -f docker/docker-compose.yml up -d` then starts the `full` profile's **infrastructure only** — Postgres, Redis, Kafka; there is no Keycloak service and no app service in that file — and the jar runs on the host against the published ports |
 | What was left out on purpose? | `docs/spec.md` §13 non-goals and §15 assumptions |
