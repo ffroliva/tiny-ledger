@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.13
+**Version:** 3.14
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -1336,6 +1336,26 @@ Cucumber scenarios carry `@N19`-style tags; Java tests name the id in the method
 scenarios name it in the docstring. A case with no id anywhere is untested until proven otherwise —
 `N2` sat in this table for eleven revisions with no test, and nobody could see it.
 
+The rule is checked by running it, not by reading the tables. **No gate enforces this** — it is a command
+you run, and saying so is the point (`AGENTS.md`: an unenforced rule is a hope):
+
+```bash
+comm -23 \
+  <(grep -ohE "^\| (P|N|E)[0-9]+" docs/spec.md | tr -d '| ' | sort -u) \
+  <(grep -rhoE "\b(P|N|E)[0-9]{1,2}\b" src/test ledger-cli/tests | sort -u)
+```
+
+**Known-open as of v3.14 — the whole expected output of that command, as a set** (it prints them
+lexicographically, so `E10 E11` land before `E6`): `E6 E7 E9 E10 E11 N20 N21 N22`.
+Anything else appearing is a regression: a case that had a label and lost it. `E9` is deferred by decision
+(§14 step 9); the rest are the unplanned rows this pass added deliberately rather than quietly.
+
+The sweep is a search, so it is subject to `AGENTS.md` trap 7: it can only report an id as *missing*, never
+as *correctly covered*. `P7` is the worked example — it read as covered by two tests that each proved half
+(a 200 with no entry asserted, and an entry read through the port rather than as an auditor over HTTP), and
+neither could have failed if the auditor's read path returned an empty page for every account. A label on
+either would have converted an open question into a false answer.
+
 ### 9.4 Integration — Spring Boot Test + Testcontainers
 Real Postgres, Kafka, Redis **and Keycloak** in containers: the production `issuer-uri` decoder
 branch is exercised by every IT, and `AbstractIntegrationTest` mints tokens against the real realm
@@ -1693,3 +1713,4 @@ Javadoc, because a reader checks the spec:
 | 3.11 | 2026-08-06 | Plan 3 security-hardening close-out truth alignment: four gaps-table rows deleted as closed rather than softened, under *Open issues* — `x-fapi-interaction-id` validates by RFC 4122 full match and replaces (never strips, never logs) a non-conforming value with a minted UUID, already recorded `Built` at §7.2; `ErrorMvcAutoConfiguration` excluded in both `application.properties` and `application-standalone.properties`, since profile files shadow rather than merge, closing the internal-identifier leak §6.5 forbids; `spring.security.oauth2.resourceserver.jwt.audiences` set in `application-full.properties`, validated by Boot's own auto-configured decoder; `RateLimitFilter` (identity buckets) and `IpBackstopFilter` (per-IP backstop, ahead of authentication) implement §6.1 on Bucket4j, Redis in `full` / Caffeine in `standalone`; three corrections within §6.1 itself — `burst` recorded as configured but with no operative effect on bucket capacity, since §9.3 N9 requires the 101st write to be refused; the `exempt-ips` contract (empty by default, `getRemoteAddr()` only, configuration-only) described; `standalone`'s rate limiting stated as deliberately inert under the loopback bind, per §9.2b's mode-parity rule; §6.4's enforcement-sites table splits the row conflating `RecordMovementService` (writes) and `StrongBalanceService` (`?consistency=strong` reads) into two, so a future admin-role decision can attach to the correct one, with the intro count corrected from four sites to five accordingly |
 | 3.12 | 2026-08-06 | Admin on-behalf-of: `ledger:admin` widens the ownership term at one comparison point — `RecordMovementService`'s in-service check — for change operations only, never for reads, whether the read-model decorator, `StrongBalanceService`'s strong read, or the account collection (D8), and never the role term; every event records the acting principal as `actor` (§2.3/§2.4/§4.1) and the audit entry surfaces it (§7); admin is not an auditor — separation of duties kept; test user `trent`, scenarios P9/N13–N18, error row (§6.5), assumptions 8–9, delegation protocols declared a non-goal (§13); `audit_entries.actor` added by changeset 005. Truth alignment landed in the same revision: §6.4's P9 evidence re-attributed to the two tests that actually carry it after the read refusals were split out, and the P9 and N17 catalogue rows extended to both verbs, because `LedgerController` wires the admin flag into deposit and withdrawal as two independent arguments and each needs its own refusal; §9.3's evidence paragraph extended to N6–N10, with N9 called out as the exception — `RateLimitIT` proves the 429, `Retry-After` and catalogued type against a real bucket, but as `bob` under a lowered limit, not at §6.1's 100/minute; §1 and §12 corrected to stop putting the app inside Compose and to move Keycloak out of the not-built bucket — the realm and resource-server integration are built, what is absent is a Compose service, so a hand-run `full` needs `LEDGER_ISSUER_URI`. **CI stage 6 and the vendored ISO governance skill deleted rather than repaired** — the script resolved `REPO_ROOT` inside its own directory, so all five checks scanned a tree holding none of their 17 artefacts and the gate reported `17 known, 0 new` unconditionally; a green check that verifies nothing is worse than no check, and generating the artefacts to turn it green was refused as out of scope. §10 reduced from two `docs/compliance/` files that never existed to a stated boundary; four false lifecycle claims withdrawn from §8.5 (the index is hand-maintained, versions do not derive from `versions.json`, no document names an owner); §12.1's stage 6 struck in place rather than the table renumbered, because six citations across three files name absolute stage numbers and no gate would catch them drifting; the eleven delivered plans (8,838 lines of agent execution script, five times this document) moved to `docs/_archive/` |
 | 3.13 | 2026-08-06 | Battle-testing pass: N19–N22 and E10–E11 added; traceability rule stated; N2 finally given a test |
+| 3.14 | 2026-08-06 | Battle-testing pass, second half: the traceability rule gains the command that checks it and the known-open list that command must print (`E6 E7 E9 E10 E11 N20 N21 N22`), stated with no gate claimed for it; P7 recorded as the worked example of trap 7 — it read as covered by two tests that each proved half, and now has one that proves it whole (`KafkaAuditModuleIT#anAuditorReadsAlicesDepositOutOfTheTrailOverHttp`); N6/N7/N8/N10 labelled on the tests that already carried them. N2 additionally proved against real Postgres in stage `integration` (`ConcurrentWithdrawalIT`), which required the shared write-per-principal budget re-derived from 20/10m to 150/90m — the per-token margin `RateLimitIT` depends on moved 30s → 36s, so it widened rather than thinned |

@@ -2,6 +2,9 @@ package com.ffroliva.tinyledger.audit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ffroliva.tinyledger.audit.application.port.out.AuditTrailPort;
 import com.ffroliva.tinyledger.ledger.application.port.in.Deposit;
@@ -38,7 +41,9 @@ import org.apache.kafka.common.utils.Utils;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * ADR 0001 end to end: a movement recorded through the use case is externalized to Kafka by the
@@ -57,6 +62,9 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private MockMvc mockMvc;
 
     private static final String DLT_TOPIC = "ledger.events.DLT";
 
@@ -103,6 +111,44 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
             // (AuditControllerTest).
             assertThat(entries.getLast().actor()).isEqualTo("alice");
         });
+    }
+
+    /**
+     * P7 — the auditor role's positive proof, end to end over the real chain.
+     *
+     * <p>Written because the traceability sweep found P7 had no single test: it was split across two that
+     * each proved half. {@code RoleAuthorizationIT#anAuditorReadsTheTrail} asserts dave gets a 200 but never
+     * that the trail holds anything, and {@link #ledgerEventsReachTheAuditTrailThroughKafka} asserts the
+     * entry lands but reads it through {@code AuditTrailPort}, not as an auditor over HTTP. A read side that
+     * answered 200 with an empty page for every account would have left both of them green. Adding the P7
+     * label to either would have converted an open question into a false answer.
+     *
+     * <p>The Awaitility poll is on the port and not on the endpoint, deliberately: it waits out the Kafka
+     * hop without spending a charged HTTP request per attempt — see the poll-ceiling arithmetic on
+     * {@link AbstractIntegrationTest#RAISED_IP_BACKSTOP_LIMIT}. The single GET afterwards is the assertion.
+     */
+    @Test
+    void anAuditorReadsAlicesDepositOutOfTheTrailOverHttp() throws Exception {
+        var opened = openAccount.open(new OpenAccount("alice", "ACC-P7", Currency.getInstance("GBP")));
+        UUID accountId = opened.accountId().value();
+        movements.deposit(
+                new Deposit("alice", false, opened.accountId(), UUID.randomUUID(), Money.of("GBP", 4200), "P7"));
+
+        await().atMost(Duration.ofSeconds(30))
+                .until(() -> trail.trail(new AuditTrailPort.TrailQuery(accountId, null, 50, null, null))
+                                .entries()
+                                .size()
+                        == 2);
+
+        // Newest first (theTrailIsReadableNewestFirstOnePageAtATime pins that ordering), so the deposit is
+        // entry 0 and the account opening is entry 1.
+        mockMvc.perform(get("/api/v1/audit/entries")
+                        .param("accountUid", accountId.toString())
+                        .header(HttpHeaders.AUTHORIZATION, bearer("dave")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.auditEntries[0].type").value("MoneyDeposited"))
+                .andExpect(jsonPath("$.auditEntries[0].accountUid").value(accountId.toString()))
+                .andExpect(jsonPath("$.auditEntries[0].actor").value("alice"));
     }
 
     @Test // §7: the trail the auditor endpoint reads — newest first, filterable, cursor-paged
