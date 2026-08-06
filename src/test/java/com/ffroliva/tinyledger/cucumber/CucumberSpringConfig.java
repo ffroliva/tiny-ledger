@@ -47,7 +47,9 @@ public class CucumberSpringConfig {
      * Awaitility's default 100 ms interval, six scenarios) can add many requests in a short window
      * on a slow condition. Same raised number and same reasoning as
      * {@link AbstractIntegrationTest#RAISED_IP_BACKSTOP_LIMIT} — a separate {@code standalone}
-     * Spring context, so it needs its own override rather than inheriting that one.
+     * Spring context, so it needs its own override rather than inheriting that one. Same minutes-not-
+     * seconds period too, for the same measured-on-CI reason documented there: a short flood must
+     * outrun {@code refillGreedy}'s continuous drip, not just outnumber the raw capacity.
      */
     @DynamicPropertySource
     static void rateLimitBackstop(DynamicPropertyRegistry registry) {
@@ -55,7 +57,7 @@ public class CucumberSpringConfig {
                 "ledger.rate-limit.ip-backstop.capacity",
                 () -> String.valueOf(AbstractIntegrationTest.RAISED_IP_BACKSTOP_LIMIT));
         registry.add("ledger.rate-limit.ip-backstop.burst", () -> "0");
-        registry.add("ledger.rate-limit.ip-backstop.period", () -> "60s");
+        registry.add("ledger.rate-limit.ip-backstop.period", () -> "10m");
     }
 
     @TestConfiguration
