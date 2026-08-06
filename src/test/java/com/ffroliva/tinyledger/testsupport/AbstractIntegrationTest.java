@@ -99,8 +99,22 @@ public abstract class AbstractIntegrationTest {
      * {@code LOWERED_WRITE_LIMIT} stays comfortably above all of them so
      * {@code RateLimitIT} is the only test that ever reaches it — {@code bob} is simply the one
      * fixture user no other test's write call touches at all.
+     *
+     * <p><strong>Raised from 20 to 150 for {@code ConcurrentWithdrawalIT}</strong>, whose ten racing
+     * withdrawals retry their 409s and so cannot be counted in advance the way every other IT's writes can.
+     * They are <em>bounded</em> instead: that test caps each branch at {@code MAX_ATTEMPTS = 12}, so its
+     * ceiling is {@code 10 * 12 + 2} = <b>122</b> charged writes, never more, all as {@code alice}. Against
+     * alice's existing 9 that is <b>131</b> — the margin here is 19, and it is a proof rather than an
+     * estimate because the retry loop is capped. Lower {@code MAX_ATTEMPTS} or this number and re-check that
+     * arithmetic; the test itself fails loudly on a 429 (it asserts {@code containsOnly(201, 422)}) rather
+     * than reporting a wrong settled/refused split, so a budget mistake cannot read as a ledger defect.
+     *
+     * <p><strong>Measured, not just bounded:</strong> the first full {@code -Pit} run spent <b>44</b>
+     * withdrawal calls on its ten outcomes (34 conflicts), so the real figure sits at about a third of the
+     * 122 ceiling. The ceiling is what this constant is sized against anyway — a run under heavier
+     * contention is allowed to cost more without turning into a rate-limit failure.
      */
-    public static final int LOWERED_WRITE_LIMIT = 20;
+    public static final int LOWERED_WRITE_LIMIT = 150;
 
     /**
      * Review finding I5: every request any {@code *IT} test makes — not just writes — charges the
@@ -112,6 +126,15 @@ public abstract class AbstractIntegrationTest {
      * {@code RateLimitIT}'s 21-request write-limit proof; {@code RateLimitIT}'s flood test is excluded
      * because it sets {@code 203.0.113.222} and charges a different bucket, and the other five IT
      * classes make no HTTP request at all.
+     *
+     * <p><strong>Recounted after {@code ConcurrentWithdrawalIT}, and the enumerated figure is now ~322.</strong>
+     * Two things moved together. {@code RateLimitIT}'s write-limit proof derives its loop from
+     * {@link #LOWERED_WRITE_LIMIT}, so raising that 20 -> 150 turned its 21 requests into <b>151</b> (+130).
+     * {@code ConcurrentWithdrawalIT} itself adds a bounded <b>123</b> — 2 setup writes, at most
+     * {@code 10 * 12} = 120 withdrawal attempts, and one strong read. Enumerated total: 69 - 21 + 151 + 123 =
+     * <b>322</b>, against the ~300 Awaitility ceiling below for a worst case near <b>622</b> — still
+     * comfortably inside the 1000 configured here, so this constant is deliberately <em>not</em> raised. The
+     * 69/68 accounting below is kept intact because it is the audit trail the recount was done against.
      *
      * <p><strong>69 requests, 68 of them charged.</strong>
      * {@code SecurityConfigIT#anErrorDispatchDoesNotEchoTheRequestPath} sets
@@ -175,12 +198,20 @@ public abstract class AbstractIntegrationTest {
 
         registry.add("ledger.rate-limit.write-per-principal.capacity", () -> String.valueOf(LOWERED_WRITE_LIMIT));
         registry.add("ledger.rate-limit.write-per-principal.burst", () -> "0");
-        // Derived, not chosen: period / capacity = 600s / LOWERED_WRITE_LIMIT (20) = 30 seconds per
-        // greedily-refilled token — far longer than the 21-request proof itself takes, so its
-        // configured-capacity assertion cannot be erased by a token arriving mid-loop. Raise
-        // LOWERED_WRITE_LIMIT and this shrinks proportionally (600s / 40 = 15s), so re-derive the
-        // margin here rather than assuming "30 seconds" still holds.
-        registry.add("ledger.rate-limit.write-per-principal.period", () -> "10m");
+        // Derived, not chosen: period / capacity = 5400s / LOWERED_WRITE_LIMIT (150) = 36 seconds per
+        // greedily-refilled token — far longer than the 151-request proof itself takes, so its
+        // configured-capacity assertion cannot be erased by a token arriving mid-loop.
+        //
+        // Re-derived when the capacity went 20 -> 150 for ConcurrentWithdrawalIT, per the standing
+        // instruction this comment has always carried. The period moved 10m -> 90m in the *same* edit
+        // and for exactly that reason: at the old 600s the margin would have collapsed to 4 seconds,
+        // and RateLimitIT's loop is now 151 real Postgres+Kafka writes, which does not reliably finish
+        // inside 4 seconds on a loaded runner. Raising the period alongside the capacity keeps the
+        // derived margin at 36s — *better* than the 30s it replaced — at no cost but a larger
+        // Retry-After, which RateLimitIT only asserts is non-null. Change either number and redo this
+        // division; a thinned margin here shows up as an intermittent RateLimitIT failure, not as a
+        // rate-limiting bug.
+        registry.add("ledger.rate-limit.write-per-principal.period", () -> "90m");
 
         registry.add("ledger.rate-limit.ip-backstop.capacity", () -> String.valueOf(RAISED_IP_BACKSTOP_LIMIT));
         registry.add("ledger.rate-limit.ip-backstop.burst", () -> "0");
