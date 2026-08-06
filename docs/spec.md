@@ -23,7 +23,7 @@ codebase**:
 | Mode | Command | What runs | Purpose |
 |---|---|---|---|
 | **`standalone`** (default) | `./mvnw spring-boot:run` | In-memory event store, in-memory cache, no auth, no broker. Binds `127.0.0.1` only; the startup banner prints `AUTH DISABLED (standalone)`. **JDK 25** is the only prerequisite. | The brief's runtime in one command: clone, run, curl the APIs. The scope beyond the brief is a recorded, deliberate choice (`agentic-workflow.md` §6) — an accepted submission risk, not claimed compliance. |
-| **`full`** | `docker compose up` | **Built:** PostgreSQL, Kafka (KRaft, no ZooKeeper), Redis — see `docker/docker-compose.yml`. **Specified, not yet built:** Keycloak, an OTel Collector, Prometheus, Grafana, Tempo, Loki — §14 steps 8–9 add them. | The production-shaped system. |
+| **`full`** | `docker compose -f docker/docker-compose.yml up -d`, then `./mvnw spring-boot:run -Dspring-boot.run.profiles=full` — **two steps: the app is not a Compose service** (§12) | **Built:** PostgreSQL, Kafka (KRaft, no ZooKeeper), Redis — see `docker/docker-compose.yml`; the jar runs on the host against their published ports. **Keycloak is built as an integration but absent from Compose:** the realm, the resource server and role enforcement are delivered (§6.4, §14 step 8) and every IT runs against a real Keycloak container, but `docker-compose.yml` declares no Keycloak service — so a hand-run `full` boot must supply its own issuer via `LEDGER_ISSUER_URI` (`application-full.properties:15`), whose default `localhost:8081` nothing in this repository serves. **Specified, not yet built:** an OTel Collector, Prometheus, Grafana, Tempo, Loki — §14 step 9 adds them. | The production-shaped system. |
 
 Both modes run the **same domain code and the same core ledger API** — the two auditor operations
 are `full`-only (§7), a declared profile-gated exclusion from parity, not an adapter difference.
@@ -1086,8 +1086,11 @@ documents.
 **The check is present but inert, so none of the above is currently enforced.** The vendored script
 sets `REPO_ROOT = Path(__file__).resolve().parents[1]` (line 24), which resolves to
 `.claude/skills/iso-compliance/` — the skill's own directory, which contains no `docs/` tree — rather
-than the repository root. Every marker, artefact and version-string check therefore runs against an
-empty tree, and the wrapper's green `governance OK: 17 known, 0 new` says nothing about this
+than the repository root. The marker, version-string and `TODO(25010)` checks therefore find no tree
+to walk at all; the artefact check does have a directory to look in, and looks for all 17 ISO
+documents inside the skill — which is why every one of the 17 registered failures is an
+artefact-presence subtest, `CHANGELOG.md` among them, though that file sits at this repository's
+root. Either way the wrapper's green `governance OK: 17 known, 0 new` says nothing about this
 repository's documents. `docs/governance-baseline.md` records the same finding. Repairing the path is
 an open task (§14 step 13), deliberately not done here: it would change what CI accepts and needs its
 own proof by deliberate violation.
@@ -1440,8 +1443,11 @@ either.
   talking point for a payments service, and the assets already exist.
 - **`docker-compose.yml`:** **Built:** Postgres, Kafka (KRaft, no ZooKeeper), Redis, each with a
   healthcheck — see `docker/docker-compose.yml`. No `app` service; the jar runs on the host against
-  the published ports (§1). **Specified, not yet built:** Keycloak with a pre-provisioned realm, an
-  OTel Collector, Prometheus, Grafana, Tempo, Loki — §14 steps 8–9 add them.
+  the published ports (§1). **No Keycloak service either, though Keycloak itself is built:** the realm
+  file `docker/keycloak/realm-tiny-ledger.json` exists and the integration suite imports it into a real
+  container (§6.4, §9.4) — what is missing is a Compose service for a hand-run `full` boot, which
+  therefore needs `LEDGER_ISSUER_URI` pointed at an issuer of the operator's own. **Specified, not yet
+  built:** an OTel Collector, Prometheus, Grafana, Tempo, Loki — §14 step 9 adds them.
 - **Migrations:** Liquibase, versioned changelogs, applied on startup.
 - **Config:** environment variables only; no secrets in images or compose files — `.env.sample`
   (§1.5) documents every variable.
@@ -1457,7 +1463,7 @@ is not part of today's failure ordering.
 | 3 | **Architecture** | `ApplicationModules.verify()` + ArchUnit (§9.2) | every push |
 | 4 | **Contract** | OpenAPI-generated interfaces compile; port contract suites (§9.2b) | every push |
 | 5 | BDD in-process | Cucumber, the committed `@standalone` subset (§9.3); full auth/admin acceptance currently runs as JUnit ITs at stage 7, with the stage-9 binding still planned | every push |
-| 6 | **Documentation (inert)** | `scripts/ci/check_docs_governance.py` wraps `.claude/skills/iso-compliance/scripts/test_docs_governance.py`: artefact presence, the seven ISO markers, no pre-release version strings, every `TODO(25010)` registered, and no unlinked SoA gap row. **All five scan the skill's own directory, not this repository (§8.4), so the step passes regardless of what `docs/` contains.** Link checking, generated-artefact freshness and the §8.6 docs-travel prompt are planned, not wired | **every push** (runs, enforces nothing) |
+| 6 | **Documentation (inert)** | `scripts/ci/check_docs_governance.py` wraps `.claude/skills/iso-compliance/scripts/test_docs_governance.py`: artefact presence, the seven ISO markers, no pre-release version strings, every `TODO(25010)` registered, and no unlinked SoA gap row. **All five scan the skill's own directory, not this repository (§8.4). The one file under `docs/` the gate does read is `governance-baseline.md` — the wrapper diffs against it and returns 2 if it is missing (`scripts/ci/check_docs_governance.py:7`, `:21-23`); no other document in `docs/` can change the result.** Link checking, generated-artefact freshness and the §8.6 docs-travel prompt are planned, not wired | **every push** (runs, enforces nothing) |
 | 7 | Integration | Testcontainers: Postgres, Kafka, Redis, Keycloak | every push |
 | 8 | Python CLI (planned) | `pytest` matrix on **3.11, 3.12, 3.13**; `pyright` strict; `ruff` | not yet wired; no `ledger-cli/` tree |
 | 9 | E2E (planned) | `docker compose up`, then pytest-bdd over the full catalogue + `ledger-cli scenario run` (§9.6) — **including the README's extracted `curl` examples** (§8.3) | not yet wired |

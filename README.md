@@ -102,7 +102,7 @@ Both ship in this build, from one codebase, and run the same domain code — onl
 | Mode | Command | What runs |
 |---|---|---|
 | **`standalone`** (default) | `./mvnw spring-boot:run` | In-memory event store and cache. No database, broker or auth. Binds `127.0.0.1` only. |
-| **`full`** | `docker compose -f docker/docker-compose.yml up -d` then `./mvnw spring-boot:run -Dspring-boot.run.profiles=full` | PostgreSQL, Redis and Kafka (KRaft) — infrastructure only. Compose carries **no Keycloak and no app service**; the jar runs on the host, and the Keycloak the `full` chain needs is started by the integration suite's Testcontainers, not by this file. |
+| **`full`** | `docker compose -f docker/docker-compose.yml up -d` then `./mvnw spring-boot:run -Dspring-boot.run.profiles=full` | PostgreSQL, Redis and Kafka (KRaft) — infrastructure only. Compose carries **no Keycloak and no app service**; the jar runs on the host. `full` requires an OAuth2 issuer and **nothing here starts one for a hand run** — point `LEDGER_ISSUER_URI` at a Keycloak of your own loaded with `docker/keycloak/realm-tiny-ledger.json`; the built-in default `http://localhost:8081/…` has nothing behind it. (The integration suite is unaffected: Testcontainers starts a throwaway Keycloak on a random port and overrides the issuer at runtime.) |
 
 That duality is the design's central bet: a reviewer who wants the tiny ledger from the brief gets it in
 one command, and a reviewer who wants production concerns gets those too, without forking the code that
