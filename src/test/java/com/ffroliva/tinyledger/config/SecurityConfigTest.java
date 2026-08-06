@@ -43,6 +43,19 @@ class SecurityConfigTest {
     }
 
     /**
+     * Task 3: {@code spring.security.oauth2.resourceserver.jwt.audiences} lives only in
+     * {@code application-full.properties}, which {@code standalone} never loads — so there is no
+     * {@code JwtDecoder} to run the check against in the first place. Asserted rather than assumed: a
+     * header carrying a value that is not even a well-formed JWT still gets a 200, proving the standalone
+     * chain never looks at {@code Authorization} at all, audience or otherwise.
+     */
+    @Test
+    void standaloneIgnoresBearerTokensEntirely() throws Exception {
+        mvc().perform(get("/api/v1/accounts").header("Authorization", "Bearer not-a-real-token"))
+                .andExpect(status().isOk());
+    }
+
+    /**
      * The framework contributes an inbound route this API never declared.
      * {@code HttpSecurityConfiguration#httpSecurity()} applies {@code logout(withDefaults())} to every
      * {@code HttpSecurity}, and because both chains call {@code csrf(csrf -> csrf.disable())},

@@ -26,7 +26,15 @@ public final class KeycloakTokens {
     private KeycloakTokens() {}
 
     public static String accessToken(String baseUrl, String username) {
-        String form = "grant_type=password&client_id=ledger-test" + "&username=" + username + "&password=dev-only";
+        return accessToken(baseUrl, username, "ledger-test");
+    }
+
+    /**
+     * Task 3: {@code ledger-other} is a second fixture client with no audience mapper of its own, so a
+     * token minted here never carries {@code tiny-ledger-api} — the negative half of the audience proof.
+     */
+    public static String accessToken(String baseUrl, String username, String clientId) {
+        String form = "grant_type=password&client_id=" + clientId + "&username=" + username + "&password=dev-only";
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/protocol/openid-connect/token"))
                 .header("Content-Type", "application/x-www-form-urlencoded")

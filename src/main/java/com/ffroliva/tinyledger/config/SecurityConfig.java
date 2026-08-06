@@ -66,6 +66,13 @@ public class SecurityConfig {
      * reinstates {@code BearerTokenAuthenticationEntryPoint}, and it costs nothing. What actually enforces
      * the outcome is {@code SecurityConfigIT#theRefusalCarriesTheCataloguedProblem}: with neither entry
      * point wired, that test fails with "Content type not set" while the status-only assertion still passes.
+     *
+     * <p>Task 3: the audience check is deliberately absent from this method. It lives entirely in
+     * {@code spring.security.oauth2.resourceserver.jwt.audiences} in {@code application-full.properties} —
+     * Boot's own auto-configured decoder adds the {@code aud} validator to the same decoder when that
+     * property is set (measured against the shipped 4.1.0 jar), so a {@code JwtDecoder} bean here would
+     * only duplicate what the framework already builds, and would fork the single Spring context
+     * {@code AbstractIntegrationTest} relies on (ADR 0003) for no gain.
      */
     @Bean
     @Profile("full")
