@@ -61,7 +61,8 @@ written against it from the start rather than migrated.
 
 ### Conventions adopted from `dr-jskill`
 
-`dr-jskill` (jdubois, Apache-2.0) is vendored at `.claude/skills/dr-jskill`. It is the JHipster
+`dr-jskill` (jdubois, Apache-2.0) is agent tooling used during the build, credited in
+`docs/agentic-workflow.md` §3 rather than vendored into this repository. It is the JHipster
 author's opinionated Spring Boot baseline; adopting it means the boring decisions are already made
 and internally consistent.
 
@@ -1492,12 +1493,19 @@ mechanically, because they are exactly the class of error that reviews miss and 
 tolerate.
 
 **Stage numbers are not renumbered when a stage goes.** Slot 6 stays visible and struck through
-because these numbers are cited by name elsewhere — `.github/workflows/ci.yml` names "Stage 7" at
-`:61` and "Stage 11" at `:88` and `:123`, `docs/INDEX.md:50` credits a plan with "CI stage 11", and
-§8.3, §8.2 and §5 of this document point at stages 8 and 9. Shifting 7–12 down one would silently
-repoint every one of them, and a rename is only proven by asserting the old name is gone — real work
-to erase a cosmetic gap. The same reasoning governs ADR numbering (`docs/adr/`, where `0002` was
-never written and the gap is left standing). Nothing occupies slot 6; `spotless:check` at stage 1 is
+because these numbers are cited by name elsewhere — `.github/workflows/ci.yml` names "Stage 7" and
+"Stage 11", `docs/INDEX.md` credits a plan with "CI stage 11", and §8.3, §8.2 and §5 of this document
+point at stages 8 and 9 (`git grep -n 'Stage 7\|Stage 11'` finds every site; line numbers are not
+quoted here because they drift, and a citation that drifts is worse than one that is searched).
+Shifting 7–12 down one would silently repoint every one of them, and a rename is only proven by
+asserting the old name is gone — real work to erase a cosmetic gap.
+
+The same principle governs ADR numbering, and `docs/adr/` shows the other way it can resolve: `0002`
+was cited across this document and `agentic-workflow.md` before the file existed, so rather than
+renumber `0003` down into a number those citations already meant something else by, the missing ADR
+was **written** ([`adr/0002-postgres-event-store.md`](adr/0002-postgres-event-store.md)). Numbers are
+identifiers either way — a gap is closed by supplying what the number names, never by shifting the
+numbers around it. Nothing occupies slot 6; `spotless:check` at stage 1 is
 the whole of the `gate` job now, and no documentation regression is caught mechanically. §8.4 says
 why the check was deleted rather than fixed.
 
@@ -1641,7 +1649,7 @@ why that is a decision rather than a gap.
 
 ## Open issues / known gaps
 
-Tracked in the council review reports (`.superpowers/sdd/`) and §15's assumptions. The council ran
+Tracked in the council review reports (`docs/_archive/reviews/`) and §15's assumptions. The council ran
 three rounds against this document; every confirmed finding is closed as of v3.3, and the report
 records the history. When an escalations section is non-empty, it is the canonical list.
 

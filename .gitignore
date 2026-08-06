@@ -1,8 +1,12 @@
 # Session-local working papers — not part of the deliverable
 HANDOFF.md
 
-# Local agent state
-.claude/settings.local.json
+# Local agent state and tooling. The skills this project was built with are credited by source and
+# licence in docs/agentic-workflow.md §3; vendoring ~150 files of another project's repository into
+# a ledger exercise is tooling, not deliverable. The review artefacts those skills produced — the
+# council reports and assessments — are kept, under docs/_archive/reviews/.
+.claude/
+.superpowers/
 
 # Build output
 target/

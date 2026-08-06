@@ -18,15 +18,11 @@ Quadrants are Diátaxis, per spec §8.1.
 | `architecture.md` | You need the shape of the system before the detail | Explanation |
 | `api/openapi.yaml` | Changing a request/response, a status code, or a validation constraint. **The generated server interfaces come from here** — edit the contract, not the generated code | Reference |
 | `adr/0001-kafka-delivery-path.md` | Touching event publication, the outbox, Kafka, or the transaction boundary around publishing | Explanation |
+| `adr/0002-postgres-event-store.md` | Asking why Postgres is the system of record and Kafka only the bus, or why the topic and partition key are what they are | Explanation |
 | `adr/0003-test-topology-and-ci-parallelisation.md` | Adding a `@SpringBootTest`, changing CI, or wondering why there is one integration context | Explanation |
 | `agentic-workflow.md` | Understanding how this was built — including §5, where the agents were wrong, and §7, the per-phase gate record | Explanation |
+| `_archive/reviews/` | Checking that the review claims in `agentic-workflow.md` are real — the council reports and assessments as they were written | Reference |
 | `_archive/` (start at its `README.md`) | Tracing *why* a decision was taken, or auditing what an agent was actually instructed to do. **Working artifacts, not documentation** — the README states which paths inside them are stale | — |
-
-**There is no `0002` in `adr/`, and there never was.** The Postgres-event-store decision that
-`spec.md` §4.2 and §4.3 call "ADR-002" was written into the spec instead of into its own file, and
-`0003` took the next free number rather than occupy one the spec already pointed elsewhere
-(`adr/0003`, numbering note). ADR numbers are identifiers, so the gap is permanent rather than
-tidied away — this is where a reader meets it, instead of finding it buried in an unrelated ADR.
 
 The Diátaxis quadrants above (spec §8.1) are the ones that have documents. `docs/` has no `how-to/`
 or `tutorial/` tree: the README is the tutorial, and the operational how-tos are not written. Both
