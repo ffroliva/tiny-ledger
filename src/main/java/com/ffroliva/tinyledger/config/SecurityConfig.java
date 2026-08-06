@@ -85,7 +85,13 @@ public class SecurityConfig {
                         .requestMatchers(
                                 HttpMethod.PUT, "/api/v1/accounts/*/deposits/*", "/api/v1/accounts/*/withdrawals/*")
                         .hasAuthority("ledger:writer")
-                        .requestMatchers(HttpMethod.GET, "/api/v1/accounts/**")
+                        // Method-less, not GET-scoped: hasAuthority matches on request.getMethod(), and
+                        // Spring MVC serves HEAD from the same @GetMapping handler by default — a
+                        // GET-only matcher here left HEAD falling through to anyRequest().authenticated(),
+                        // skipping the role check while still returning real status/Content-Length.
+                        // Measured: RoleAuthorizationIT#headIsSubjectToTheSameRoleRuleAsGet failed
+                        // 200 instead of 403 before this line.
+                        .requestMatchers("/api/v1/accounts/**")
                         .hasAuthority("ledger:reader")
                         .anyRequest()
                         .authenticated())
