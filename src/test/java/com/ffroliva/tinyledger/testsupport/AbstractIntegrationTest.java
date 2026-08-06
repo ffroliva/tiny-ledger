@@ -100,9 +100,11 @@ public abstract class AbstractIntegrationTest {
      * it is raised well past anything ambient traffic could reach instead of left at the production
      * value: the flood test is what exercises the backstop's behaviour now, not this suite's default
      * traffic, and the production number itself is unexercised here as a result (recorded in the
-     * task report, not hidden). {@code CucumberSpringConfig} carries the same override for the
-     * separate {@code standalone} context, for the same reason — Awaitility polling in
-     * {@code eventual-consistency.feature} is the equivalent risk there.
+     * task report, not hidden). {@code CucumberSpringConfig} needs no equivalent override: it boots
+     * {@code standalone} (no {@code @ActiveProfiles}, so {@code spring.profiles.default=standalone}
+     * applies), and {@code application-standalone.properties} exempts {@code 127.0.0.1} from every
+     * bucket outright — an override there would raise a ceiling nothing can ever be charged against.
+     * An earlier version of this class carried exactly that dead override; removed on review.
      *
      * <p>Measured on CI, not assumed: the first version of this override used the production period
      * (60s), and {@code RateLimitIT}'s flood test failed — {@code refillGreedy} drips tokens back in

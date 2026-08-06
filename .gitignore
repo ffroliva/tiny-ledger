@@ -16,8 +16,7 @@ docs/source/
 .serena/
 __pycache__/
 
-# Keys never land by accident. These two are deliberate, test-only and labelled in
-# src/test/resources/README; anything else has to be un-ignored on purpose too.
+# Keys never land by accident. TestJwt now generates its signing key per-JVM instead of loading a
+# committed PEM (see that class), so there is nothing left to un-ignore — recreating either filename
+# would silently re-enable tracking, which is exactly what removing them was meant to end.
 *.pem
-!src/test/resources/test-jwt-private.pem
-!src/test/resources/test-jwt-public.pem
