@@ -122,6 +122,33 @@ class AccountTest {
         assertThat(rejected.type()).isEqualTo(MovementType.WITHDRAWAL);
     }
 
+    /**
+     * The positive twin of the two currency-mismatch tests above, and — checked by grep across
+     * {@code src/test} and {@code ledger-cli/tests} — <strong>the only place in this repository that opens an
+     * account in anything but GBP</strong>. Everywhere else EUR appears only as the amount being refused, so
+     * a comparison against a hardcoded {@code GBP} literal rather than {@code this.currency} passed every
+     * test here. The dual-currency behaviour §7 describes was asserted entirely by its refusals.
+     *
+     * <p>The refused half is the discriminator: it is the mirror image of the tests above, and it only
+     * passes if the check reads the account's own currency. A hardcoded-GBP implementation accepts it.
+     */
+    @Test
+    void anAccountHoldsItsOwnCurrencyRatherThanAHardcodedOne() {
+        Currency eur = Currency.getInstance("EUR");
+        AccountId id = AccountId.random();
+        Account account = Account.rehydrate(Account.open(id, new OpenAccount("alice", "ACC-EUR", eur), T));
+        assertThat(account.currency()).isEqualTo(eur);
+
+        List<LedgerEvent> accepted =
+                account.deposit(new Deposit("alice", false, id, UUID.randomUUID(), new Money(eur, 100), null), T);
+        assertThat(accepted.getFirst()).isInstanceOf(MoneyDeposited.class);
+        assertThat(((MoneyDeposited) accepted.getFirst()).balanceAfter()).isEqualTo(new Money(eur, 100));
+
+        List<LedgerEvent> refused =
+                account.deposit(new Deposit("alice", false, id, UUID.randomUUID(), new Money(GBP, 100), null), T);
+        assertThat(((MovementRejected) refused.getFirst()).reason()).isEqualTo("currency-mismatch");
+    }
+
     @Test
     void rehydrateRejectsEmptyHistoryAndVersionGaps() {
         assertThatThrownBy(() -> Account.rehydrate(List.<LedgerEvent>of()))
