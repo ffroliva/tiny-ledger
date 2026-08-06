@@ -102,7 +102,7 @@ Both ship in this build, from one codebase, and run the same domain code — onl
 | Mode | Command | What runs |
 |---|---|---|
 | **`standalone`** (default) | `./mvnw spring-boot:run` | In-memory event store and cache. No database, broker or auth. Binds `127.0.0.1` only. |
-| **`full`** | `docker compose -f docker/docker-compose.yml up -d` then `./mvnw spring-boot:run -Dspring-boot.run.profiles=full` | PostgreSQL, Redis and Kafka (KRaft). |
+| **`full`** | `docker compose -f docker/docker-compose.yml up -d` then `./mvnw spring-boot:run -Dspring-boot.run.profiles=full` | PostgreSQL, Redis and Kafka (KRaft) — infrastructure only. Compose carries **no Keycloak and no app service**; the jar runs on the host, and the Keycloak the `full` chain needs is started by the integration suite's Testcontainers, not by this file. |
 
 That duality is the design's central bet: a reviewer who wants the tiny ledger from the brief gets it in
 one command, and a reviewer who wants production concerns gets those too, without forking the code that
