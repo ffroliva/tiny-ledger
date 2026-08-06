@@ -926,6 +926,13 @@ the orthogonal axis saying what kind of movement it was. `status` is `SETTLED` o
 ledger emits (appends settle atomically); the enum reserves `PENDING` and `REVERSED` so pending
 states never need a breaking change, and the two timestamps are equal today for the same reason.
 
+An audit entry carries one field the transaction does not: the **`actor`**, the principal that
+issued the command, which for an on-behalf-of movement is not the account's `owner` (§6.4). The
+raw event stream exposes it inherently — it is a field of the event. The customer-facing
+transaction resource is deliberately silent on it: the compliance trail is where attribution is
+read, and `actor` is an optional field, so surfacing it on the feed later is an addition, not a
+break.
+
 The balance resource returns the money object plus the staleness markers §9.3 E1 demands:
 
 ```json
@@ -1206,6 +1213,11 @@ assert a `403`, and a mode that loses state on restart cannot assert recovery.
 | N10 | Unauthenticated request to any endpoint | `401`; no information about whether the account exists |
 | N11 | Reused `depositUid` with a different amount | `409` `idempotency-conflict`; the original movement stands untouched |
 | N12 | `mallory` lists accounts via `GET /api/v1/accounts` | `200`; the list contains `ACC-004` only — listing is scoped to the caller, and the existence of other accounts never leaks |
+| N18 | An event written after the cutover with no `actor` | Reported as `unknown`, never as the owner |
+
+**N18 cannot be driven through the HTTP API**, which §9.3 requires of catalogue scenarios — no
+endpoint writes an event without stamping `actor` (§4.1 step 4). Its only executable form is
+`AuditKafkaListenerTest`, a repository-level test of the header-to-column mapping directly.
 
 **Eventual consistency — `eventual-consistency.feature`**
 
@@ -1472,6 +1484,18 @@ Each step ends green and demonstrable.
 9. An event written before `actor` existed has no `actor` key in its payload at all — not a null
    value, an absent key. Events are immutable and there is no backfill, so deserialisation must
    tolerate its absence permanently rather than as a migration window.
+10. Events are immutable and there is no backfill. An audit entry with no `actor` reads as
+    `actor = owner` only if it predates the cutover instant recorded when this lands. After that
+    instant, an audit entry with no `actor` is a defect, and the trail reports `unknown`, never the
+    owner.
+11. **The event payload is the record; the audit trail is a projection of it.** `actor` reaches the
+    trail as a Kafka header (item 10), read alongside — never instead of — the payload it was
+    derived from: a header that disagrees with the payload's own `actor` is a fault, not a value to
+    silently prefer, so the listener rejects that record rather than choosing either value. The
+    delivery error handler that already parks a record it cannot otherwise process on the
+    dead-letter topic (`ledger.events.DLT`) parks this one the same way. A rebuild (§14 step 7) is
+    this same listener replaying from offset zero, not a second code path, so the check holds on
+    rebuild exactly as it does live.
 
 ---
 

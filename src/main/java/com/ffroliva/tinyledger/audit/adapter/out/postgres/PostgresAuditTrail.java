@@ -15,7 +15,7 @@ import org.springframework.jdbc.core.RowMapper;
 public class PostgresAuditTrail implements AuditTrailPort {
 
     private static final String SELECT =
-            "SELECT account_id, event_type, stream_version, payload, occurred_at, recorded_at FROM audit_entries";
+            "SELECT account_id, event_type, stream_version, payload, occurred_at, recorded_at, actor FROM audit_entries";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -26,15 +26,16 @@ public class PostgresAuditTrail implements AuditTrailPort {
     @Override
     public void record(AuditEntry entry) {
         jdbcTemplate.update(
-                "INSERT INTO audit_entries (account_id, event_type, stream_version, payload, occurred_at, recorded_at) "
-                        + "VALUES (?, ?, ?, ?::jsonb, ?, ?) "
+                "INSERT INTO audit_entries (account_id, event_type, stream_version, payload, occurred_at, recorded_at, actor) "
+                        + "VALUES (?, ?, ?, ?::jsonb, ?, ?, ?) "
                         + "ON CONFLICT (account_id, stream_version) DO NOTHING",
                 entry.accountId(),
                 entry.eventType(),
                 entry.streamVersion(),
                 entry.payload(),
                 Timestamp.from(entry.occurredAt()),
-                Timestamp.from(entry.recordedAt()));
+                Timestamp.from(entry.recordedAt()),
+                entry.actor());
     }
 
     /** Keyset on the stream version, which is what "stream order" means for a single account (§7). */
@@ -128,7 +129,8 @@ public class PostgresAuditTrail implements AuditTrailPort {
                 rs.getLong("stream_version"),
                 rs.getTimestamp("occurred_at").toInstant(),
                 rs.getTimestamp("recorded_at").toInstant(),
-                rs.getString("payload"));
+                rs.getString("payload"),
+                rs.getString("actor"));
     }
 
     /** Opaque to the client (§7): URL-safe Base64, and never constructed by hand. */

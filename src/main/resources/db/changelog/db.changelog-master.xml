@@ -9,5 +9,6 @@
     <include file="changes/002-init-balance-projection.sql" relativeToChangelogFile="true"/>
     <include file="changes/003-init-audit-store.sql" relativeToChangelogFile="true"/>
     <include file="changes/004-init-event-publication.sql" relativeToChangelogFile="true"/>
+    <include file="changes/005-add-audit-actor.sql" relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

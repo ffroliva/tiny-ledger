@@ -172,13 +172,25 @@ class AuditControllerTest {
             verifyNoInteractions(trail);
         }
 
+        @Test // §7/D4: the audit entry surfaces the acting principal; absent stays absent on the wire
+        void auditTrailSurfacesTheActor() throws Exception {
+            given(trail.trail(new AuditTrailPort.TrailQuery(ACCOUNT, null, 50, null, null)))
+                    .willReturn(page(null));
+
+            mvc.perform(get("/api/v1/audit/entries").param("accountUid", ACCOUNT.toString()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.auditEntries[0].actor").doesNotExist())
+                    .andExpect(jsonPath("$.auditEntries[1].actor").value("alice"));
+        }
+
         private static AuditTrailPort.Page page(String nextCursor) {
             return new AuditTrailPort.Page(
                     List.of(
                             new AuditTrailPort.AuditEntry(ACCOUNT, "AccountOpened", 1, OCCURRED, RECORDED, """
-                                    {"name":"ACC-001","owner":"alice"}"""),
-                            new AuditTrailPort.AuditEntry(ACCOUNT, "MoneyDeposited", 2, OCCURRED, RECORDED, """
-                                    {"amount":{"currency":"GBP","minorUnits":2500}}""")),
+                                    {"name":"ACC-001","owner":"alice"}""", null),
+                            new AuditTrailPort.AuditEntry(
+                                    ACCOUNT, "MoneyDeposited", 2, OCCURRED, RECORDED, """
+                                    {"amount":{"currency":"GBP","minorUnits":2500}}""", "alice")),
                     nextCursor);
         }
     }
