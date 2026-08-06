@@ -1,6 +1,7 @@
 package com.ffroliva.tinyledger.config;
 
 import com.ffroliva.tinyledger.platform.CallerPrincipal;
+import com.ffroliva.tinyledger.platform.IpBackstopFilter;
 import com.ffroliva.tinyledger.platform.KeycloakRealmRolesConverter;
 import com.ffroliva.tinyledger.platform.RateLimitFilter;
 import com.ffroliva.tinyledger.platform.RateLimitProperties;
@@ -13,6 +14,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import tools.jackson.databind.ObjectMapper;
@@ -60,6 +62,9 @@ public class SecurityConfig {
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+                .addFilterBefore(
+                        ipBackstopFilter(rateLimiterStore, rateLimitProperties, mapper),
+                        BearerTokenAuthenticationFilter.class)
                 .addFilterBefore(
                         rateLimitFilter(rateLimiterStore, rateLimitProperties, callerPrincipal, mapper),
                         AuthorizationFilter.class)
@@ -135,6 +140,9 @@ public class SecurityConfig {
                                 .authenticationEntryPoint(problems))
                 .exceptionHandling(e -> e.authenticationEntryPoint(problems).accessDeniedHandler(problems))
                 .addFilterBefore(
+                        ipBackstopFilter(rateLimiterStore, rateLimitProperties, mapper),
+                        BearerTokenAuthenticationFilter.class)
+                .addFilterBefore(
                         rateLimitFilter(rateLimiterStore, rateLimitProperties, callerPrincipal, mapper),
                         AuthorizationFilter.class)
                 .build();
@@ -143,11 +151,10 @@ public class SecurityConfig {
     /**
      * Spec §6.1. {@code addFilterBefore(_, AuthorizationFilter.class)} in both chains above is the
      * position that matters: after {@code BearerTokenAuthenticationFilter} has populated the
-     * {@code SecurityContext} for a presented token, so a real caller is limited by identity, and
-     * before {@code AuthorizationFilter} decides 401/403, so a token-less flood is throttled instead
-     * of reaching that refusal on every attempt. See {@link RateLimitFilter}'s own javadoc for why it
-     * is built here rather than exposed as a {@code @Component} — the latter would also be picked up
-     * by Boot's filter auto-registration and run the check twice per request.
+     * {@code SecurityContext} for a presented, valid token, so a real caller is limited by identity,
+     * and before {@code AuthorizationFilter} decides 401/403. See {@link RateLimitFilter}'s own
+     * javadoc for why it is built here rather than exposed as a {@code @Component} — the latter would
+     * also be picked up by Boot's filter auto-registration and run the check twice per request.
      */
     private static RateLimitFilter rateLimitFilter(
             RateLimiterStore store,
@@ -155,5 +162,16 @@ public class SecurityConfig {
             CallerPrincipal callerPrincipal,
             ObjectMapper mapper) {
         return new RateLimitFilter(store, properties, callerPrincipal, mapper);
+    }
+
+    /**
+     * Review finding C1: {@code addFilterBefore(_, BearerTokenAuthenticationFilter.class)} — ahead of
+     * authentication, unlike {@link #rateLimitFilter}, precisely because §6.1's per-IP backstop must
+     * see the requests the security chain answers on its own (an invalid bearer token) rather than
+     * only the ones that survive authentication. See {@link IpBackstopFilter}'s javadoc.
+     */
+    private static IpBackstopFilter ipBackstopFilter(
+            RateLimiterStore store, RateLimitProperties properties, ObjectMapper mapper) {
+        return new IpBackstopFilter(store, properties, mapper);
     }
 }

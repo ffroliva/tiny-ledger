@@ -8,6 +8,7 @@ import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
 import com.ffroliva.tinyledger.notification.application.Notification;
 import com.ffroliva.tinyledger.notification.application.NotificationPort;
 import com.ffroliva.tinyledger.shared.AccountId;
+import com.ffroliva.tinyledger.testsupport.AbstractIntegrationTest;
 import io.cucumber.spring.CucumberContextConfiguration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -24,6 +25,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * The one Spring context every scenario shares: the real application on a random port.
@@ -35,6 +38,25 @@ import org.springframework.context.annotation.Primary;
 @CucumberContextConfiguration
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 public class CucumberSpringConfig {
+
+    /**
+     * Review finding I5: {@code LedgerSteps} drives every scenario over a real loopback HTTP call
+     * (this class boots {@code RANDOM_PORT}, not MockMvc), so it shares the ordinary risk any real
+     * client has of tripping its own {@code ip-backstop:127.0.0.1} bucket — sharper here because
+     * {@code eventual-consistency.feature}'s {@code await().atMost(5s)} polls (two sites,
+     * Awaitility's default 100 ms interval, six scenarios) can add many requests in a short window
+     * on a slow condition. Same raised number and same reasoning as
+     * {@link AbstractIntegrationTest#RAISED_IP_BACKSTOP_LIMIT} — a separate {@code standalone}
+     * Spring context, so it needs its own override rather than inheriting that one.
+     */
+    @DynamicPropertySource
+    static void rateLimitBackstop(DynamicPropertyRegistry registry) {
+        registry.add(
+                "ledger.rate-limit.ip-backstop.capacity",
+                () -> String.valueOf(AbstractIntegrationTest.RAISED_IP_BACKSTOP_LIMIT));
+        registry.add("ledger.rate-limit.ip-backstop.burst", () -> "0");
+        registry.add("ledger.rate-limit.ip-backstop.period", () -> "60s");
+    }
 
     @TestConfiguration
     static class Seams {

@@ -2,6 +2,7 @@ package com.ffroliva.tinyledger.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.lettuce.core.RedisException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletRequest;
@@ -23,6 +24,11 @@ import tools.jackson.databind.ObjectMapper;
  * container. {@link LocalRateLimiterStore} is the real {@code standalone} storage, not a fake:
  * Caffeine is pure JVM memory, so using it here already satisfies "zero containers" without a
  * second, test-only implementation to keep honest.
+ *
+ * <p>The per-IP backstop is {@link IpBackstopFilter}'s own test (review finding C1) — this class
+ * covers the identity buckets {@link RateLimitFilter} still owns, plus the two things
+ * {@link RateLimitFilter#probe} does that are shared with that filter (burst arithmetic, storage
+ * failure handling — I2/I3), proved once here rather than duplicated there.
  */
 class RateLimitFilterTest {
 
@@ -111,6 +117,41 @@ class RateLimitFilterTest {
         assertThat(second.getContentAsString()).contains("/errors/rate-limit-exceeded");
     }
 
+    @Test // I3 / §9.3 N9: "alice exceeds 100 writes in a minute" is the 101st, so burst must not extend capacity
+    void burstDoesNotExtendBucketCapacity() throws Exception {
+        RateLimitFilter filter = new RateLimitFilter(
+                new LocalRateLimiterStore(),
+                properties(limit(1, 20), GENEROUS, GENEROUS, GENEROUS), // capacity 1, burst 20
+                fullPrincipal(),
+                MAPPER);
+        authenticateAs("alice");
+        CountingChain chain = new CountingChain();
+
+        filter.doFilter(request("POST", "203.0.113.6"), new MockHttpServletResponse(), chain); // spends the 1
+        MockHttpServletResponse second = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "203.0.113.6"), second, chain); // the burst does not buy a 2nd token
+
+        assertThat(chain.count).isEqualTo(1);
+        assertThat(second.getStatus()).isEqualTo(429);
+    }
+
+    @Test // I2: a rate limiter is an abuse control, not a source of truth — a storage blip must not 500 the API
+    void aStorageFailureFailsOpenInsteadOfPropagating() throws Exception {
+        RateLimiterStore brokenStore = (key, configuration) -> {
+            throw new RedisException("connection reset (simulated)");
+        };
+        RateLimitFilter filter = new RateLimitFilter(
+                brokenStore, properties(limit(1, 0), GENEROUS, GENEROUS, GENEROUS), fullPrincipal(), MAPPER);
+        authenticateAs("alice");
+        CountingChain chain = new CountingChain();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request("POST", "203.0.113.7"), response, chain);
+
+        assertThat(chain.count).isEqualTo(1); // allowed through despite the broken store
+        assertThat(response.getStatus()).isNotEqualTo(429);
+    }
+
     @Test // §6.1 row 3: no principal resolves (CallerPrincipal throws outside standalone) — per-IP, not per-principal
     void withNoAuthenticatedPrincipalTheUnauthenticatedPerIpBucketApplies() throws Exception {
         RateLimitFilter filter = new RateLimitFilter(
@@ -145,25 +186,5 @@ class RateLimitFilterTest {
 
         assertThat(chain.count).isEqualTo(2);
         assertThat(read.getStatus()).isNotEqualTo(429);
-    }
-
-    @Test // §6.1: "per principal AND per IP, whichever is more restrictive" — the backstop is shared by IP
-    void theIpBackstopAppliesAcrossDifferentPrincipalsSharingAnIp() throws Exception {
-        RateLimitFilter filter = new RateLimitFilter(
-                new LocalRateLimiterStore(),
-                properties(GENEROUS, GENEROUS, GENEROUS, limit(1, 0)),
-                fullPrincipal(),
-                MAPPER);
-        CountingChain chain = new CountingChain();
-
-        authenticateAs("alice");
-        filter.doFilter(request("POST", "203.0.113.5"), new MockHttpServletResponse(), chain);
-
-        authenticateAs("bob"); // a different principal, own identity bucket still full
-        MockHttpServletResponse second = new MockHttpServletResponse();
-        filter.doFilter(request("POST", "203.0.113.5"), second, chain);
-
-        assertThat(chain.count).isEqualTo(1); // the shared per-IP backstop, not bob's own bucket, refused it
-        assertThat(second.getStatus()).isEqualTo(429);
     }
 }

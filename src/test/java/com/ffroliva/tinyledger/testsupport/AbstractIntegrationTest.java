@@ -90,6 +90,22 @@ public abstract class AbstractIntegrationTest {
      */
     public static final int LOWERED_WRITE_LIMIT = 10;
 
+    /**
+     * Review finding I5: every request any {@code *IT} test makes — not just writes — charges the
+     * same {@code ip-backstop:127.0.0.1} bucket for the life of this shared context (MockMvc's
+     * default remote address, uniform across every test class). Left at §6.1's real 300/minute, nine
+     * IT classes' combined ambient traffic (~40 requests, counted the same way as
+     * {@link #LOWERED_WRITE_LIMIT}'s margin) would stay under it comfortably — but
+     * {@code RateLimitIT}'s own flood test (C1) must deliberately exceed whatever this number is, so
+     * it is raised well past anything ambient traffic could reach instead of left at the production
+     * value: the flood test is what exercises the backstop's behaviour now, not this suite's default
+     * traffic, and the production number itself is unexercised here as a result (recorded in the
+     * task report, not hidden). {@code CucumberSpringConfig} carries the same override for the
+     * separate {@code standalone} context, for the same reason — Awaitility polling in
+     * {@code eventual-consistency.feature} is the equivalent risk there.
+     */
+    public static final int RAISED_IP_BACKSTOP_LIMIT = 1000;
+
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
@@ -109,5 +125,9 @@ public abstract class AbstractIntegrationTest {
         registry.add("ledger.rate-limit.write-per-principal.capacity", () -> String.valueOf(LOWERED_WRITE_LIMIT));
         registry.add("ledger.rate-limit.write-per-principal.burst", () -> "0");
         registry.add("ledger.rate-limit.write-per-principal.period", () -> "60s");
+
+        registry.add("ledger.rate-limit.ip-backstop.capacity", () -> String.valueOf(RAISED_IP_BACKSTOP_LIMIT));
+        registry.add("ledger.rate-limit.ip-backstop.burst", () -> "0");
+        registry.add("ledger.rate-limit.ip-backstop.period", () -> "60s");
     }
 }
