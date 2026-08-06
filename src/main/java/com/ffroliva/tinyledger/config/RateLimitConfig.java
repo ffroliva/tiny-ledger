@@ -68,11 +68,31 @@ public class RateLimitConfig {
         return new LocalRateLimiterStore();
     }
 
+    /**
+     * Review finding (Redis-outage follow-up): {@code RedisURI.create(host, port)} carries Lettuce's
+     * default 60s command timeout, and Bucket4j is handed no {@code ClientSideConfig}, so a Redis
+     * outage would block every request in {@link com.ffroliva.tinyledger.platform.RateLimitFilter}
+     * for ~60s before failing open — Tomcat's worker pool saturates long before that, which is a
+     * total outage with unbounded latency, strictly worse than the 500 the I2 fail-open replaced.
+     *
+     * <p>250ms, not Bucket4j's {@code ClientSideConfig.withRequestTimeout(...)}: that path throws
+     * {@code io.github.bucket4j.TimeoutException}, which extends {@code BucketExecutionException}
+     * (a {@code RuntimeException}), <strong>not</strong> {@link io.lettuce.core.RedisException} —
+     * adding it without widening the catch in {@code RateLimitFilter#probe} would silently reopen
+     * the exact {@code /error} path leak I2 closed. Bounding it here instead keeps every failure
+     * inside the hierarchy that method already catches. 250ms is chosen because this check sits in
+     * every request's path — long enough to absorb ordinary network jitter to a same-network Redis,
+     * short enough that a real outage costs one bounded stall per request, not sixty. <strong>Do not
+     * "fix" this by adding a Bucket4j request timeout instead</strong> — see the paragraph above.
+     */
     @Bean(destroyMethod = "shutdown")
     @Profile("full")
     RedisClient rateLimitRedisClient(
             @Value("${spring.data.redis.host}") String host, @Value("${spring.data.redis.port}") int port) {
-        return RedisClient.create(RedisURI.create(host, port));
+        RedisURI uri = RedisURI.Builder.redis(host, port)
+                .withTimeout(Duration.ofMillis(250))
+                .build();
+        return RedisClient.create(uri);
     }
 
     @Bean(destroyMethod = "close")

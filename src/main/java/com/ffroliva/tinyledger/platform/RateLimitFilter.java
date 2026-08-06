@@ -149,6 +149,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
      * uncaught exception that {@code ErrorHandlingAdvice} (a {@code @ControllerAdvice}, blind to
      * filter exceptions) cannot translate and that would otherwise fall through to Boot's default
      * error page — the exact request-path leak Task 2 closed.
+     *
+     * <p><strong>Corrected failure mode</strong> (the first version of this fix understated it): the
+     * {@code RedisClient} {@code RateLimitConfig} builds sets a 250ms command timeout, so a Redis
+     * outage costs <em>one bounded 250ms stall per request</em>, then fails open — not the ~60s
+     * stall Lettuce's default timeout would otherwise cause per request (Tomcat's worker pool
+     * saturates in seconds at that rate, which is a total outage, strictly worse than the 500 this
+     * fail-open replaces). See {@code RateLimitConfig#rateLimitRedisClient}'s javadoc for why the
+     * timeout is bounded on the Lettuce side rather than Bucket4j's own {@code ClientSideConfig}.
      */
     static ConsumptionProbe probe(RateLimiterStore store, String key, RateLimitProperties.Limit limit) {
         Supplier<BucketConfiguration> configuration = () -> BucketConfiguration.builder()
