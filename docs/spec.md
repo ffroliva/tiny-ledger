@@ -333,8 +333,9 @@ infrastructure failure and should not acquire one.
 
 1. Command arrives, validated at the boundary (shape only, §4.6).
 2. Aggregate rehydrated by replaying its event stream; **ownership checked against the caller
-   principal before anything else is answered** — a foreign caller gets the §6.5 refusal, never an
-   idempotency oracle.
+   principal before anything else is answered** — or, for a caller holding `ledger:admin`, the
+   widened check of §6.4. A caller who satisfies neither gets the §6.5 refusal, never an idempotency
+   oracle.
 3. Movement UID checked **globally** via `findByMovementUid` (§4.2's unique index) — a replay is
    answered from the existing event, never re-applied; a UID found on a *different* stream is an
    idempotency conflict (§6.3).
@@ -710,22 +711,23 @@ Keycloak as OAuth2/OIDC provider; the app is a resource server validating JWTs.
 | `ledger:reader` | Read balance and history for owned accounts |
 | `ledger:writer` | Record movements on owned accounts |
 | `ledger:auditor` | Read the audit trail across all accounts; no writes |
+| `ledger:admin` | Widen `ledger:writer` to **any** account for change operations, acting on behalf of its owner; never widens `ledger:reader` — reads, including `?consistency=strong`, stay owner-scoped. Grants no operation on its own, and no access to the audit trail |
 
 Authorisation is never an annotation on an application class — the application layer carries no
 Spring annotations (§4.5). Where each decision *is* made follows from the principle below, not from
 a single mechanism.
 
 **Every authorisation decision is made by the component that holds the state the decision needs.**
-That principle decides where a new operation's check belongs. It yields five sites, and **this list
-is closed — a sixth requires an ADR.**
+That principle decides where a new operation's check belongs. It yields five comparison points
+across four sites, and **this list is closed — a sixth requires an ADR.**
 
 | The operation | Authorised | Because |
 |---|---|---|
-| Changes state | In `RecordMovementService`, against the rehydrated aggregate, before the idempotency lookup (§6.3) | The decision must be taken against the same state, at the same version, the command is applied to |
-| Reads at the aggregate's version (`?consistency=strong`) | In `StrongBalanceService`, against the rehydrated aggregate | The strong read is the write-side escape hatch (§4.4) — only `ledger` can promise read-your-writes, so it authorises against the same aggregate state a write would |
-| Reads a read model for one named account | A decorator wrapping the inbound port (§4.5) | The read model is the authority for a question the read model answers |
-| Returns a collection the caller sees only part of | The port takes the visibility scope as a parameter (`accountsOwnedBy`) — the scope *is* the authorisation | There is no set to decorate; widening it is a port-signature change |
-| Depends on role alone, with no account subject (`/audit/**`, `/accounts/*/events`) | The security filter chain in `config` | There is no subject to compare and no inbound port to decorate |
+| Changes state (`PUT .../deposits/*`, `PUT .../withdrawals/*`) | In `RecordMovementService`, against the rehydrated aggregate, before the idempotency lookup (§6.3). Ownership admits the caller if the account's `owner` matches **or** the caller holds `ledger:admin` — the one comparison point `ledger:admin` widens | The decision must be taken against the same state, at the same version, the command is applied to |
+| Reads at the aggregate's version (`?consistency=strong`) | In `StrongBalanceService`, against the rehydrated aggregate — the same in-service mechanism as the row above, **not widened**: a strong read is still a read | The strong read is the write-side escape hatch (§4.4) — only `ledger` can promise read-your-writes, so it authorises against the same aggregate state a write would; `ledger:admin` is a change-operation grant, not a read grant, so this comparison is untouched |
+| Reads a read model for one named account | A decorator wrapping the inbound port (§4.5), **not widened** | The read model is the authority for a question the read model answers |
+| Returns a collection the caller sees only part of | The port takes the visibility scope as a parameter (`accountsOwnedBy`) — the scope *is* the authorisation, **not widened** (D8) | There is no set to decorate; widening it is a port-signature change |
+| Depends on role alone, with no account subject (`/audit/**`, `/accounts/*/events`) | The security filter chain in `config` — `ledger:admin` is absent from both matchers | There is no subject to compare and no inbound port to decorate |
 
 Absent is never answered as unowned: an account that does not exist is §6.5's 404, whoever asks —
 on every route but `/transactions`, whose 200-with-empty-page divergence the gaps table records.
@@ -748,11 +750,18 @@ of the tree.
 | `carol` | `ledger:reader` | `ACC-003` | **403 on write.** A reader may not move money |
 | `dave` | `ledger:auditor` | — | Reads the audit trail and raw event streams across all accounts; **403 on every write** |
 | `mallory` | `ledger:writer`, `ledger:reader` | `ACC-004` | **403 on cross-account access.** Valid token, correct role, wrong owner — the authorisation bug that role checks alone miss |
+| `trent` | `ledger:writer`, `ledger:reader`, `ledger:admin` | — | **On-behalf-of.** Moves money on an account he does not own; the movement records `actor=trent` on `alice`'s stream while the owner stays `alice`. **403 on the audit trail** — acting and reviewing are different jobs |
 | `ledger-cli` | service account, `ledger:writer`, `ledger:reader` | `ACC-900` | Client-credentials flow for the Python CLI and the e2e suite |
 
 `mallory` is the one that earns its place. Role-based checks pass for her on every endpoint; only the
 ownership check against the JWT subject stops her reading `ACC-001`. A test suite without a
 `mallory` proves authentication and nothing about authorisation.
+
+`trent` is the cryptographic literature's trusted arbitrator, and the name is the point: authorised,
+and still not above the record. He earns his place from the opposite side to `mallory` — `mallory`
+proves the ownership comparison exists, `trent` proves the exception to it is exactly one clause
+wide. A suite whose `trent` can also read the audit trail has tested a superuser and called it an
+administrator.
 
 `ACC-001`…`ACC-900` are account *names* (Starling's `AccountV2.name`), not identifiers — the API
 knows only `accountUid`s, pinned to deterministic UUIDs by `docker/keycloak/realm-tiny-ledger.json`
@@ -761,8 +770,17 @@ built; **the seed script is still not**.
 
 **The ownership mechanism, end to end:** `AccountOpened` records the `owner` (§2.3), so ownership
 is a fact of the event stream, not sidecar state; every command and query carries the caller
-principal (§2.4); the use case compares the two. `mallory`'s N7 is a test of that comparison, not
-of a role.
+principal (§2.4); the use case compares the two. For a command — `RecordMovementService` alone —
+that comparison admits the caller if they hold `ledger:admin`; every query's comparison,
+`StrongBalanceService`'s strong read included, is untouched, because admin widens change operations
+only, never reads. Every event a command then emits records the caller as its `actor` (§2.3), so an
+admin-performed movement carries both halves of the answer an investigation needs — *who acted* and
+*whose account it was* — on the same immutable row, and the audit trail surfaces the pair (§7).
+`mallory`'s N7 is a test of the comparison, not of a role; `trent`'s coverage is unit-level for
+now — `RecordMovementServiceTest#adminCanDepositOnAnAccountTheyDoNotOwn` proves the admin clause
+widened the write comparison, and `StrongBalanceServiceTest#adminIsRefusedTheStrongReadOfAnAccountTheyDoNotOwn`
+proves the same clause left the strong-read comparison untouched. A `trent` scenario in the
+Cucumber catalogue (§9.3) is not yet built.
 
 ### 6.5 Error handling
 
@@ -778,7 +796,7 @@ RFC 7807 `ProblemDetail` throughout, via Spring's built-in support
 | Reused movement UID, different payload | 409 | `/errors/idempotency-conflict` |
 | Rate limit exceeded | 429 | `/errors/rate-limit-exceeded` |
 | Unauthenticated | 401 | `/errors/unauthenticated` |
-| Forbidden — wrong role *or* wrong owner | 403 | `/errors/forbidden` |
+| Forbidden — wrong role, or (on a change operation) wrong owner without `ledger:admin` | 403 | `/errors/forbidden` |
 | Unknown account | 404 | `/errors/account-not-found` |
 | Event store unreachable | 503 | `/errors/event-store-unavailable`, with `Retry-After` |
 | Auditor operation invoked in standalone | 501 | `/errors/not-available-in-standalone` |
@@ -1398,6 +1416,9 @@ Stated so their absence reads as a decision:
 - Real KYC/AML. `audit` records what happened; it does not judge it.
 - Aggregate snapshots. Replay is O(stream length) and PoC streams are short; a snapshot store is
   the recorded upgrade path for when streams outgrow that — cut whole rather than half-specified.
+- Delegation and impersonation protocols. An admin acts under their own identity and their own
+  token (§15.8); OAuth 2.0 Token Exchange (RFC 8693) — a console minting a scoped, time-boxed
+  on-behalf-of token — is the recorded production upgrade path, and is not built here.
 
 ---
 

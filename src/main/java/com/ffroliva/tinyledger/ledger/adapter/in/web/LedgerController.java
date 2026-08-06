@@ -77,6 +77,7 @@ public class LedgerController implements MovementsApi {
         return respond(
                 recordMovement.deposit(new Deposit(
                         callerPrincipal.current(),
+                        callerPrincipal.isAdmin(),
                         new AccountId(accountUid),
                         depositUid,
                         LedgerApiMapper.toMoney(request.getAmount()),
@@ -89,6 +90,7 @@ public class LedgerController implements MovementsApi {
         return respond(
                 recordMovement.withdraw(new Withdraw(
                         callerPrincipal.current(),
+                        callerPrincipal.isAdmin(),
                         new AccountId(accountUid),
                         withdrawalUid,
                         LedgerApiMapper.toMoney(request.getAmount()),

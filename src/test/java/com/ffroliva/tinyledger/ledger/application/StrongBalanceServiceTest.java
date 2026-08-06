@@ -35,6 +35,19 @@ class StrongBalanceServiceTest {
         assertThatThrownBy(() -> service.strongBalance("wrong-user", id)).isInstanceOf(OwnershipException.class);
     }
 
+    @Test // §6.4 D1: reads never widen. "trent" is the same caller who, given callerIsAdmin=true, is
+    // admitted by RecordMovementService#adminCanDepositOnAnAccountTheyDoNotOwn — but
+    // QueryStrongBalanceUseCase#strongBalance(String, AccountId) has no callerIsAdmin parameter at
+    // all, so there is structurally nothing for a JWT's ledger:admin authority to widen here. A
+    // strong read is still a read: the ownership comparison is refused exactly as it is for any other
+    // non-owner.
+    void adminIsRefusedTheStrongReadOfAnAccountTheyDoNotOwn() {
+        AccountId id = AccountId.random();
+        store.append(id, 0, List.of(new AccountOpened(id, 1, now, "alice", "ACC-001", Currency.getInstance("GBP"))));
+
+        assertThatThrownBy(() -> service.strongBalance("trent", id)).isInstanceOf(OwnershipException.class);
+    }
+
     @Test
     void returnsStrongBalanceForAuthorizedOwner() {
         AccountId id = AccountId.random();
