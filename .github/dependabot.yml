@@ -1,10 +1,47 @@
 version: 2
+
+# Grouped and capped deliberately. Ungrouped Dependabot opened four PRs on this repository's first
+# push, each triggering a full four-container CI run — noise that trains people to ignore the bot,
+# which is the opposite of what a dependency gate is for. Grouping means one PR per ecosystem per
+# week; the open-PR cap bounds the blast radius when a week is busy.
 updates:
   - package-ecosystem: "maven"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      maven-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Major bumps land as individual PRs, not in the group, because they need a human decision.
+      # Testcontainers 1.x -> 2.x was proposed on day one and would very likely have broken the
+      # integration suite: it is the base of every IT via AbstractIntegrationTest.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # The Python CLI (spec §11, implementation-order step 10). `uv` reads pyproject.toml and uv.lock;
+  # Dependabot's `uv` ecosystem understands both, so the lock stays authoritative rather than being
+  # bypassed by a bare pyproject edit.
+  - package-ecosystem: "uv"
+    directory: "/ledger-cli"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
