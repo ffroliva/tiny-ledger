@@ -2,6 +2,7 @@ package com.ffroliva.tinyledger.shared;
 
 import static org.assertj.core.api.Assertions.*;
 
+import com.ffroliva.tinyledger.shared.error.InvalidAmountException;
 import java.util.Currency;
 import org.junit.jupiter.api.Test;
 
@@ -28,9 +29,23 @@ class MoneyTest {
         assertThat(new Money(GBP, -1).isNegative()).isTrue();
     }
 
+    /**
+     * V3. This asserted {@code ArithmeticException} until 2026-08-07, which was "loudly" in the sense that
+     * it did not wrap around — but at the API boundary that exception is uncatalogued, so it reached
+     * {@code ErrorHandlingAdvice}'s catch-all and the caller got an opaque <b>500</b> for input the
+     * contract permits. Loud to the domain is not the same as loud to the client.
+     */
     @Test
-    void overflowFailsLoudly() {
+    void overflowFailsAsACataloguedInvalidAmountRatherThanAnUncaughtArithmeticException() {
         assertThatThrownBy(() -> new Money(GBP, Long.MAX_VALUE).plus(new Money(GBP, 1)))
-                .isInstanceOf(ArithmeticException.class);
+                .isInstanceOf(InvalidAmountException.class)
+                .isNotInstanceOf(ArithmeticException.class);
+    }
+
+    /** The other operator, which had no overflow test at all — see {@code Money#exact}'s javadoc. */
+    @Test
+    void underflowOnSubtractionIsCataloguedTheSameWay() {
+        assertThatThrownBy(() -> new Money(GBP, Long.MIN_VALUE).minus(new Money(GBP, 1)))
+                .isInstanceOf(InvalidAmountException.class);
     }
 }
