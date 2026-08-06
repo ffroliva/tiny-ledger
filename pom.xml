@@ -94,7 +94,20 @@
   </dependencies>
   <build>
     <plugins>
-      <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin>
+      <!--
+        The `exec` classifier makes the REPACKAGED jar tiny-ledger-<version>-exec.jar and leaves the
+        plain, ordinary jar as the main artifact. Without it, `repackage` replaces the main artifact
+        with a Boot jar whose classes live under BOOT-INF/classes/ — a layout javac cannot read — so
+        anything depending on this project compiles against nothing:
+
+            cannot find symbol: class Money
+
+        That is exactly what benchmarks/ hit, and it is the documented reason Boot ships the
+        classifier option. Consumers now get real classes; the runnable jar is still produced, just
+        named -exec (see scripts/e2e/run-e2e.sh).
+      -->
+      <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration><classifier>exec</classifier></configuration></plugin>
       <plugin>
         <groupId>org.openapitools</groupId><artifactId>openapi-generator-maven-plugin</artifactId><version>${openapi-generator.version}</version>
         <executions><execution><goals><goal>generate</goal></goals>

@@ -7,7 +7,10 @@
 # up Postgres, Redis, Kafka and Keycloak already. Run from the repository root.
 set -euo pipefail
 
-JAR=${JAR:-target/tiny-ledger-0.1.0-SNAPSHOT.jar}
+# -exec, because the root pom gives spring-boot-maven-plugin a classifier so the plain
+# jar stays usable as a dependency (benchmarks/ compiles against it). The runnable,
+# repackaged jar is the one with the classifier.
+JAR=${JAR:-target/tiny-ledger-0.1.0-SNAPSHOT-exec.jar}
 BASE_URL=${LEDGER_BASE_URL:-http://127.0.0.1:8080}
 APP_LOG=${APP_LOG:-app.log}
 READY_TIMEOUT=${READY_TIMEOUT:-120}

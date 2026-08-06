@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  §9.7's JMH microbenchmarks: event replay and `Money` arithmetic.
+
+  DELIBERATELY NOT A MODULE OF THE ROOT POM. The root has no <modules> section and this
+  does not add one. Two reasons, both load-bearing here:
+
+    1. `./mvnw -q verify` at the root MUST stay fast and MUST start zero containers
+       (AGENTS: "verify starting a container is a bug, not a slow test" — it is what lets
+       CI run the unit job on a runner with no Docker, ADR 0003). A benchmark module in
+       the reactor would be compiled, and eventually run, by every developer on every
+       verify. Benchmarks are minutes, not seconds.
+    2. JMH's annotation processor generates its harness at compile time. Keeping it in a
+       separate reactor keeps that processor off the main build's compile path entirely,
+       rather than relying on scope to contain it.
+
+  Build and run explicitly, from this directory:
+
+      ../mvnw -q -DskipTests package      # in the repository root first, to install the jar
+      ./mvnw -q clean package
+      java -jar target/benchmarks.jar -rf json -rff jmh-result.json
+
+  It depends on the application artifact, so the root must have been installed:
+
+      cd .. && ./mvnw -q -DskipTests install
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.ffroliva</groupId>
+  <artifactId>tiny-ledger-benchmarks</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+  <name>tiny-ledger benchmarks (JMH)</name>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>25</maven.compiler.release>
+    <!-- Pinned, not inherited: this pom has no parent, so nothing else supplies a version. -->
+    <jmh.version>1.37</jmh.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.ffroliva</groupId>
+      <artifactId>tiny-ledger</artifactId>
+      <version>0.1.0-SNAPSHOT</version>
+    </dependency>
+    <dependency>
+      <groupId>org.openjdk.jmh</groupId>
+      <artifactId>jmh-core</artifactId>
+      <version>${jmh.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.openjdk.jmh</groupId>
+      <artifactId>jmh-generator-annprocess</artifactId>
+      <version>${jmh.version}</version>
+      <scope>provided</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!--
+        JMH generates its harness and /META-INF/BenchmarkList with an annotation processor, and the
+        processor MUST be named on annotationProcessorPaths rather than merely be a `provided`
+        dependency. Since JDK 23, javac no longer discovers annotation processors from the classpath
+        by default (JEP 8321314), so the older "put jmh-generator-annprocess in provided scope"
+        recipe silently produces a jar with no benchmarks in it. The failure surfaces only at run
+        time, and it does not look like a build problem:
+
+            Exception in thread "main" java.lang.RuntimeException:
+              ERROR: Unable to find the resource: /META-INF/BenchmarkList
+
+        This project targets Java 25, so it is squarely in that regime.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+        <configuration>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.openjdk.jmh</groupId>
+              <artifactId>jmh-generator-annprocess</artifactId>
+              <version>${jmh.version}</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals><goal>shade</goal></goals>
+            <configuration>
+              <finalName>benchmarks</finalName>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>org.openjdk.jmh.Main</mainClass>
+                </transformer>
+              </transformers>
+              <filters>
+                <filter>
+                  <artifact>*:*</artifact>
+                  <!-- Shading a Boot-derived classpath drags in signed jars whose signatures
+                       no longer verify once repackaged. Dropping the signature files is the
+                       standard JMH-shade remedy. -->
+                  <excludes>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

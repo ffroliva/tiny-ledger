@@ -24,3 +24,6 @@ __pycache__/
 # committed PEM (see that class), so there is nothing left to un-ignore — recreating either filename
 # would silently re-enable tracking, which is exactly what removing them was meant to end.
 *.pem
+
+# JMH run output — a measurement, not a source artifact
+benchmarks/jmh-result.json
