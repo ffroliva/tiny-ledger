@@ -5,6 +5,7 @@ import com.ffroliva.tinyledger.platform.SecurityProblemHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -79,9 +80,7 @@ public class SecurityConfig {
                         // if these two matchers are moved there (measured: 403 instead of 501).
                         .requestMatchers("/api/v1/audit/**", "/api/v1/accounts/*/events")
                         .hasAuthority("ledger:auditor")
-                        // DELIBERATE BREAK — measuring RoleAuthorizationIT#aReaderOnlyTokenCanListHerOwnAccounts.
-                        // Revert this line before merging.
-                        .requestMatchers("/api/v1/accounts")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/accounts")
                         .hasAuthority("ledger:writer")
                         // Method-less, not PUT-scoped: a deposit/withdrawal path is a write path regardless
                         // of verb. Scoping it to PUT left every other verb on these paths (no handler today,
