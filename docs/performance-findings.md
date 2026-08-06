@@ -346,3 +346,37 @@ branch coverage" that JaCoCo already reports without saying which branches matte
 
 **Not done as part of this task:** writing the three tests §6.4 names. That is deliberately
 separate work — this section is the finding, not the fix.
+
+### 6.7 A mutant PIT never generated: idempotency is enforced twice, and no test can tell
+
+Found by hand while writing N21, not by PIT — the mutation is "delete a whole `if` statement", which
+is not in PIT's default operator set, and the line lives in `application`, which §6.1 does scope in.
+
+`RecordMovementService:69` short-circuits a replay:
+
+```java
+Optional<LedgerEvent> existing = store.findByMovementUid(movementUid);   // ④
+if (existing.isPresent()) return replayOf(existing.get(), ...);
+```
+
+Disable that `if` and **the entire BDD suite still passes — 22 of 22**, P6 (deposit replay), N11
+(idempotency conflict) and the new N21 included. Measured, not reasoned about: `&& false` on the
+condition, `./mvnw test -Dtest=CucumberTest`, `Tests run: 22, Failures: 0`.
+
+The reason is that the guarantee has a second enforcement point. Without the early return the service
+builds a fresh event and appends it; the store rejects the duplicate UID
+(`InMemoryEventStore:24`, and the unique index in Postgres), and the `catch
+(DuplicateMovementException)` at `:73` re-reads by UID and returns exactly the same answer. Two
+mechanisms, byte-identical responses.
+
+**So what is line 69 actually for?** Not correctness of the answer — determinism of it under
+contention. With the early return a replay performs no append at all, so it cannot lose an optimistic
+version check; without it, a replay that races another writer can surface a **409** where §6.3
+promises the original answer. That is the behaviour a test should pin, and none does: N19 exercises
+racing *first* writes, not a racing *replay*.
+
+**The test that would kill it:** a replay driven through the `RacingEventStore` seam
+`CucumberSpringConfig` already provides — advance the stream between ① and ⑥ and assert the replay
+still answers 200/422 and never 409. The seam exists; the scenario does not.
+
+Recorded rather than fixed, for the same reason as §6.4: this section is the finding.
