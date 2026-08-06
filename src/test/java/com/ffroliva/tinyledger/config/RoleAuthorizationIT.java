@@ -1,10 +1,12 @@
 package com.ffroliva.tinyledger.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ffroliva.tinyledger.testsupport.AbstractIntegrationTest;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -123,6 +126,38 @@ class RoleAuthorizationIT extends AbstractIntegrationTest {
     void aReaderOnlyTokenCanListHerOwnAccounts() throws Exception {
         mockMvc.perform(get("/api/v1/accounts").header(HttpHeaders.AUTHORIZATION, bearer("carol")))
                 .andExpect(status().isOk());
+    }
+
+    // N16/D8: ledger:admin never widens GET /api/v1/accounts — trent owns nothing, so the list is empty
+    @Test
+    void anAdminListsOnlyTheAccountsHeOwnsWhichIsNone() throws Exception {
+        mockMvc.perform(post("/api/v1/accounts")
+                        .header(HttpHeaders.AUTHORIZATION, bearer("alice"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"ACC-N16\",\"currency\":\"GBP\"}"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/api/v1/accounts").header(HttpHeaders.AUTHORIZATION, bearer("trent")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accounts").isEmpty());
+    }
+
+    /**
+     * N15: the actual conjunction test. `ledger:admin` alone does not satisfy the chain's
+     * `ledger:writer` matcher on this path — P9 alone cannot fail against a blanket
+     * `if (admin) return true` bypass that also happened to grant roles; this can, because it holds
+     * `ledger:admin` and nothing else. `.with(jwt().authorities(...))` bypasses the real decoder and
+     * injects the authorities directly — the same technique `SecurityConfigIT#anErrorDispatchDoesNotEchoTheRequestPath`
+     * already uses — so this needs no realm change: the chain-level rule is what is under test, not
+     * the token issuer.
+     */
+    @Test
+    void anAdminWithoutWriterCannotDeposit() throws Exception {
+        mockMvc.perform(put("/api/v1/accounts/" + ANY_UID + "/deposits/" + UUID.randomUUID())
+                        .with(jwt().authorities(new SimpleGrantedAuthority("ledger:admin")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(MOVEMENT_BODY))
+                .andExpect(status().isForbidden());
     }
 
     @Test

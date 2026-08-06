@@ -1,10 +1,13 @@
 package com.ffroliva.tinyledger.config;
 
+import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -15,6 +18,7 @@ import com.ffroliva.tinyledger.testsupport.KeycloakTokens;
 import com.ffroliva.tinyledger.testsupport.TestJwt;
 import com.jayway.jsonpath.JsonPath;
 import jakarta.servlet.RequestDispatcher;
+import java.time.Duration;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -157,6 +161,86 @@ class SecurityConfigIT extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.type").value("/errors/forbidden"));
+    }
+
+    /**
+     * P9: trent (admin) deposits into alice's account, addressed by its `accountUid` — not a name.
+     * `trent` owns no account (D6), so this never goes near `GET /api/v1/accounts`; the UUID comes
+     * straight from `openAnAccountAs`'s own response, the same way every other ownership test in this
+     * class already gets it. The movement succeeds and the trail attributes it to him, not to alice —
+     * the pair (actor, owner) on one row is the whole record of the delegation.
+     *
+     * <p>30s, not the 10s first drafted: {@code KafkaAuditModuleIT}'s equivalent non-DLT waits already
+     * use 30s for the same real hop (publish -&gt; {@code AuditKafkaListener} -&gt; trail write); matching
+     * that established margin here costs nothing and avoids re-tuning a timing constant per call site.
+     */
+    @Test
+    void anAdminRecordsACrossAccountMovementAndTheAuditTrailAttributesItToHim() throws Exception {
+        UUID alicesAccount = openAnAccountAs("alice");
+
+        mvc.perform(put("/api/v1/accounts/{a}/deposits/{d}", alicesAccount, UUID.randomUUID())
+                        .header("Authorization", bearer("trent"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":{\"currency\":\"GBP\",\"minorUnits\":10000}}"))
+                .andExpect(status().isCreated());
+
+        mvc.perform(get("/api/v1/accounts/{a}/balance?consistency=strong", alicesAccount)
+                        .header("Authorization", bearer("alice")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.amount.minorUnits").value(10000));
+
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> mvc.perform(get("/api/v1/audit/entries")
+                        .param("accountUid", alicesAccount.toString())
+                        .header("Authorization", bearer("dave")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.auditEntries[?(@.type == 'MoneyDeposited')].actor")
+                        .value(hasItem(KeycloakTokens.SUBJECTS.get("trent")))));
+    }
+
+    // P9's other half: admin widens the write, never the read — trent cannot read the account he
+    // just acted on, neither the eventually-consistent balance nor the strong one.
+    @Test
+    void anAdminCannotReadTheAccountHeJustActedOn() throws Exception {
+        UUID alicesAccount = openAnAccountAs("alice");
+
+        mvc.perform(get("/api/v1/accounts/{a}/balance", alicesAccount).header("Authorization", bearer("trent")))
+                .andExpect(status().isForbidden());
+
+        mvc.perform(get("/api/v1/accounts/{a}/balance?consistency=strong", alicesAccount)
+                        .header("Authorization", bearer("trent")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test // N13: ledger:admin widens ownership only — the trail stays ledger:auditor-only
+    void theAuditTrailIsRefusedToAnAdmin() throws Exception {
+        mvc.perform(get("/api/v1/audit/entries").header("Authorization", bearer("trent")))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.type").value("/errors/forbidden"));
+    }
+
+    // N14: same reason as N13, the other auditor route — SecurityConfig denies both with one matcher,
+    // so a fix that split the routes and covered only /audit/** would pass N13 while an admin still
+    // reads the raw event stream on this one.
+    @Test
+    void theRawEventStreamIsRefusedToAnAdmin() throws Exception {
+        UUID alicesAccount = openAnAccountAs("alice");
+
+        mvc.perform(get("/api/v1/accounts/{a}/events", alicesAccount).header("Authorization", bearer("trent")))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.type").value("/errors/forbidden"));
+    }
+
+    @Test // N17: mallory holds ledger:writer but not ledger:admin — the widening is gated on the role
+    void aWriterWithoutAdminCannotDepositIntoSomeoneElsesAccount() throws Exception {
+        UUID alicesAccount = openAnAccountAs("alice");
+
+        mvc.perform(put("/api/v1/accounts/{a}/deposits/{d}", alicesAccount, UUID.randomUUID())
+                        .header("Authorization", bearer("mallory"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":{\"currency\":\"GBP\",\"minorUnits\":10000}}"))
+                .andExpect(status().isForbidden());
     }
 
     @Test // §6.5: and an account nobody owns is still a 404, not a 403

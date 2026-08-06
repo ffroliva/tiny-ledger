@@ -598,10 +598,12 @@ The contract precedes the code, in three artefacts, all under version control an
 3. **`docs/adr/*.md`** — Architecture Decision Records. Every non-obvious choice in this document has
    one, with context, decision, consequences and the alternatives rejected.
 
-**Rule:** no endpoint is implemented before its OpenAPI operation and its `.feature` scenario exist.
+**Delivery rule:** no endpoint is implemented before its OpenAPI operation and executable acceptance
+proof exist. That proof is currently split between committed `@standalone` feature scenarios and
+full-stack JUnit integration tests (§9.3); stage 9 will add the missing pytest-bdd catalogue binding.
 
 **Requirement IDs:** the scenario IDs *are* the requirement IDs — `REQ-<scenario-id>` for every
-catalogue row (P0…P8, N1…N12, E1…E9), and the `REQ-NNN` tags §8.2 harvests from tests use exactly
+catalogue row (P0…P9, N1…N18, E1…E9), and the `REQ-NNN` tags §8.2 harvests from tests use exactly
 these. Membership is the catalogue itself, never a range that can drift.
 
 ---
@@ -1158,7 +1160,7 @@ concurrency semantics as Postgres, and a reviewer running `./mvnw spring-boot:ru
 demonstrably behaves like the deployed one. It is also the cheapest possible defence against the
 classic event-sourcing bug: an in-memory store that silently accepts a stale `expectedVersion`.
 
-### 9.3 BDD / acceptance — Cucumber-JVM
+### 9.3 BDD / acceptance catalogue
 Gherkin scenarios in business language, run against the real application. Example:
 
 ```gherkin
@@ -1176,14 +1178,17 @@ Steps drive the HTTP API, not internal classes — the specification must not de
 
 #### Scenario catalogue
 
-Every scenario below is a committed `.feature` file, tagged **`@standalone`** or **`@full`**.
-Cucumber runs the `@standalone` subset in-process on every push (§12.1 stage 5); pytest-bdd re-runs
-the **entire** catalogue against the composed stack (§9.6), where auth, Kafka and the shared
-limiter actually exist. The auth scenarios (N6–N10), the shared-limiter N9, Kafka's E6, auditor P7,
-restart-persistence E7 and real-Postgres N2 are `@full` by necessity — a mode with no auth cannot
-assert a `403`, and a mode that loses state on restart cannot assert recovery.
+The rows below are the contract's requirement catalogue; a row does not imply that a like-named
+`.feature` file exists. The currently committed Gherkin subset is tagged **`@standalone`** and runs
+in-process on every push (§12.1 stage 5). The full-only auth/admin catalogue is exercised today by
+JUnit integration tests extending `AbstractIntegrationTest`, against real Postgres, Redis, Kafka and
+Keycloak at stage 7. Stage 9's pytest-bdd binding of the whole catalogue is still unbuilt (§9.6).
 
-**Positive — `deposits.feature`, `withdrawals.feature`, `history.feature`**
+The auth scenarios N6–N10 and N13–N18, shared-limiter N9, Kafka E6, auditor P7, on-behalf-of P9,
+restart-persistence E7 and real-Postgres N2 are classified **`@full`** by necessity: a mode with no
+auth cannot assert a `403` or an admin, and a mode that loses state on restart cannot assert recovery.
+
+**Positive**
 
 | # | Scenario | Asserts |
 |---|---|---|
@@ -1196,8 +1201,9 @@ assert a `403`, and a mode that loses state on restart cannot assert recovery.
 | P6 | `alice` retries the same deposit `PUT` (same `depositUid`) | `200` not `201`, body identical to the original; **balance credited once** |
 | P7 | `dave` reads the audit trail after `alice`'s deposit | `200`; the trail contains the corresponding entry — the auditor role gets a positive proof, not only refusals |
 | P8 | `alice` deposits 15 000.00 (≥ the large-movement threshold, §3) | A notification record (structured log entry) carrying the movement UID is produced; a 20.00 deposit produces none |
+| P9 | `trent` (admin) deposits 100.00 into `alice`'s account, addressed by its `accountUid` — not the `ACC-001` name | `201`; balance 100.00; `MoneyDeposited` on the stream carrying `actor=trent` while the stream's `owner` stays `alice`; the audit entry for that version reports the same `actor` — the movement is attributable to the person, not merely to "an admin". `trent`'s own read of that balance is refused: `403`, same as any non-owner's — admin widens change operations only, never reads |
 
-**Negative — `insufficient-funds.feature`, `concurrency.feature`, `authorisation.feature`, `rate-limit.feature`**
+**Negative**
 
 | # | Scenario | Asserts |
 |---|---|---|
@@ -1213,11 +1219,23 @@ assert a `403`, and a mode that loses state on restart cannot assert recovery.
 | N10 | Unauthenticated request to any endpoint | `401`; no information about whether the account exists |
 | N11 | Reused `depositUid` with a different amount | `409` `idempotency-conflict`; the original movement stands untouched |
 | N12 | `mallory` lists accounts via `GET /api/v1/accounts` | `200`; the list contains `ACC-004` only — listing is scoped to the caller, and the existence of other accounts never leaks |
+| N13 | `trent` (admin) requests `GET /api/v1/audit/entries` | `403`. `ledger:admin` widens ownership, not roles: the trail belongs to `ledger:auditor`, and the principal who may move money on any account is not the one who reviews it |
+| N14 | `trent` (admin) requests `GET /api/v1/accounts/{accountUid}/events` | `403`, same reason as N13. `SecurityConfig` denies both auditor routes with a single matcher; a fix that split the routes and covered only `/audit/**` would pass N13 while an admin still reads the raw event stream on the other route |
+| N15 | A token carrying `ledger:admin` but not `ledger:writer` attempts a deposit | `403`. The actual conjunction test — P9 cannot fail against a short-circuit that also grants roles |
+| N16 | `trent` requests `GET /api/v1/accounts` | `200`; only accounts he owns — none. Proves D8 |
+| N17 | `mallory` (writer, no admin) attempts a cross-account deposit | `403`. Proves the widening is gated on the role rather than always-on |
 | N18 | An event written after the cutover with no `actor` | Reported as `unknown`, never as the owner |
 
-**N18 cannot be driven through the HTTP API**, which §9.3 requires of catalogue scenarios — no
-endpoint writes an event without stamping `actor` (§4.1 step 4). Its only executable form is
-`AuditKafkaListenerTest`, a repository-level test of the header-to-column mapping directly.
+**N18 cannot be driven through the HTTP API**: no endpoint writes an event without stamping `actor`
+(§4.1 step 4). Its executable form is `AuditKafkaListenerTest`, a repository-level test of the
+header-to-column mapping directly.
+
+**Why N13/N14 and not only a cross-account write refusal.** The obvious candidate — `mallory`
+deposits into `alice`'s account and is refused — mirrors N7 onto the write path, and N7 already fails
+the moment the ownership comparison stops discriminating. What no earlier scenario could fail is the
+shape this change invites: an admin clause implemented as a blanket bypass. That implementation can
+pass the positive admin write and every ordinary ownership refusal while also granting an admin the
+auditor surfaces. N13 and N14 close that distinct hole, one scenario per auditor route.
 
 **Eventual consistency — `eventual-consistency.feature`**
 
@@ -1276,12 +1294,15 @@ Validation testing covers the boundary: every field constraint, currency mismatc
 zero amounts, non-integer `minorUnits`, malformed JSON, malformed movement UIDs, oversized payload.
 
 ### 9.6 End-to-end
-`docker compose up`, then two layers against the running stack. **pytest-bdd binds the same
-committed `.feature` files** (§9.3) with step definitions driving the HTTP API through the Python
-CLI's client — the entire catalogue, `@standalone` and `@full` alike, at full depth. Then
-`ledger-cli scenario run` smoke flows: open account, deposit, withdraw, verify balance, exhaust the
-rate limit, confirm the `429`, replay an idempotent request, confirm no double credit. Run in CI on
-the composed stack (§12.1 stage 9).
+Stage 9's target is `docker compose up`, then two layers against the running stack. pytest-bdd will
+bind the catalogue to step definitions that drive the HTTP API through the Python CLI's client,
+covering `@standalone` and `@full` at full depth. Then `ledger-cli scenario run` will exercise smoke
+flows: open account, deposit, withdraw, verify balance, exhaust the rate limit, confirm the `429`,
+replay an idempotent request, confirm no double credit.
+
+**This stage is not built yet:** the repository has no Python CLI tree or pytest-bdd bindings, and CI
+does not run stage 9. Until those land, stage 5 covers the committed standalone Gherkin subset and
+stage 7 carries the real-stack auth/admin acceptance proof (§9.3).
 
 ### 9.7 Load and performance — Gatling + JMH
 - **Gatling:** ramp to 500 concurrent users; assert p99 write latency < 150 ms, p99 cached read
@@ -1393,11 +1414,11 @@ after the load test.
 | 2 | Compile + unit | JUnit, JaCoCo ≥90% line / 85% branch on `domain` | every push |
 | 3 | **Architecture** | `ApplicationModules.verify()` + ArchUnit (§9.2) | every push |
 | 4 | **Contract** | OpenAPI-generated interfaces compile; port contract suites (§9.2b) | every push |
-| 5 | BDD in-process | Cucumber, the `@standalone`-tagged subset (§9.3) — auth/Kafka scenarios are `@full` and run at stages 7 and 9 | every push |
+| 5 | BDD in-process | Cucumber, the committed `@standalone` subset (§9.3); full auth/admin acceptance currently runs as JUnit ITs at stage 7, with the stage-9 binding still planned | every push |
 | 6 | **Documentation** | `test_docs_governance.py`: artefact presence, the seven ISO markers, no pre-release version strings, every `TODO(25010)` registered, no unlinked SoA gap row. Plus link check, generated-artefact freshness, and the §8.6 docs-travel-with-code prompt | **every push** |
 | 7 | Integration | Testcontainers: Postgres, Kafka, Redis, Keycloak | every push |
 | 8 | Python CLI | `pytest` matrix on **3.11, 3.12, 3.13**; `pyright` strict; `ruff` | on `ledger-cli/**` |
-| 9 | E2E | `docker compose up`, then pytest-bdd over the full catalogue + `ledger-cli scenario run` (§9.6) — **including the README's extracted `curl` examples** (§8.3) | PR + main |
+| 9 | E2E (planned) | `docker compose up`, then pytest-bdd over the full catalogue + `ledger-cli scenario run` (§9.6) — **including the README's extracted `curl` examples** (§8.3) | not yet wired |
 | 10 | Load | Gatling; p99 write <150 ms, p99 cached read <20 ms, errors <0.1% | main + nightly |
 | 11 | Security | `gitleaks`, `detect-secrets`, Trivy image scan, `dependency-check` | every push |
 | 12 | Publish | Multi-arch image, CycloneDX SBOM, generated module diagrams to `docs/generated/` | main |
