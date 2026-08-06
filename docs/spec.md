@@ -609,8 +609,8 @@ pytest-bdd catalogue binding remains planned and unbuilt.
 
 **Requirement IDs:** P0…P9, N1…N18 and E1…E9 are the catalogue's stable labels. Committed feature
 scenarios use tags such as `@P0` and `@N11`; Java tests name the applicable label in code or prose.
-There are currently no `REQ-*` test tags, and the governance script does not harvest a traceability
-matrix from tests. Automated traceability remains planned (§8.2).
+There are currently no `REQ-*` test tags, and nothing harvests a traceability matrix from tests.
+Automated traceability remains planned (§8.2).
 
 ---
 
@@ -1021,15 +1021,15 @@ Feb 2025), reviewed 2026-08-04.
 distinct. Docs that are merely *encouraged* rot, but a planned gate must not be described as one the
 build already runs.
 
-1. **Docs have a CI stage, and it is inert today.** Stage 6 of §12.1 runs on every push, but the
-   check it runs currently scans nothing in this repository's `docs/` — §8.4. Nothing about the
-   documents below is enforced by a gate at present.
+1. **No CI stage gates documentation, by decision.** There was one — stage 6 of §12.1 — and it was
+   removed rather than repaired, because it scanned nothing in this repository (§8.4). Every
+   convention below is a convention, upheld by review and by nothing mechanical.
 2. **Generation is the target wherever generation is possible.** The current and planned rows are
    distinguished in §8.2.
 3. **Committed Gherkin is executable today.** README example extraction belongs to unbuilt stage 9
    (§8.3/§9.6).
 4. **Docs have a lifecycle** — an index, an archive, revision history, and an owner. This is a
-   documentation convention, enforced by nobody while stage 6 stays inert.
+   documentation convention; no gate enforces it.
 
 ### 8.1 Structure — Diátaxis
 
@@ -1055,7 +1055,7 @@ a current gate.
 | C4 component diagrams, module canvas | The module graph | Spring Modulith `Documenter` |
 | API reference + Swagger UI (planned) | `openapi.yaml` | `springdoc` is not a dependency or current gate; OpenAPI-generated interfaces are the enforcement that exists (§5) |
 | CLI reference (planned) | `openapi.yaml` | Pydantic generation belongs to the unbuilt CLI toolchain (§11/§12.1 stage 8) |
-| Traceability matrix rows (planned) | Catalogue labels in features and Java tests | No generator exists yet; the governance script does not harvest requirement tags |
+| Traceability matrix rows (planned) | Catalogue labels in features and Java tests | No generator exists yet, and nothing harvests requirement tags |
 | Coverage tables | JaCoCo | report merge |
 | Dependency inventory / SBOM | The build | CycloneDX |
 
@@ -1073,36 +1073,33 @@ committed Gherkin subset in §9.3 already has that property: those files are sim
 specification and acceptance tests. Catalogue rows without a feature depend on their named JUnit
 evidence instead; the catalogue as a whole is not yet one executable Gherkin suite.
 
-### 8.4 Governance — the ISO 15289 section contract
+### 8.4 Governance — a convention, and the gate that used to claim to enforce it
 
-Every governed document under `docs/` is meant to carry seven literal markers. The check written to
-enforce them is `.claude/skills/iso-compliance/scripts/test_docs_governance.py`, vendored from the
-**`iso-compliance`** skill (§10) and run in CI by the wrapper `scripts/ci/check_docs_governance.py`:
+`docs/spec.md` carries seven literal section markers, and they are worth keeping because silence
+under a heading is indistinguishable from an oversight:
 
 ```
 **Version:**   ·   ## Table of contents   ·   ## Scope & purpose   ·   ## Glossary & acronyms
 ## Traceability   ·   ## Open issues / known gaps   ·   ## Revision history
 ```
 
-`Not applicable — [reason]` under a heading is acceptable. **Omitting the heading is not** — silence
-is indistinguishable from an oversight, which is the whole point of the check.
+`Not applicable — [reason]` under a heading is acceptable; omitting the heading is not. Working
+papers, routers and registries (`docs/adr/`, `docs/_archive/`, `INDEX.md`) are exempt — ADRs and
+plans have their own canonical formats.
 
-Working papers, routers and registries (`docs/adr/`, `docs/generated/`, `docs/source/`,
-`docs/superpowers/`, `INDEX.md`) are explicitly exempt: ADRs, specs-in-progress and implementation
-plans have their own canonical formats and should not be forced into a shape built for operational
-documents.
+**Nothing enforces this.** A check did: `scripts/ci/check_docs_governance.py`, wrapping a test
+vendored from an `iso-compliance` skill, ran as §12.1 stage 6 on every push. It set
+`REPO_ROOT = Path(__file__).resolve().parents[1]`, which resolved to the skill's own directory rather
+than the repository root, so all five of its checks walked a tree containing none of this
+repository's documents and it printed `governance OK: 17 known, 0 new` regardless of what changed
+under `docs/`.
 
-**The check is present but inert, so none of the above is currently enforced.** The vendored script
-sets `REPO_ROOT = Path(__file__).resolve().parents[1]` (line 24), which resolves to
-`.claude/skills/iso-compliance/` — the skill's own directory, which contains no `docs/` tree — rather
-than the repository root. The marker, version-string and `TODO(25010)` checks therefore find no tree
-to walk at all; the artefact check does have a directory to look in, and looks for all 17 ISO
-documents inside the skill — which is why every one of the 17 registered failures is an
-artefact-presence subtest, `CHANGELOG.md` among them, though that file sits at this repository's
-root. Either way the wrapper's green `governance OK: 17 known, 0 new` says nothing about this
-repository's documents. `docs/governance-baseline.md` records the same finding. Repairing the path is
-an open task (§14 step 13), deliberately not done here: it would change what CI accepts and needs its
-own proof by deliberate violation.
+**The gate, the wrapper, the vendored skill and the baseline file were deleted on 2026-08-06 rather
+than repaired.** Repairing the path would have made CI demand seventeen ISO 15289 / 27001 / 25010
+artefacts — `security-policy.md`, `risk-register.md`, `statement-of-applicability.md`,
+`incident-response.md`, `threat-models/` and the rest — which is a compliance programme, not the
+documentation an event-sourced ledger needs. A green gate that verifies nothing is strictly worse
+than no gate, because it reads as assurance; the honest state is the one recorded here.
 
 ### 8.5 Lifecycle
 
@@ -1120,12 +1117,12 @@ own proof by deliberate violation.
 ### 8.6 Docs travel with the code
 
 **Planned, not enforcing.** Nothing checks this today: `.github/workflows/ci.yml` is the only
-workflow, it has no path filter and no step that reads a pull request's file list or body, and stage 6
-runs the governance script alone.
+workflow, it has no path filter and no step that reads a pull request's file list or body, and since
+stage 6 was removed (§8.4) there is no documentation stage for such a check to live in.
 
 When built, a pull request touching `src/**` and touching neither `docs/**` nor `CHANGELOG.md` would
-fail stage 6 with a prompt rather than a hard block — the escape hatch being a `docs: n/a — <reason>`
-line in the PR body, which is recorded and reviewable. The goal is to make skipping documentation a
+warn with a prompt rather than a hard block — the escape hatch being a `docs: n/a — <reason>` line in
+the PR body, which is recorded and reviewable. The goal is to make skipping documentation a
 *deliberate, visible* act rather than the default.
 
 ---
@@ -1366,31 +1363,23 @@ This stage is specified but not built or wired into CI.
 
 ---
 
-## 10. ISO compliance
+## 10. ISO compliance — out of scope, deliberately
 
-Documented as traceability matrices, each row pointing at the artefact that satisfies it. Claims
-without evidence are worse than no claims.
+**This project makes no ISO conformance claim, and holds no compliance artefacts.** An earlier
+revision specified an ISO/IEC 25010 quality matrix and an ISO/IEC 27001:2022 Annex A Statement of
+Applicability, plus the ISO/IEC 15289 document set and a CI stage to enforce them (§8.4, §12.1). None
+of it was ever written; the gate that was meant to demand it scanned the wrong directory tree and
+passed unconditionally.
 
-**ISO/IEC 25010** (product quality) — `docs/compliance/iso-25010.md`. Each of the eight
-characteristics mapped to concrete mechanisms and the tests that demonstrate them: functional
-correctness → §9.3/9.5; performance efficiency → §9.7; security → §6.4 + §9.4; maintainability →
-§9.2 + module structure; reliability → idempotency, optimistic concurrency, outbox.
+Both the gate and the specification of the artefacts are removed rather than carried as a backlog.
+Seventeen policy documents — security policy, risk register, SoA, incident response, threat
+models — describe an organisation's information-security management system. This repository is a
+ledger. Claims without evidence are worse than no claims, and a backlog of unwritten compliance
+documents is a claim.
 
-**ISO/IEC 27001:2022 Annex A** — `docs/compliance/iso-27001-controls.md`. The applicable controls
-only, with honest gaps marked: A.8.2 privileged access, A.8.5 secure authentication, A.8.15 logging,
-A.8.16 monitoring, A.8.24 cryptography, A.8.28 secure coding, A.5.14 information transfer. Controls
-that a PoC cannot satisfy (physical security, supplier management, HR screening) are listed as **out
-of scope** rather than silently claimed.
-
-`iso-27001-controls.md` **is the Statement of Applicability (SoA)** — the term §12.1 stage 6 and
-§14 step 13 use — and a *gap row* is any control marked applicable but not yet evidenced. Stage 6 is
-written to fail on a gap row with no linked issue, but does not do so today: the check is inert
-(§8.4). The governance test itself,
-`.claude/skills/iso-compliance/scripts/test_docs_governance.py`, comes from the **`iso-compliance`**
-skill, vendored under the same policy as `dr-jskill`: vendored, not referenced, so a skill changing
-underneath a compliance run cannot invalidate the evidence trail. CI does not invoke it directly —
-`scripts/ci/check_docs_governance.py` runs it under pytest and diffs the result against
-`docs/governance-baseline.md`.
+What the repository does have instead is specific and demonstrable: the security model and its
+enforcement sites (§6.4), the error catalogue (§6.5), the architecture rules that fail the build
+(§9.2), and the pipeline in §12.1. Those are the evidence. Nothing here is offered as conformance.
 
 ---
 
@@ -1477,7 +1466,7 @@ is not part of today's failure ordering.
 | 3 | **Architecture** | `ApplicationModules.verify()` + ArchUnit (§9.2) | every push |
 | 4 | **Contract** | OpenAPI-generated interfaces compile; port contract suites (§9.2b) | every push |
 | 5 | BDD in-process | Cucumber, the committed `@standalone` subset (§9.3); full auth/admin acceptance currently runs as JUnit ITs at stage 7, with the stage-9 binding still planned | every push |
-| 6 | **Documentation (inert)** | `scripts/ci/check_docs_governance.py` wraps `.claude/skills/iso-compliance/scripts/test_docs_governance.py`: artefact presence, the seven ISO markers, no pre-release version strings, every `TODO(25010)` registered, and no unlinked SoA gap row. **All five scan the skill's own directory, not this repository (§8.4). The one file under `docs/` the gate does read is `governance-baseline.md` — the wrapper diffs against it and returns 2 if it is missing (`scripts/ci/check_docs_governance.py:7`, `:21-23`); no other document in `docs/` can change the result.** Link checking, generated-artefact freshness and the §8.6 docs-travel prompt are planned, not wired | **every push** (runs, enforces nothing) |
+| 6 | ~~Documentation~~ — **removed 2026-08-06** | Was `scripts/ci/check_docs_governance.py`, wrapping a vendored ISO governance test. All five of its checks scanned the vendored skill's own directory rather than this repository, so it passed unconditionally (§8.4). Deleted, not repaired | — |
 | 7 | Integration | Testcontainers: Postgres, Kafka, Redis, Keycloak | every push |
 | 8 | Python CLI (planned) | `pytest` matrix on **3.11, 3.12, 3.13**; `pyright` strict; `ruff` | not yet wired; no `ledger-cli/` tree |
 | 9 | E2E (planned) | `docker compose up`, then pytest-bdd over the full catalogue + `ledger-cli scenario run` (§9.6) — **including the README's extracted `curl` examples** (§8.3) | not yet wired |
@@ -1488,13 +1477,15 @@ is not part of today's failure ordering.
 Stages 3, 4 and 5 are the ones worth pointing at: they fail on a *design* regression, not a
 behavioural one. An agent-assisted codebase moving at speed needs boundary violations caught
 mechanically, because they are exactly the class of error that reviews miss and tests otherwise
-tolerate. **Stage 6 is not in that list**: it is wired and ordered, but inert (§8.4), so no
-documentation regression is caught mechanically today.
+tolerate.
 
-**Stage 6 sits before integration deliberately.** Documentation failures are cheap to detect and
-cheap to fix; discovering them after a twelve-minute Testcontainers run trains everyone to ignore
-them. Position in a pipeline is a statement about priority — but until the check actually reads this
-repository's `docs/`, that position is the only part of the "first-class citizen" claim that is real.
+**Stage numbers are not renumbered when a stage goes.** Slot 6 stays visible and struck through
+because the numbers are referenced by name — in workflow step titles, in ADR 0003, and throughout
+this document — and a silent shift would quietly repoint every one of those. The same reasoning
+governs ADR numbering (`docs/adr/`, where `0002` was never written and the gap is left standing).
+Nothing occupies slot 6; `spotless:check` at stage 1 is the whole of the `gate` job now, and no
+documentation regression is caught mechanically. §8.4 says why the check was deleted rather than
+fixed.
 
 `resolve-drift` is currently a placeholder step that only echoes where the Python CLI drift job will
 land. The planned job will install from declared ranges rather than the lockfile and smoke-import the
@@ -1531,7 +1522,7 @@ Each step ends green and demonstrable.
 
 | # | Step | Done when |
 |---|---|---|
-| 0 | **Docs scaffold first** — `docs/` Diátaxis tree, INDEX, CHANGELOG, the governance check wired into CI stage 6 | Done, with a caveat. The governance test ran and **failed**, listing every missing artefact, and that failing list is registered as the **governance baseline** — the documentation backlog, generated rather than guessed. Stage 6 (§12.1) is written to fail on *regressions against the baseline*, never on the baseline itself. It does not do so today: the vendored script's `REPO_ROOT` points inside the skill directory (§8.4), so the baseline is frozen at what it recorded then and no new violation can be detected. It runs from `scripts/ci/check_docs_governance.py` in CI, not from `verify`. Step 13 requires the baseline empty — and requires the path fixed first, or "empty" means nothing |
+| 0 | **Docs scaffold first** — `docs/` Diátaxis tree, INDEX, CHANGELOG | Done. A governance check was wired into CI as stage 6 at the same time, together with a registered baseline of the seventeen ISO artefacts it reported missing. Both were **deleted on 2026-08-06** (§8.4): the check scanned the vendored skill's own directory rather than this repository, so its baseline could never move and its green result meant nothing. `docs/INDEX.md` is hand-maintained, and that is now stated rather than backstopped |
 | 1 | Skeleton, pom, Modulith verification, CI | `mvn verify` green on an empty module graph |
 | 2 | `shared` + `ledger` domain, in-memory event store | Unit + architecture tests green — no endpoints yet; §5's rule holds |
 | 3 | OpenAPI contract + generated interfaces | Every §7 operation specified; controller drift breaks the build |
@@ -1544,7 +1535,7 @@ Each step ends green and demonstrable.
 | 10 | Python CLI + e2e scenarios | `ledger-cli scenario run edge-cases` green against compose |
 | 11 | Gatling + JMH + thresholds | Planned pipeline gate fails on regression once stage 10 is built |
 | 12 | **JVM assessment with `jvm-pulse`** — once the system is stable under load | GC + JFR telemetry captured against the composed stack (`pulse attach --docker <container> --duration 30s`) during a Gatling run; `report.html` committed to `docs/profiling/`; a `compare` against the pre-tuning baseline; tuning conclusions recorded as an ADR. **Run last, deliberately** — profiling an unstable system measures the instability, not the system |
-| 13 | Compliance run with the `iso-compliance` skill | The vendored script's `REPO_ROOT` repaired so the test actually scans this repository (§8.4) — a green run means nothing until then — and then: governance test green; every SoA-listed control dispositioned (§10); 25010 coverage table complete; dated acceptance record in the ISO hub |
+| 13 | ~~Compliance run~~ — **dropped** | Removed 2026-08-06 along with stage 6 and the vendored skill behind it. ISO conformance is out of scope (§10); the step is struck rather than renumbered, for the reason §12.1 gives |
 
 ---
 
@@ -1622,7 +1613,6 @@ implementing agents and the reviewing humans; nothing overrides it except a reco
 |---|---|
 | CQRS | Command Query Responsibility Segregation — the write/read split (§4.0) |
 | SLO | Service Level Objective — the projection-lag numbers (§6.6) |
-| SoA | Statement of Applicability — `docs/compliance/iso-27001-controls.md` (§10) |
 | OTLP | OpenTelemetry Protocol — the single telemetry wire format (§6.6) |
 | Feed item | Starling's name for a transaction as the API presents it (§7) |
 
@@ -1632,7 +1622,8 @@ Domain vocabulary is §2.1's ubiquitous language.
 
 Catalogue labels are P0…P9, N1…N18 and E1…E9 (§5). Feature tags and Java-test references link only
 the evidence that exists today; no `REQ-*` tag harvester or generated traceability matrix exists.
-§12.1 maps pipeline stages to their sections, and §10's matrices map ISO clauses to artefacts.
+§12.1 maps pipeline stages to their sections. There is no ISO clause-to-artefact mapping — §10 says
+why that is a decision rather than a gap.
 
 ## Open issues / known gaps
 

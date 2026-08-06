@@ -1,12 +1,12 @@
 # Changelog — Keep a Changelog format
 ## [Unreleased]
 ### Added
-- Docs scaffold and governance baseline (spec §14 step 0).
+- Docs scaffold (spec §14 step 0).
 - Maven skeleton, module markers, Modulith verification, CI (spec §14 step 1).
 - Ledger domain, in-memory event store, balance projection, notification module (spec §14 step 2).
 - OpenAPI contract and generated server interfaces (spec §14 step 3).
-- Web adapters (§7 API on the in-memory core), `@standalone` Cucumber suite, README quickstart,
-  CI Stage 6 docs governance (spec §14 step 4) — **Plan 1 (standalone core) complete.**
+- Web adapters (§7 API on the in-memory core), `@standalone` Cucumber suite, README quickstart
+  (spec §14 step 4) — **Plan 1 (standalone core) complete.**
 - Postgres event store with OCC and client-UID idempotency, Liquibase changelog, transactional
   outbox and its relay (spec §14 step 5).
 - Postgres balance projection with keyset history pagination and Redis balance cache with
