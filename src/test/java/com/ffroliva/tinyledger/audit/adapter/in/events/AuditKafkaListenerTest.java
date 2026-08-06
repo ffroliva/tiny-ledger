@@ -70,6 +70,14 @@ class AuditKafkaListenerTest {
         assertThat(recorded.actor()).isEqualTo("unknown");
     }
 
+    @Test // §15.11: a header dropped by a re-key/mirror/replay tool is not a contradiction — the payload
+    // is the record, so its value is used rather than the entry being downgraded to null/"unknown"
+    void aMissingActorHeaderWithAnActorInThePayloadUsesThePayloadValue() {
+        listener.on(record(Instant.parse("2026-08-10T00:00:00Z"), null, "{\"actor\":\"trent\"}"));
+
+        assertThat(recorded.actor()).isEqualTo("trent");
+    }
+
     @Test // §15.11: the event payload is the record; a header that disagrees with it is a fault, not a guess
     void aHeaderThatDisagreesWithThePayloadsActorIsRejectedRatherThanStored() {
         ConsumerRecord<String, String> disagreeing =

@@ -1482,20 +1482,41 @@ Each step ends green and demonstrable.
    (§13). Account *opening* has no on-behalf-of form — an account has no owner until it exists, so
    `AccountOpened.actor` is always the owner.
 9. An event written before `actor` existed has no `actor` key in its payload at all — not a null
-   value, an absent key. Events are immutable and there is no backfill, so deserialisation must
-   tolerate its absence permanently rather than as a migration window.
-10. Events are immutable and there is no backfill. An audit entry with no `actor` reads as
-    `actor = owner` only if it predates the cutover instant recorded when this lands. After that
-    instant, an audit entry with no `actor` is a defect, and the trail reports `unknown`, never the
-    owner.
+   value, an absent key, and this is permanent: the write side never backfills a stored payload, so
+   deserialisation tolerates the missing key forever, not for a migration window. This is about the
+   **event's own JSON**, on the write side — item 10 below is a distinct absence, on the read side.
+10. **The cutover instant is `2026-08-06T00:00:00Z`.** This literal is the one authority for it — the
+    `AuditKafkaListener.CUTOVER` Java constant cites this paragraph in its own javadoc, and if the two
+    are ever found to disagree, this paragraph is correct and the constant is the bug. Unlike item 9,
+    this is about the **`actor` header**, on the read side, and it is a window, not a permanent
+    tolerance: an audit entry whose header is absent reads as `actor = owner` only if its
+    `occurredAt` predates this instant. On or after it, every publisher stamps the header
+    unconditionally, so a header absent **and unrecoverable from the payload** (item 11) is a defect,
+    and the trail reports `unknown`, never the owner.
 11. **The event payload is the record; the audit trail is a projection of it.** `actor` reaches the
-    trail as a Kafka header (item 10), read alongside — never instead of — the payload it was
-    derived from: a header that disagrees with the payload's own `actor` is a fault, not a value to
-    silently prefer, so the listener rejects that record rather than choosing either value. The
-    delivery error handler that already parks a record it cannot otherwise process on the
-    dead-letter topic (`ledger.events.DLT`) parks this one the same way. A rebuild (§14 step 7) is
-    this same listener replaying from offset zero, not a second code path, so the check holds on
-    rebuild exactly as it does live.
+    trail as a Kafka header, read alongside — never instead of — the payload it was derived from, but
+    the header is an optimisation over the record, not a second source of truth, so the two are not
+    treated symmetrically:
+
+    | header | payload | outcome |
+    |---|---|---|
+    | present | present, agrees | use it |
+    | present | present, **disagrees** | **fault** — the listener rejects the record rather than guess which of the two to trust |
+    | **absent** | present | **use the payload's value, and log a warning** — a header dropped by a re-key, mirror or replay tool is a transport gap, not a contradiction, and losing a correctly-attributable compliance entry is worse than recording it with a warning |
+    | absent | absent | item 10's cutover logic |
+
+    Only the disagreeing-values row is a fault: the delivery error handler that already parks a record
+    it cannot otherwise process on the dead-letter topic (`ledger.events.DLT`) parks that one the same
+    way. A rebuild (§14 step 7) is this same listener replaying from offset zero, not a second code
+    path, so the table holds on rebuild exactly as it does live.
+
+    **Known coupling.** The payload check knows exactly one thing about the write side: that `actor`
+    is a *top-level* JSON key. If a future change nests it, `payloadActor` silently returns `null`
+    forever after, the detector goes permanently dark, and every existing test stays green — nothing
+    here would catch that regression. Related: `AccountOpened.actor()` is a derived accessor (from
+    `owner`), not a record component (§2.3), so an `AccountOpened` payload never has an `actor` key at
+    all and this check is already inert for it — harmless today (the derivation cannot disagree with
+    itself), but the same blind spot.
 
 ---
 

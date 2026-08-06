@@ -97,6 +97,11 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
                     .isAfterOrEqualTo(entries.getFirst().occurredAt());
             assertThat(entries.getLast().eventType()).isEqualTo("MoneyDeposited");
             assertThat(entries.getLast().payload()).contains("2500");
+            // §15.11: the field this whole change exists for — proves it survives the header ->
+            // PostgresAuditTrail.record -> PostgresAuditTrail.eventStream round-trip, not just the
+            // listener's in-memory mapping (AuditKafkaListenerTest) or the controller's read side
+            // (AuditControllerTest).
+            assertThat(entries.getLast().actor()).isEqualTo("alice");
         });
     }
 
