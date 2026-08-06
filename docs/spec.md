@@ -1436,6 +1436,14 @@ Each step ends green and demonstrable.
 7. Amounts are `long` minor units end to end — domain, store and API (§7). Decimal conversion exists
    only at human boundaries (CLI input, display) and rejects excessive scale rather than rounding
    silently.
+8. On-behalf-of is **implicit**: an actor acts under their own identity and their own token, against
+   the same endpoints, and an operation is "on behalf of" the owner purely because it targets that
+   owner's account. There is no impersonation header, no delegation token and no token exchange
+   (§13). Account *opening* has no on-behalf-of form — an account has no owner until it exists, so
+   `AccountOpened.actor` is always the owner.
+9. An event written before `actor` existed has no `actor` key in its payload at all — not a null
+   value, an absent key. Events are immutable and there is no backfill, so deserialisation must
+   tolerate its absence permanently rather than as a migration window.
 
 ---
 
