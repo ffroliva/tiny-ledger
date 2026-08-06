@@ -20,7 +20,7 @@ Quadrants are Diátaxis, per spec §8.5.
 | `adr/0001-kafka-delivery-path.md` | Touching event publication, the outbox, Kafka, or the transaction boundary around publishing | Explanation |
 | `adr/0003-test-topology-and-ci-parallelisation.md` | Adding a `@SpringBootTest`, changing CI, or wondering why there is one integration context | Explanation |
 | `agentic-workflow.md` | Understanding how this was built — including §5, where the agents were wrong, and §7, the per-phase gate record | Explanation |
-| `governance-baseline.md` | Adding or moving a document; CI stage 6 enforces it | Reference |
+| `governance-baseline.md` | Adding or moving a document. CI stage 6 reads it, but enforces nothing — see below and spec §8.4 | Reference |
 | `how-to/` | A specific operational task | How-to |
 | `tutorial/` | Learning the system end to end | Tutorial |
 | `superpowers/plans/` | What is being built now, and the decisions behind it. Newest first; each plan states its own scope and what it deliberately defers | Explanation |
@@ -53,6 +53,13 @@ When you add a document, **add a row here by hand.** Nothing will remind you:
 discover new files — it reported `17 known, 0 new` both before and after four documents were added on
 2026-08-05, including an ADR. Its name and its green result both imply otherwise, so do not rely on it
 as a safety net for this. Making it discover additions is an open task.
+
+The deeper reason is worse than a missing discovery step: the vendored script it wraps,
+`.claude/skills/iso-compliance/scripts/test_docs_governance.py`, resolves `REPO_ROOT` (line 24) to
+`.claude/skills/iso-compliance/` rather than the repository root, so it never reads this `docs/` tree
+at all. `17 known, 0 new` is what it prints whatever you do here. Spec §8.4 and
+`governance-baseline.md` record it; nothing in this repository currently enforces a documentation
+rule.
 
 If a document's claims stop matching the code, fix or retract them the same day. `spec.md` reached v3.8
 for exactly this reason (finding CR14), and is v3.11 now.
