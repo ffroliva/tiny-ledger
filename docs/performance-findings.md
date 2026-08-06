@@ -380,3 +380,16 @@ racing *first* writes, not a racing *replay*.
 still answers 200/422 and never 409. The seam exists; the scenario does not.
 
 Recorded rather than fixed, for the same reason as §6.4: this section is the finding.
+
+**Prediction confirmed, hours later, by `N19`.** The paragraph above was reasoning about ordering.
+The next CI run measured it: five racing `PUT`s of one `movementUid` answered **one 201 and four
+`409` `/errors/version-conflict`**, because the version check at `PostgresEventStore:66` runs ahead
+of the UID check. §6.3 had claimed the losers would be resolved by a unique-constraint re-read; that
+path cannot fire for same-stream racers at all, and §6.3 is corrected in spec v3.16.
+
+Two things follow. First, the ordering above is not a theoretical concern — it is the observed
+behaviour on the *first-write* race, and the replay race differs from it only in which line the
+early return sits on. Second, this is the sharper form of the §6.7 point: line 69 is doing more work
+than "avoid a doomed append", because when it is *not* reached the caller gets a 409 rather than the
+answer §6.3 promises. The client-side obligation (retry a bare 409) is what closes the gap, and it is
+now written down in §6.3 rather than assumed.

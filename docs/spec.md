@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.15
+**Version:** 3.16
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -700,9 +700,26 @@ store to drift from it, no header machinery, and no expiry window — an identit
 
 Replays are answered only after ownership of the path account passes (§4.1) — idempotency is never
 an authorisation bypass. Lookups are global, matching the index: reusing a UID against a
-*different account* is a `409` idempotency conflict, not a fresh movement. Racing duplicate `PUT`s need no special path — the
-loser's unique-constraint violation triggers a re-read by UID, which then answers from the table
-above exactly as a sequential replay would.
+*different account* is a `409` idempotency conflict, not a fresh movement.
+
+**Racing duplicate `PUT`s need no special path, but not for the reason this section claimed until
+v3.16.** Through v3.15 it read: "the loser's unique-constraint violation triggers a re-read by UID".
+**Measured on CI 2026-08-07, by `N19` on its first ever run: that path does not fire.** All the
+racers read the same stream version, so every loser fails the event store's *version* check — which
+runs **before** the UID check (`PostgresEventStore:66`, `InMemoryEventStore:21`) — and is answered
+`409` `/errors/version-conflict`.
+
+The unique-constraint path is in fact unreachable for same-stream racers: a racer that had read the
+later version would already have found the UID at `RecordMovementService:68` and returned `200`
+without appending at all. Version and UID are facts of the same committed row, so no window exists
+where one is fresh and the other is not. (It remains reachable for a *cross-stream* race — the same
+UID against a different account, `N20` — where the version check passes because it is a different
+stream and the global unique index is what fires.)
+
+The guarantee itself is unchanged, and arrives one retry later: **a bare `409` version conflict is
+not terminal**, and the retry re-reads and answers from the table above exactly as a sequential
+replay would. So the contract for *n* racing duplicates is **one `201`, *n*−1 eventual `200`s,
+credited once** — with the retry being the client's obligation, the same one `N2` depends on.
 
 Rejections replay deterministically too: `MovementRejected` carries the UID, so retrying a refused
 withdrawal with the same UID returns the original `422`. A retry *after* topping up is a new attempt
@@ -1285,7 +1302,7 @@ auth cannot assert a `403` or an admin, and a mode that loses state on restart c
 | N16 | `trent` requests `GET /api/v1/accounts` | `200`; only accounts he owns — none. Proves D8 |
 | N17 | `mallory` (writer, no admin) attempts a cross-account deposit, and separately a cross-account withdrawal | `403` on both — the two verbs are wired independently (§6.4), so each needs its own refusal. Proves the widening is gated on the role rather than always-on |
 | N18 | An event written after the cutover with no `actor` | Reported as `unknown`, never as the owner |
-| N19 | **Racing duplicate `PUT`s with the same `movementUid`** — 5 concurrent identical deposits | Exactly one `201`, four `200`, **credited once**. §6.3 claims this needs no special path; this is the proof |
+| N19 | **Racing duplicate `PUT`s with the same `movementUid`** — 5 concurrent identical deposits | Exactly one `201`, four **eventual** `200`, **credited once** — the losers are answered `409` `/errors/version-conflict` first and must retry. This row said "four `200`" until v3.16; the first run of the test disproved it and §6.3 is corrected accordingly |
 | N20 | Reused `movementUid` against a **different** account | `409` `idempotency-conflict` — the lookup is global (§6.3), not per-stream |
 | N21 | A refused withdrawal is replayed with the same uid **after a top-up** | Still the original `422`. A rejection is durable; topping up does not resurrect it |
 | N22 | Two identical `POST /api/v1/accounts` | Two distinct `accountUid`s. Account opening is **not** client-idempotent (§6.3) — pinned so it is a decision, not an accident |
@@ -1715,3 +1732,4 @@ Javadoc, because a reader checks the spec:
 | 3.13 | 2026-08-06 | Battle-testing pass: N19–N22 and E10–E11 added; traceability rule stated; N2 finally given a test |
 | 3.14 | 2026-08-06 | Battle-testing pass, second half: the traceability rule gains the command that checks it and the known-open list that command must print (`E6 E7 E9 E10 E11 N20 N21 N22`), stated with no gate claimed for it; P7 recorded as the worked example of trap 7 — it read as covered by two tests that each proved half, and now has one that proves it whole (`KafkaAuditModuleIT#anAuditorReadsAlicesDepositOutOfTheTrailOverHttp`); N6/N7/N8/N10 labelled on the tests that already carried them. N2 additionally proved against real Postgres in stage `integration` (`ConcurrentWithdrawalIT`), which required the shared write-per-principal budget re-derived from 20/10m to 150/90m — the per-token margin `RateLimitIT` depends on moved 30s → 36s, so it widened rather than thinned |
 | 3.15 | 2026-08-06 | N21 given a test at the BDD layer (`withdrawals.feature`): a refused withdrawal replayed after a top-up is still the original 422, and the stream version proves the replay appended nothing. Known-open set narrows to `E6 E7 E9 E10 E11 N20 N22`. The scenario also surfaced §6.7 of `docs/performance-findings.md` — disabling `RecordMovementService:69`'s replay short-circuit leaves all 22 BDD scenarios green, because the duplicate-UID catch at `:73` enforces the same guarantee; line 69 is what makes a replay 409-proof under contention, and nothing tests that |
+| 3.16 | 2026-08-07 | **§6.3's racing-duplicate mechanism corrected against a measurement.** Stage 9 ran in CI for the first time and `N19` failed: the losers of a same-`movementUid` race are answered `409` `/errors/version-conflict`, not `200`. The event store checks the stream version *before* the UID (`PostgresEventStore:66`), so the unique-constraint re-read §6.3 named is unreachable for same-stream racers — a racer holding the later version would already have returned `200` from `RecordMovementService:68` without appending. The guarantee is unchanged but arrives one retry later; §6.3 and §12's N19 row now say so, and the e2e scenario retries the 409 as the contract requires. The test had passed locally: on Windows the five threads never overlapped tightly enough to collide, so a green run was never evidence the race had happened |
