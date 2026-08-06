@@ -20,7 +20,7 @@ Quadrants are Diátaxis, per spec §8.1.
 | `adr/0001-kafka-delivery-path.md` | Touching event publication, the outbox, Kafka, or the transaction boundary around publishing | Explanation |
 | `adr/0003-test-topology-and-ci-parallelisation.md` | Adding a `@SpringBootTest`, changing CI, or wondering why there is one integration context | Explanation |
 | `agentic-workflow.md` | Understanding how this was built — including §5, where the agents were wrong, and §7, the per-phase gate record | Explanation |
-| `_archive/plans/`, `_archive/specs/` | Tracing *why* a decision was taken, or auditing what an agent was actually instructed to do. **Working artifacts, not documentation** — see below | — |
+| `_archive/` (start at its `README.md`) | Tracing *why* a decision was taken, or auditing what an agent was actually instructed to do. **Working artifacts, not documentation** — the README states which paths inside them are stale | — |
 
 **There is no `0002` in `adr/`, and there never was.** The Postgres-event-store decision that
 `spec.md` §4.2 and §4.3 call "ADR-002" was written into the spec instead of into its own file, and
@@ -46,7 +46,7 @@ is being built next is §14 of `spec.md`, and what is known-open is its *Open is
 
 | Plan | State |
 |---|---|
-| `_archive/plans/2026-08-07-admin-on-behalf-of.md` | **Applied through task 5** — `ledger:admin` exists in `src/main`: `CallerPrincipal:55` reads the authority, `RecordMovementService:65` is the one comparison it widens, and the acting principal reaches the audit trail on the event. Task 6 (the spec version bump and its revision-history row) is outstanding |
+| `_archive/plans/2026-08-07-admin-on-behalf-of.md` | **Applied through task 5** — `ledger:admin` exists in `src/main`: `CallerPrincipal:55` reads the authority, `RecordMovementService:65` is the one comparison it widens, and the acting principal reaches the audit trail on the event. Task 6 (the spec version bump and its revision-history row) is outstanding — and that bump must also carry a row for the 2026-08-06 documentation pass, which rewrote §5, §8–§8.6, §10, §12.1, §14, the glossary and *Traceability* without one |
 | `_archive/plans/2026-08-06-security-hardening.md` | **Delivered** — closed the four security gaps spec v3.10 recorded open (rate limiter §6.1, `aud` validation, `x-fapi-interaction-id` bound/validated, `/error` path leak excluded) plus CI stage 11 (`gitleaks`); spec v3.11 close-out |
 | `_archive/plans/2026-08-06-roles-and-keycloak-realm.md` | **Delivered** — `ledger:reader`/`writer`/`auditor` enforced on the `full` filter chain, a real Keycloak container and realm behind the integration suite; spec v3.10 close-out |
 | `_archive/plans/2026-08-05-spec-v3.9-and-proposal-repair.md` | Delivered — spec v3.9 truth alignment folded into `docs/spec.md`; the admin on-behalf-of proposal repaired, not applied |

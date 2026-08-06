@@ -4,13 +4,14 @@
 **Date:** 2026-08-05
 **Context:** spec §9 (verification), CR13, Plan 3 planning
 
-> **Numbering note.** `docs/adr/` contains only `0001` besides this file. "ADR-002" is referenced by
-> `docs/spec.md` §4.2 and §4.3, and by `docs/agentic-workflow.md` §6, as the Postgres-event-store
-> decision — but that file was never written; the decision and its alternatives live in §4.2 itself.
+> **Numbering note.** `docs/adr/` contains only `0001` besides this file. "ADR-002" is referenced as
+> the Postgres-event-store decision from `docs/spec.md` and `docs/agentic-workflow.md`
+> (`git grep -n 'ADR-002'` finds every site) — but that file was never written; the decision and its
+> alternatives live in `spec.md` §4.2 itself.
 > This ADR takes **0003** rather than silently occupying a number the spec already points elsewhere.
 > The gap is permanent: ADR numbers are identifiers, and `docs/INDEX.md` states this where a reader
-> meets the ADR list. *(Line references replaced with section references 2026-08-06 — the originals
-> had drifted.)*
+> meets the ADR list. *(Edited 2026-08-06: this note carried three line numbers, all drifted, and an
+> enumeration of citing sites that was short by one. Both replaced by the grep, which cannot drift.)*
 
 ## Context
 

@@ -8,7 +8,7 @@ HANDOFF.md
 target/
 
 # Source briefs held for reference only. They are the assessor's material, not
-# ours to publish — this repository is public. Kept on disk, never committed.
+# ours to redistribute, private repo or not. Kept on disk, never committed.
 docs/source/
 
 # Tooling caches
