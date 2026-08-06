@@ -106,6 +106,18 @@ class RoleAuthorizationIT extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    /**
+     * The positive half of the reader rule, and the detector for a regression the comment at
+     * SecurityConfig's POST matcher only warns about: if that matcher were ever made method-less,
+     * GET /api/v1/accounts would silently require ledger:writer and readers would lose their own
+     * account list. alice cannot catch it — she holds both roles. carol holds ledger:reader only.
+     */
+    @Test
+    void aReaderOnlyTokenCanListHerOwnAccounts() throws Exception {
+        mockMvc.perform(get("/api/v1/accounts").header(HttpHeaders.AUTHORIZATION, bearer("carol")))
+                .andExpect(status().isOk());
+    }
+
     @Test
     void aRolelessButAuthenticatedTokenIsRefused() throws Exception {
         mockMvc.perform(get("/api/v1/accounts").header(HttpHeaders.AUTHORIZATION, bearer("nobody")))
