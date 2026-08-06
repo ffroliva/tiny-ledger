@@ -110,7 +110,11 @@ holds the money.
 
 Authentication and role authorisation are built: `full` requires a JWT issued by a real Keycloak realm
 (spec §6.4), and the filter chain enforces `ledger:reader` / `ledger:writer` / `ledger:auditor` per
-route. **Not yet built:** observability and the FAPI/DPoP work. The auditor endpoints
+route. A fourth role, `ledger:admin`, is deliberately *not* a chain role: it widens ownership inside
+`RecordMovementService` for change operations only — an admin may move money on an account they do not
+own, but may not read its balance or transactions, and is not an auditor. Every event records the
+acting principal as `actor`, so the audit trail carries who acted alongside who owns (spec §6.4,
+§2.3). **Not yet built:** observability and the FAPI/DPoP work. The auditor endpoints
 `GET /api/v1/accounts/{id}/events` and `GET /api/v1/audit/entries` are `full`-only; in `standalone` both
 answer `501` with an RFC 7807 problem detail — see [`docs/spec.md`](docs/spec.md) §6.5 and §7.
 

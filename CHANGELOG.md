@@ -49,6 +49,34 @@
 - `..shared..` fenced from frameworks alongside `..domain..`. ArchUnit checks *direct* dependencies,
   and the domain now compiles against `shared.error`, so a domain-only rule would have stayed green
   while a Spring import reached the domain's transitive compile path.
+- **`actor` on every domain event**, so a movement records *who acted* alongside *who owns*. The
+  `(actor, owner)` pair is the whole record of a delegation; a legacy payload with no `actor` key
+  still deserialises (spec §2.3/§2.4/§4.1).
+- **`ledger:admin`, which widens ownership for change operations only — never reads.** Of five
+  comparison points exactly one widens: `RecordMovementService`'s in-service check. Strong reads are
+  reads, so `?consistency=strong` gets no widening, and admin is not an auditor — separation of
+  duties is kept. It is a conjunction, not a superuser short-circuit: `ledger:admin` without
+  `ledger:writer` is still refused (spec §6.4, scenario N15).
+- **The audit trail surfaces the acting principal**, via `audit_entries.actor` (Liquibase changeset
+  `005`) and an `actor` Kafka header. The payload is authoritative and the header an optimisation: a
+  dropped header warns and uses the payload, and only a genuine *disagreement* faults to the DLT —
+  losing a correctly attributable compliance entry is worse than recording it loudly (spec §15.10,
+  §15.11).
+- Realm fixture user `trent` (`ledger:writer` + `ledger:reader` + `ledger:admin`) and the P9 /
+  N13–N18 authorisation scenarios, exercised through the real chain against a Keycloak container
+  — **Plan 4 (admin on-behalf-of) complete**, spec v3.12.
+
+### Removed
+- **CI stage 6 and the vendored ISO-compliance skill, deleted rather than repaired.** The script
+  resolved `REPO_ROOT` inside its own directory, so all five of its checks scanned a tree holding
+  none of their 17 artefacts and the gate reported `governance OK: 17 known, 0 new` unconditionally.
+  A green check that verifies nothing is worse than no check, and generating the 17 artefacts to turn
+  it green would have added exactly the noise the pass existed to remove. §12.1's stage 6 is struck
+  in place rather than the table renumbered, because six citations across three files name absolute
+  stage numbers and no gate would catch them drifting.
+- `docs/how-to/` and `docs/tutorial/`, both empty and both routed to. The eleven delivered plans
+  (8,838 lines of agent execution script, five times the spec) moved to `docs/_archive/`.
+  `docs/agentic-workflow.md` deliberately stays — it is the readable account of how this was built.
 
 ### Security
 - **Rate limiting (§6.1) exists.** Token buckets per principal and per IP, whichever is more
