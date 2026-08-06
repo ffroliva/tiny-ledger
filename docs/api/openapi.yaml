@@ -48,9 +48,7 @@ paths:
       operationId: openAccount
       summary: Open an account
       description: |
-        Requires `ledger:writer`. The `accountUid` is server-generated (§6.3).
-        **Not enforced yet:** the role does not exist, so `full` accepts any authenticated caller here —
-        a `ledger:reader` token is not refused a write (§6.4's `carol` case). Ownership *is* enforced.
+        Requires `ledger:writer`. The `accountUid` is server-generated (§6.3). Ownership *is* enforced.
       requestBody:
         required: true
         content:
@@ -82,10 +80,7 @@ paths:
       summary: List the caller's own accounts
       description: |
         Scoped to the JWT subject — a caller never sees another principal's accounts (§9.3 N12).
-        Requires `ledger:reader`.
-        **Not enforced yet:** the role does not exist, so `full` accepts any authenticated caller on every
-        `ledger:reader` / `ledger:writer` route. Ownership *is* enforced — this is a role gap, not an
-        ownership one.
+        Requires `ledger:reader`. Ownership *is* enforced.
       responses:
         '200':
           description: The caller's accounts.
@@ -309,9 +304,6 @@ paths:
       description: |
         The account's events in stream order. Requires `ledger:auditor` (§6.4).
         `full` profile only — `standalone` answers `501` (§7).
-        **Temporarily unavailable in `full`:** the `ledger:auditor` role does not exist yet, so `full`
-        answers every caller — auditor or not — with `403`, because without the role any token had the
-        whole cross-account trail. This is lifted when the role check lands.
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
@@ -337,10 +329,6 @@ paths:
       description: |
         The compliance trail across all accounts, filterable by account and time range. Requires
         `ledger:auditor` (§6.4). `full` profile only — `standalone` answers `501` (§7).
-        **Temporarily unavailable in `full`:** the `ledger:auditor` role does not exist yet, so `full`
-        answers every caller — auditor or not — with `403`, because `accountUid` is optional here and
-        without the role any token could page every account's id, amount and reference. This is lifted
-        when the role check lands.
       parameters:
         - name: accountUid
           in: query

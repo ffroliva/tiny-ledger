@@ -14,7 +14,7 @@ Quadrants are Diátaxis, per spec §8.5.
 |---|---|---|
 | **`../AGENTS.md`** | **Always, first.** The gates, the enforced rules, the traps already paid for | — |
 | `../README.md` | Running it for the first time | Tutorial |
-| `spec.md` (v3.8) | Any question about *contract* — API shape, errors (§6.5), security model (§6.4), idempotency (§6.3), the two run modes (§1), module boundaries (§3/§4) | Explanation |
+| `spec.md` (v3.10) | Any question about *contract* — API shape, errors (§6.5), security model (§6.4), idempotency (§6.3), the two run modes (§1), module boundaries (§3/§4) | Explanation |
 | `architecture.md` | You need the shape of the system before the detail | Explanation |
 | `api/openapi.yaml` | Changing a request/response, a status code, or a validation constraint. **The generated server interfaces come from here** — edit the contract, not the generated code | Reference |
 | `adr/0001-kafka-delivery-path.md` | Touching event publication, the outbox, Kafka, or the transaction boundary around publishing | Explanation |
@@ -31,6 +31,8 @@ Quadrants are Diátaxis, per spec §8.5.
 
 | Plan | State |
 |---|---|
+| `superpowers/plans/2026-08-06-roles-and-keycloak-realm.md` | **Delivered** — `ledger:reader`/`writer`/`auditor` enforced on the `full` filter chain, a real Keycloak container and realm behind the integration suite; spec v3.10 close-out |
+| `superpowers/plans/2026-08-05-spec-v3.9-and-proposal-repair.md` | Delivered — spec v3.9 truth alignment folded into `docs/spec.md`; the admin on-behalf-of proposal repaired, not applied |
 | `superpowers/plans/2026-08-05-plan-3-security-and-authorization.md` | **Delivered (Plan 3)** — council-reviewed three times; the third round's 13 P0s are folded into the task text, so the plan reads as executed rather than as first drafted |
 | `superpowers/plans/2026-08-05-plan-3-research.md` | Research input to the above |
 | `superpowers/plans/2026-08-04-error-handling-catalogue-proposal.md` | Approved, folded into Plan 3 |
@@ -50,5 +52,5 @@ discover new files — it reported `17 known, 0 new` both before and after four 
 2026-08-05, including an ADR. Its name and its green result both imply otherwise, so do not rely on it
 as a safety net for this. Making it discover additions is an open task.
 
-If a document's claims stop matching the code, fix or retract them the same day. `spec.md` v3.8 exists
-because a whole class of such drift accumulated unnoticed (finding CR14).
+If a document's claims stop matching the code, fix or retract them the same day. `spec.md` reached v3.8
+for exactly this reason (finding CR14), and is v3.10 now.

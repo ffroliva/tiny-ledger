@@ -46,11 +46,30 @@
   while a Spring import reached the domain's transitive compile path.
 
 ### Security
-- **`full` refuses both auditor operations with 403 until the `ledger:auditor` role exists
-  (TEMPORARY).** `accountUid` is optional on the trail and `PostgresAuditTrail` builds `WHERE true`, so
-  once `full` became authenticated *any* valid token could page every account's id, amount and
-  reference — which also voids §6.5's "account UUIDs are unguessable" premise. Confirmed live before it
-  was closed. Ownership decoration cannot help: an audit trail is deliberately not owner-scoped.
+- **`full` temporarily refused both auditor operations with 403 until the `ledger:auditor` role
+  existed.** `accountUid` is optional on the trail and `PostgresAuditTrail` builds `WHERE true`, so once
+  `full` became authenticated *any* valid token could page every account's id, amount and reference —
+  which also voids §6.5's "account UUIDs are unguessable" premise. Confirmed live before it was closed.
+  Ownership decoration could not help: an audit trail is deliberately not owner-scoped. **Closed** by the
+  role enforcement below — a token holding `ledger:auditor` now reads the trail; every other token is
+  still refused.
+- **`ledger:reader` / `ledger:writer` / `ledger:auditor` enforced on the `full` filter chain**,
+  replacing the temporary auditor denial above and the previously-unenforced writer/reader roles.
+  `KeycloakRealmRolesConverter` maps Keycloak's nested `realm_access.roles` onto Spring authorities;
+  rules use `hasAuthority` rather than `hasRole`, since Spring's `hasRole` prepends `ROLE_`, which these
+  names do not carry.
+- **A real Keycloak container and realm behind the integration suite**
+  (`docker/keycloak/realm-tiny-ledger.json`), provisioning the three roles and six pinned-UUID test
+  users, so every IT exercises the production `issuer-uri` decoder branch instead of a committed test
+  key.
+- **`HEAD` is subject to the same role rule as `GET`, and the lesson now applies to the write path too.**
+  The reader matcher named `GET` explicitly; `hasAuthority` matches on `request.getMethod()`, and Spring
+  MVC serves `HEAD` from the same `@GetMapping` handler by default, so a `HEAD` request fell through
+  every role rule to `anyRequest().authenticated()` while still returning real status and
+  `Content-Length` — fixed by making the reader matcher method-less. The deposits/withdrawals matcher had
+  the same shape of gap: scoped to `PUT`, it let any other verb on a money path fall through to the
+  weaker reader rule. Now method-less there too. `POST /api/v1/accounts` stays method-scoped
+  deliberately — broadening it the same way would block readers from `GET /api/v1/accounts`.
 - **Closed a framework-contributed `/logout` route** present in both run modes and authorised by
   nothing. Spring applies `logout(withDefaults())` unconditionally and, with CSRF disabled, matches
   `GET`/`PUT`/`DELETE` too; `LogoutFilter` precedes `AuthorizationFilter`, so `full` answered an

@@ -63,8 +63,9 @@ class SecurityConfigTest {
     }
 
     /**
-     * §7: {@code full} refuses the two auditor operations until the {@code ledger:auditor} role lands, and it
-     * does so with a chain-level {@code denyAll()} in {@code fullChain}. {@code standalone} has its own chain
+     * §7: {@code full} enforces {@code ledger:auditor} on the two auditor operations via a
+     * {@code hasAuthority} role matcher in {@code fullChain} — not, as this comment once said, a
+     * chain-level {@code denyAll()}; that stopgap is gone. {@code standalone} has its own chain
      * and must keep answering the contractual 501 (`openapi.yaml:296-355`). Nothing else in the repository
      * holds that line over a filter chain: no feature file mentions {@code audit}, {@code /events}, 501 or
      * {@code not-available}, and {@code AuditControllerTest} is a {@code @WebMvcTest} slice with no chain at
