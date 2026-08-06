@@ -184,6 +184,15 @@ class SecurityConfigIT extends AbstractIntegrationTest {
                         .content("{\"amount\":{\"currency\":\"GBP\",\"minorUnits\":10000}}"))
                 .andExpect(status().isCreated());
 
+        // P9's other half, on the same stream trent just changed: acting for the owner must not
+        // silently make the admin an owner on either projection-backed or strong reads.
+        mvc.perform(get("/api/v1/accounts/{a}/balance", alicesAccount).header("Authorization", bearer("trent")))
+                .andExpect(status().isForbidden());
+
+        mvc.perform(get("/api/v1/accounts/{a}/balance?consistency=strong", alicesAccount)
+                        .header("Authorization", bearer("trent")))
+                .andExpect(status().isForbidden());
+
         mvc.perform(get("/api/v1/accounts/{a}/balance?consistency=strong", alicesAccount)
                         .header("Authorization", bearer("alice")))
                 .andExpect(status().isOk())
@@ -195,20 +204,6 @@ class SecurityConfigIT extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.auditEntries[?(@.type == 'MoneyDeposited')].actor")
                         .value(hasItem(KeycloakTokens.SUBJECTS.get("trent")))));
-    }
-
-    // P9's other half: admin widens the write, never the read — trent cannot read the account he
-    // just acted on, neither the eventually-consistent balance nor the strong one.
-    @Test
-    void anAdminCannotReadTheAccountHeJustActedOn() throws Exception {
-        UUID alicesAccount = openAnAccountAs("alice");
-
-        mvc.perform(get("/api/v1/accounts/{a}/balance", alicesAccount).header("Authorization", bearer("trent")))
-                .andExpect(status().isForbidden());
-
-        mvc.perform(get("/api/v1/accounts/{a}/balance?consistency=strong", alicesAccount)
-                        .header("Authorization", bearer("trent")))
-                .andExpect(status().isForbidden());
     }
 
     @Test // N13: ledger:admin widens ownership only — the trail stays ledger:auditor-only

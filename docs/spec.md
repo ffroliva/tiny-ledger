@@ -588,23 +588,28 @@ The mapping rules, enforced by dependency direction rather than convention:
 
 ## 5. Spec-driven design
 
-The contract precedes the code, in three artefacts, all under version control and all enforced:
+The contract precedes the code in three version-controlled artefacts. Their current enforcement is
+different and is stated rather than inferred:
 
 1. **`docs/api/openapi.yaml`** — OpenAPI 3.1, hand-written first. The build generates request/response
    DTOs and server interfaces from it; controllers implement generated interfaces, so a controller
    that drifts from the contract fails compilation. `springdoc` validates the live app against it.
-2. **`src/test/resources/features/*.feature`** — Gherkin. Every functional requirement in §2 and §6
-   has a scenario. These are executable specification, not documentation (§9.3).
-3. **`docs/adr/*.md`** — Architecture Decision Records. Every non-obvious choice in this document has
-   one, with context, decision, consequences and the alternatives rejected.
+2. **`src/test/resources/features/*.feature`** — the committed `@standalone` Gherkin subset, executed
+   by Cucumber/JVM inside `verify`. Catalogue rows without a feature are not represented as Gherkin;
+   current full-profile evidence is JUnit (§9.3).
+3. **`docs/adr/*.md`** — Architecture Decision Records for selected non-obvious choices, with context,
+   decision, consequences and alternatives rejected. Version control, not a build gate, protects their
+   history.
 
-**Delivery rule:** no endpoint is implemented before its OpenAPI operation and executable acceptance
-proof exist. That proof is currently split between committed `@standalone` feature scenarios and
-full-stack JUnit integration tests (§9.3); stage 9 will add the missing pytest-bdd catalogue binding.
+**Delivery policy:** an endpoint should have its OpenAPI operation and executable acceptance proof
+before implementation. No gate can prove that historical ordering. Current evidence is split between
+the committed `@standalone` Cucumber subset and full-profile JUnit integration tests (§9.3); stage 9's
+pytest-bdd catalogue binding remains planned and unbuilt.
 
-**Requirement IDs:** the scenario IDs *are* the requirement IDs — `REQ-<scenario-id>` for every
-catalogue row (P0…P9, N1…N18, E1…E9), and the `REQ-NNN` tags §8.2 harvests from tests use exactly
-these. Membership is the catalogue itself, never a range that can drift.
+**Requirement IDs:** P0…P9, N1…N18 and E1…E9 are the catalogue's stable labels. Committed feature
+scenarios use tags such as `@P0` and `@N11`; Java tests name the applicable label in code or prose.
+There are currently no `REQ-*` test tags, and the governance script does not harvest a traceability
+matrix from tests. Automated traceability remains planned (§8.2).
 
 ---
 
@@ -784,11 +789,13 @@ that comparison admits the caller if they hold `ledger:admin`; every query's com
 only, never reads. Every event a command then emits records the caller as its `actor` (§2.3), so an
 admin-performed movement carries both halves of the answer an investigation needs — *who acted* and
 *whose account it was* — on the same immutable row, and the audit trail surfaces the pair (§7).
-`mallory`'s N7 is a test of the comparison, not of a role; `trent`'s coverage is unit-level for
-now — `RecordMovementServiceTest#adminCanDepositOnAnAccountTheyDoNotOwn` proves the admin clause
-widened the write comparison, and `StrongBalanceServiceTest#adminIsRefusedTheStrongReadOfAnAccountTheyDoNotOwn`
-proves the same clause left the strong-read comparison untouched. A `trent` scenario in the
-Cucumber catalogue (§9.3) is not yet built.
+`mallory`'s N7 is a test of the comparison, not of a role. `trent` has both unit and real-stack
+coverage: `RecordMovementServiceTest#adminCanDepositOnAnAccountTheyDoNotOwn` proves the widened write
+predicate directly, while
+`SecurityConfigIT#anAdminRecordsACrossAccountMovementAndTheAuditTrailAttributesItToHim` performs the
+cross-account deposit against Postgres/Redis/Kafka/Keycloak, keeps `alice`'s strong balance readable,
+refuses `trent` on both eventual and strong reads of that same account UID, and finds `trent` as the
+audit actor without assuming row order. A pytest-bdd/Cucumber `@full` binding is not built (§9.3).
 
 ### 6.5 Error handling
 
@@ -1000,15 +1007,17 @@ Feb 2025), reviewed 2026-08-04.
 
 ## 8. Documentation
 
-**Documentation is a first-class citizen**, which is a claim with four testable consequences. Docs
-that are merely *encouraged* rot; the only documentation that survives contact with a deadline is
-documentation the build refuses to ship without.
+**Documentation is a first-class citizen**, with current enforcement and intended enforcement kept
+distinct. Docs that are merely *encouraged* rot, but a planned gate must not be described as one the
+build already runs.
 
 1. **Docs are gated by CI.** Stage 6 of §12.1 fails the build on a governance violation.
-2. **Docs are generated wherever generation is possible**, so they cannot drift.
-3. **Docs are executable wherever execution is possible** — the README's examples are run by the
-   test suite.
-4. **Docs have a lifecycle** — an index, an archive, revision history, and an owner.
+2. **Generation is the target wherever generation is possible.** The current and planned rows are
+   distinguished in §8.2.
+3. **Committed Gherkin is executable today.** README example extraction belongs to unbuilt stage 9
+   (§8.3/§9.6).
+4. **Docs have a lifecycle** — an index, an archive, revision history, and an owner. This is a
+   documentation convention except where stage 6 explicitly checks a marker.
 
 ### 8.1 Structure — Diátaxis
 
@@ -1025,15 +1034,16 @@ The most common documentation failure is a single file trying to be all four. Th
 
 ### 8.2 Generated, not written
 
-Anything derivable from the code is generated by a **test**, so a stale diagram fails the build
-rather than misleading a reader.
+The design target is to generate derivable material with a **test**, so a stale artefact fails the
+build rather than misleading a reader. The table includes planned outputs; only a wired generator is
+a current gate.
 
 | Artefact | Generated from | By |
 |---|---|---|
 | C4 component diagrams, module canvas | The module graph | Spring Modulith `Documenter` |
 | API reference + Swagger UI | `openapi.yaml` | springdoc |
 | CLI reference | `openapi.yaml` | Pydantic model generation (§11) |
-| Traceability matrix rows | `REQ-NNN` tags in tests | governance script |
+| Traceability matrix rows (planned) | Catalogue labels in features and Java tests | No generator exists yet; the governance script does not harvest requirement tags |
 | Coverage tables | JaCoCo | report merge |
 | Dependency inventory / SBOM | The build | CycloneDX |
 
@@ -1043,13 +1053,13 @@ decision.
 
 ### 8.3 Executable documentation
 
-The README's `curl` examples are extracted and executed by the e2e suite (§9.6). An example that
-stops working fails the build.
+The README's `curl` examples are intended to be extracted and executed by the e2e suite (§9.6), but
+stage 9 is not built and those examples do not currently fail the build.
 
-This closes the single most common documentation lie — a quickstart that no longer runs — and it
-costs one test. The same applies to the Gherkin in §9.3: those files are simultaneously the
-specification and the acceptance suite, so the specification cannot describe behaviour the system
-does not have.
+When built, that closes the common documentation lie of a quickstart that no longer runs. The
+committed Gherkin subset in §9.3 already has that property: those files are simultaneously
+specification and acceptance tests. Catalogue rows without a feature depend on their named JUnit
+evidence instead; the catalogue as a whole is not yet one executable Gherkin suite.
 
 ### 8.4 Governance — the ISO 15289 section contract
 
@@ -1180,11 +1190,13 @@ Steps drive the HTTP API, not internal classes — the specification must not de
 
 The rows below are the contract's requirement catalogue; a row does not imply that a like-named
 `.feature` file exists. The currently committed Gherkin subset is tagged **`@standalone`** and runs
-in-process on every push (§12.1 stage 5). The full-only auth/admin catalogue is exercised today by
-JUnit integration tests extending `AbstractIntegrationTest`, against real Postgres, Redis, Kafka and
-Keycloak at stage 7. Stage 9's pytest-bdd binding of the whole catalogue is still unbuilt (§9.6).
+in-process on every push (§12.1 stage 5). P9 and N6–N17 have real-stack JUnit evidence extending
+`AbstractIntegrationTest`, against Postgres, Redis, Kafka and Keycloak at stage 7. N18 is different:
+its executable evidence is the repository-level `AuditKafkaListenerTest`, not a full-stack
+authentication scenario (§15.10). Stage 9's pytest-bdd binding of the whole catalogue is still
+unbuilt (§9.6).
 
-The auth scenarios N6–N10 and N13–N18, shared-limiter N9, Kafka E6, auditor P7, on-behalf-of P9,
+The auth scenarios N6–N10 and N12–N17, shared-limiter N9, Kafka E6, auditor P7, on-behalf-of P9,
 restart-persistence E7 and real-Postgres N2 are classified **`@full`** by necessity: a mode with no
 auth cannot assert a `403` or an admin, and a mode that loses state on restart cannot assert recovery.
 
@@ -1305,11 +1317,14 @@ does not run stage 9. Until those land, stage 5 covers the committed standalone 
 stage 7 carries the real-stack auth/admin acceptance proof (§9.3).
 
 ### 9.7 Load and performance — Gatling + JMH
+
+This stage is specified but not built or wired into CI.
+
 - **Gatling:** ramp to 500 concurrent users; assert p99 write latency < 150 ms, p99 cached read
   < 20 ms, error rate < 0.1%. Scenarios: steady state, burst, and hot-account contention (all
   traffic on one aggregate — the pathological case for optimistic concurrency).
 - **JMH:** microbenchmarks on event replay and `Money` arithmetic.
-- Thresholds are assertions. A regression fails the pipeline.
+- When wired, the thresholds become assertions and a regression will fail the pipeline.
 
 ---
 
@@ -1417,11 +1432,11 @@ after the load test.
 | 5 | BDD in-process | Cucumber, the committed `@standalone` subset (§9.3); full auth/admin acceptance currently runs as JUnit ITs at stage 7, with the stage-9 binding still planned | every push |
 | 6 | **Documentation** | `test_docs_governance.py`: artefact presence, the seven ISO markers, no pre-release version strings, every `TODO(25010)` registered, no unlinked SoA gap row. Plus link check, generated-artefact freshness, and the §8.6 docs-travel-with-code prompt | **every push** |
 | 7 | Integration | Testcontainers: Postgres, Kafka, Redis, Keycloak | every push |
-| 8 | Python CLI | `pytest` matrix on **3.11, 3.12, 3.13**; `pyright` strict; `ruff` | on `ledger-cli/**` |
+| 8 | Python CLI (planned) | `pytest` matrix on **3.11, 3.12, 3.13**; `pyright` strict; `ruff` | not yet wired; no `ledger-cli/` tree |
 | 9 | E2E (planned) | `docker compose up`, then pytest-bdd over the full catalogue + `ledger-cli scenario run` (§9.6) — **including the README's extracted `curl` examples** (§8.3) | not yet wired |
-| 10 | Load | Gatling; p99 write <150 ms, p99 cached read <20 ms, errors <0.1% | main + nightly |
-| 11 | Security | `gitleaks`, `detect-secrets`, Trivy image scan, `dependency-check` | every push |
-| 12 | Publish | Multi-arch image, CycloneDX SBOM, generated module diagrams to `docs/generated/` | main |
+| 10 | Load (planned) | Gatling; p99 write <150 ms, p99 cached read <20 ms, errors <0.1% | not yet wired |
+| 11 | Security (partial) | `gitleaks` runs; `detect-secrets`, Trivy and `dependency-check` remain unwired | every push (`gitleaks` only) |
+| 12 | Publish (planned) | Multi-arch image, CycloneDX SBOM, generated module diagrams to `docs/generated/` | not yet wired |
 
 Stages 3, 4, 5 and 6 are the ones worth pointing at: they fail on a *design or documentation*
 regression, not a behavioural one. An agent-assisted codebase moving at speed needs boundary and
@@ -1472,14 +1487,14 @@ Each step ends green and demonstrable.
 | 1 | Skeleton, pom, Modulith verification, CI | `mvn verify` green on an empty module graph |
 | 2 | `shared` + `ledger` domain, in-memory event store | Unit + architecture tests green — no endpoints yet; §5's rule holds |
 | 3 | OpenAPI contract + generated interfaces | Every §7 operation specified; controller drift breaks the build |
-| 4 | Cucumber feature suite + the §7 endpoints on the in-memory store | Every §2 requirement has a green scenario; `standalone` serves every §7 endpoint except the two auditor operations (`full`-only: `audit` needs Kafka — step 7 — and the role needs auth — step 8). Membership by reference to §7, never by count |
+| 4 | Cucumber feature suite + the §7 endpoints on the in-memory store | The committed `@standalone` feature subset is green; catalogue rows requiring `full` use JUnit evidence until stage 9 exists. `standalone` serves every §7 endpoint except the two auditor operations (`full`-only: `audit` needs Kafka — step 7 — and the role needs auth — step 8) |
 | 5 | Postgres event store + Liquibase + outbox | Integration tests green on Testcontainers |
 | 6 | Projections + Redis cache + event-driven eviction | Use-case tests assert projection and cache state |
 | 7 | Kafka relay + `audit` module | Audit trail rebuilt from the stream |
 | 8 | Keycloak + RBAC + rate limiting | Security and rate-limit integration tests green |
 | 9 | Observability stack | Dashboards render live traffic; readiness gates on projection lag |
 | 10 | Python CLI + e2e scenarios | `ledger-cli scenario run edge-cases` green against compose |
-| 11 | Gatling + JMH + thresholds | Pipeline fails on regression |
+| 11 | Gatling + JMH + thresholds | Planned pipeline gate fails on regression once stage 10 is built |
 | 12 | **JVM assessment with `jvm-pulse`** — once the system is stable under load | GC + JFR telemetry captured against the composed stack (`pulse attach --docker <container> --duration 30s`) during a Gatling run; `report.html` committed to `docs/profiling/`; a `compare` against the pre-tuning baseline; tuning conclusions recorded as an ADR. **Run last, deliberately** — profiling an unstable system measures the instability, not the system |
 | 13 | Compliance run with the `iso-compliance` skill | Governance test green; every SoA-listed control dispositioned (§10); 25010 coverage table complete; dated acceptance record in the ISO hub |
 
@@ -1567,8 +1582,9 @@ Domain vocabulary is §2.1's ubiquitous language.
 
 ## Traceability
 
-Scenario IDs are the requirement IDs (`REQ-<scenario-id>`, §5); §12.1 maps every pipeline stage to
-the section it enforces; §10's matrices map ISO clauses to artefacts.
+Catalogue labels are P0…P9, N1…N18 and E1…E9 (§5). Feature tags and Java-test references link only
+the evidence that exists today; no `REQ-*` tag harvester or generated traceability matrix exists.
+§12.1 maps pipeline stages to their sections, and §10's matrices map ISO clauses to artefacts.
 
 ## Open issues / known gaps
 
