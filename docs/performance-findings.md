@@ -203,6 +203,50 @@ Resolved with an explicit `annotationProcessorPaths`. Filed here because it will
 annotation-processor dependency in this project — Lombok, MapStruct, immutables — in exactly the same
 silent way.
 
+### 3.5 Two Redis clients on one request path, and only one was bounded — *severity: high, availability*
+
+**Found 2026-08-07 by `RedisOutageIT` (E10), the first time a real Redis outage was ever exercised.**
+§3.2 above reasoned carefully about the rate limiter's 250 ms timeout. That reasoning was correct and
+it was applied to exactly one of the two Lettuce clients this application runs.
+
+Paused the Redis container, issued one deposit. It returned **`201` after 64 seconds**:
+
+```
+io.lettuce.core.RedisCommandTimeoutException: GET. Command timed out after 250 millisecond(s)
+  → rate limiter storage unavailable for key 'ip-backstop:127.0.0.1', allowing the request unmetered
+
+io.lettuce.core.RedisCommandTimeoutException: Connection initialization timed out after 1 minute(s)
+  → org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
+```
+
+| Client | Timeout | Behaviour during the outage |
+|---|---|---|
+| `RateLimitConfig.rateLimitRedisClient` | 250 ms, deliberate (§3.2) | failed open in 250 ms, exactly as designed |
+| Spring Data Redis `LettuceConnectionFactory` | **unset** → Boot default 60 s | held the request for **64 seconds** |
+
+Nothing was wrong with the *logic*. `RedisBalanceCache.evict` catches `DataAccessException` and never
+rethrows, precisely so a cache outage cannot roll back a movement — a good decision, and it held. But
+`BalanceProjector.on` evicts **inside the still-open append transaction**, so the correct failure
+arrives 60 seconds later while holding a Tomcat worker, on **every write**, for the duration of the
+outage.
+
+That is the worker-pool saturation `RateLimitConfig`'s own javadoc names as *strictly worse than the
+500 the fail-open replaces*. The protection was real and the second client walked straight past it.
+
+**Why nothing caught it.** `RateLimitFilterTest#aStorageFailureFailsOpenInsteadOfPropagating` proves
+the fail-open branch by throwing a `RedisException` from a stub store — it can verify the *branch* and
+is structurally incapable of observing *latency*, or of noticing a second client it never touches. A
+simulated outage cannot measure how long a real one costs.
+
+Resolved by bounding this client for the same reason and to the same value
+(`application-full.properties`: `spring.data.redis.timeout`, `spring.data.redis.connect-timeout`).
+Measured after: the same test takes **2.8 s** end to end, and `RedisBalanceCacheIT`'s six tests stay
+green, so 250 ms is not tight enough to disturb normal operation against a same-network Redis.
+
+**The general lesson, and the reason this sits at high severity:** a per-request availability budget is
+a property of the whole request path, not of the component whose javadoc discusses it. Any future
+client added to that path inherits the obligation, and only an outage test can tell you whether it did.
+
 ---
 
 ## 4. Optimisation candidates — carried forward, not closed
