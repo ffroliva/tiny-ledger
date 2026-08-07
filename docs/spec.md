@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.32
+**Version:** 3.33
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -1612,8 +1612,8 @@ either.
   (§1.5) documents every variable.
 ### 12.1 Pipeline (GitHub Actions)
 
-Active stages are ordered cheapest-and-most-informative first. The load stage remains planned, so it
-is not part of today's failure ordering.
+Active stages are ordered cheapest-and-most-informative first. The load stage is built but
+`workflow_dispatch`-only, so it is not part of the push-path failure ordering.
 
 | # | Stage | Gate | Runs on |
 |---|---|---|---|
@@ -1629,6 +1629,7 @@ is not part of today's failure ordering.
 | 10 | **Load** | Gatling simulation and the JMH benchmarks; thresholds fail the build (§9.7) | `workflow_dispatch` only — a ramp on every push would pay for itself in queue time, not signal |
 | 11 | Security (partial) | `gitleaks` runs; `detect-secrets`, Trivy and `dependency-check` remain unwired | every push (`gitleaks` only) |
 | 12 | Publish (planned) | Multi-arch image, CycloneDX SBOM, generated module diagrams to `docs/generated/` | not yet wired |
+| 13 | **SonarCloud** | Static analysis and coverage on `sonarcloud.io`, fed from both JaCoCo reports. **Reports; does not gate** — see below | every push, last: `needs: [unit, integration]` |
 
 Stages 3, 4 and 5 are the ones worth pointing at: they fail on a *design* regression, not a
 behavioural one. An agent-assisted codebase moving at speed needs boundary violations caught
@@ -1656,10 +1657,44 @@ why the check was deleted rather than fixed.
 land. The planned job will install from declared ranges rather than the lockfile and smoke-import the
 CLI; no dependency-range drift is detected today.
 
-**No SonarQube/SonarCloud, deliberately.** The current ground is held by Spotless, JaCoCo's failing
-thresholds, ArchUnit and the CI `gitleaks` scan. `ruff`, `pyright`, Trivy and `dependency-check` are
-specified but unwired and do not count as present coverage. A gate that can be reproduced locally is
-still preferred to a SaaS badge that needs an account and token to verify.
+**SonarCloud is wired, and it does less than the badge implies.** Through v3.32 this section read
+*"No SonarQube/SonarCloud, deliberately"*, preferring a locally reproducible gate to "a SaaS badge that
+needs an account and token to verify". The tool arrived; the sentence did not move. Two properties are
+worth stating exactly, because both are easy to read the wrong way round:
+
+- **It reports; it does not gate.** The job runs `./mvnw sonar:sonar` **without**
+  `-Dsonar.qualitygate.wait=true`, so a failing quality gate does not fail the build. That is
+  deliberate, and it is the posture `docs/performance-findings.md` §6 took for mutation coverage:
+  measure first, set the threshold against a real baseline, never gate on a number nobody has seen.
+  **Consequence worth holding on to — the Quality Gate badge can go red while CI stays green.**
+- **`sonar` is nevertheless a required status check on `main`** — with `gate`, `unit`, `integration`,
+  `security`, `cli` and `e2e`, seven in total. (`load` is deliberately *not* required: it is
+  `workflow_dispatch`-only and skips on every run, so requiring it would deadlock every PR
+  permanently.) What that requires is that the **job** succeeds, which is not the same as the analysis
+  passing — and the job **exits 0 with a warning when `SONAR_TOKEN` is absent**. On a fork, or in a
+  clone with no SonarCloud project, the required check is therefore green having analysed nothing. The
+  step prints `skipped, NOT passed` to the log and the run summary rather than reporting a success it
+  did not earn, which is the most a job can do about it. This is `AGENTS.md` trap 4's shape — a check
+  that passes having run nothing — surviving as a known property rather than as a surprise.
+
+The old paragraph's objection is answered rather than dropped: the project keys **and** the scanner
+version live in `pom.xml` rather than in the workflow, so `./mvnw sonar:sonar` with a token reproduces
+the CI analysis by hand. Coverage is fed from **both** JaCoCo reports, unit and integration, and
+guarded twice — the artifacts upload with `if-no-files-found: error`, and the job re-checks both files
+are non-empty before analysing, because `sonar.coverage.jacoco.xmlReportPaths` silently **ignores** a
+missing file and would turn a lost artifact into a reduced coverage number instead of a broken
+pipeline. Checkout is `fetch-depth: 0`, because blame, new-code detection and issue authorship are
+wrong on a shallow clone and degrade without complaining.
+
+**What Sonar does not displace.** Spotless, JaCoCo's failing thresholds, ArchUnit and `gitleaks` remain
+the things that actually fail a build; `ruff` and `pyright` gate stage 8. Trivy and `dependency-check`
+are still specified and unwired, and still do not count as present coverage.
+
+**Badges are visibility, not gates.** `README.md` carries seven — CI, quality gate, coverage,
+reliability, security, maintainability, duplication — so the state is legible without opening Actions.
+Six of them read from SonarCloud, which per the above gates nothing, so a green badge row means
+*"analysis ran and reported this"*, not *"the build would have failed otherwise"*. The only badge
+tracking something that fails a build is CI's own.
 
 ---
 
@@ -1844,3 +1879,4 @@ Javadoc, because a reader checks the spec:
 | 3.30 | 2026-08-07 | **All seven `AGENTS.md` traps accounted for, five of them verified by running rather than by reading.** Trap 1's `failOnEmptyShould=true` is set; trap 2's five string literals all fail loudly if left stale — measured by pointing `@AnalyzeClasses` at a renamed package (9 rules fail "failed to check any classes") and the Cucumber glue at one (27 scenarios error), so trap 1's setting is what protects four of trap 2's five and Cucumber protects the fifth; trap 3's CI gate counts `<testcase>` elements from XML with no `if:`, so it runs only after a green build — the exit-code pairing the trap demands; trap 4's guard fires on both sides, verified by `-Dtest=NoSuchTestClassXyz` failing the build; trap 6 gained its first test (v3.29); trap 5 caught a context fork introduced by that very test, now removed; trap 7 is methodology and was applied throughout — it caught a broken search whose control returned 0 for a term with 53 occurrences |
 | 3.31 | 2026-08-07 | **Two documentation defects, both inherited rather than reasoned.** (1) The P/N/E case catalogue lives in **§9.3**, not §12 — §12 is Docker and delivery. The battle-testing plan called it "the spec's §12 catalogue" and this pass propagated that into five places (two revision rows, two test javadocs, one script header) without anyone opening §12 to check. Corrected; the three remaining `§12` references are genuinely about delivery, including `LiquibaseMigrationIT`'s, since §12 does cover migrations. (2) `AGENTS.md` described the remote as **private**; it is **public**, and has been. That one is not cosmetic: it told every agent that pushing is "not a publication event", when in fact each push makes commit messages and comments world-readable and a force-push does not unpublish them. Both are the same failure this pass kept finding — a claim passed along and never re-derived, like `E9`'s deferral at v3.26 |
 | 3.32 | 2026-08-07 | **Observability specified against this architecture instead of a generic one, ahead of §14 step 9 being built.** §6.6 gains the deployment shape — Micrometer Tracing over the OTel bridge, domain spans added by a use-case *decorator* so §9.2's framework-free application layer survives instrumentation, and a backend that is **opt-in and hosted**: one Collector service behind a Compose `profiles: [observability]` key forwarding to Grafana Cloud, with no Prometheus/Grafana/Tempo/Loki container anywhere and OTLP export off by default so an inactive profile costs no failed-export noise. **The substantive correction is `E9` and the §6.6 health paragraph, which described a system this is not.** Readiness was specified to gate on projection lag; the balance projection is a synchronous `@EventListener` on the publishing thread inside the write transaction (§4.3 — and §6.6's own trace-context table said so four paragraphs above the claim), so its lag is structurally **zero** and `E9`'s stated harm, "serving stale balances", has no mechanism. The lag that exists is the outbox and audit consumer, it makes the *audit trail* stale rather than balances, and gating readiness on it would take instances out of service during exactly the Kafka outage **E11** requires the ledger to survive. So it is gauged and not gated: `ledger.audit.lag.seconds`, `full` only, with the 2 s/5 s numbers kept as alerting thresholds and stated plainly to have **no probe and no gate consuming them**. `E9` is rewritten to assert the honest behaviour and stays open; `adr/0004` records the decision. Readiness composition is now explicit for the same reason — `db` in, `redis` and `kafka` deliberately out, because Boot's defaults would have pulled in indicators that contradict `E10` and `E11`. Also: exemplars are demoted from a table row to **specified-and-not-delivered** (a Prometheus-registry feature unreachable on the OTLP path), and §14 step 9's done-when loses both of its original clauses — no build can assert a hosted dashboard, so a Collector-reachability test is named as the nearest gate and the dashboard as a manual step. **The known-divergences label still reads `v3.12` and was deliberately not bumped:** this pass did not re-audit those three rows, and moving the version on them would have claimed an audit that did not happen — the precise error v3.26 and v3.31 were spent correcting |
+| 3.33 | 2026-08-07 | **§12.1 caught up with SonarCloud, which had been wired while the section still said it was refused.** The paragraph read "No SonarQube/SonarCloud, deliberately", arguing a locally reproducible gate beats "a SaaS badge that needs an account and token to verify" — the tool landed in PR #4 and the sentence never moved. Stage **13** now exists in the table, and the two properties that are easy to invert are stated: it **reports and does not gate** (no `-Dsonar.qualitygate.wait=true`, deliberately, matching `performance-findings.md` §6's posture on mutation coverage), so **the Quality Gate badge can go red while CI stays green**; and `sonar` is nevertheless one of **seven required status checks** on `main` (verified against the branch-protection API, not recalled — `load` is deliberately excluded, being `workflow_dispatch`-only, and requiring it would deadlock every PR). Those two combine into a property worth knowing rather than discovering: the required job **exits 0 with a warning when `SONAR_TOKEN` is absent**, so on a fork the check is green having analysed nothing — `AGENTS.md` trap 4's exact shape, kept as a stated property. The old paragraph's objection is answered rather than deleted: keys and scanner version live in `pom.xml`, so `./mvnw sonar:sonar` reproduces CI by hand. Also recorded: coverage is fed from **both** JaCoCo reports and guarded twice, because `sonar.coverage.jacoco.xmlReportPaths` ignores a missing file and would turn a lost artifact into a coverage dip rather than a failure. **Badges are documented as visibility, not gates** — six of the seven read from a tool that gates nothing. Two smaller staleness fixes in the same section: the intro called the load stage "planned" when it is built and `workflow_dispatch`-only, and stage 13 needed adding to a table that stopped at 12 |
