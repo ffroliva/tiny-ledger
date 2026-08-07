@@ -44,6 +44,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.DockerClientFactory;
 
 /**
  * ADR 0001 end to end: a movement recorded through the use case is externalized to Kafka by the
@@ -398,6 +399,63 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
                 StringDeserializer.class.getName()));
         consumer.subscribe(List.of(topic));
         return consumer;
+    }
+
+    /**
+     * E12 — an in-flight publication survives a broker outage and completes without intervention.
+     *
+     * <p><strong>This is deliberately not tagged E7, and the distinction is the point.</strong> E7 asks for
+     * the application to be killed mid-publication and restarted, so that
+     * {@code republish-outstanding-events-on-restart} completes the delivery. No harness here can kill and
+     * restart the process inside a shared Spring context (ADR 0003), so E7 stays open.
+     *
+     * <p>What is reachable is the half E7 depends on, and it is the load-bearing half: that the work is
+     * <em>durably on disk</em> while delivery is impossible. With {@code completion-mode=DELETE} an
+     * incomplete publication is simply a row that still exists, so a surviving row is the evidence that a
+     * process dying at that instant would lose nothing. Without it the restart hook would have nothing to
+     * replay and E7's guarantee could not hold however the restart behaved.
+     *
+     * <p>The recovery assertion is honest about what it does <em>not</em> isolate: once the broker returns,
+     * the producer's own in-flight send can complete the publication on its own, so this proves "completes
+     * without manual intervention" and does not attribute that to the restart hook specifically.
+     */
+    @Test
+    void anInFlightPublicationSurvivesABrokerOutageAndCompletesWithoutIntervention() {
+        var opened = openAccount.open(new OpenAccount("bob", "ACC-E12", Currency.getInstance("GBP")));
+        UUID accountId = opened.accountId().value();
+        // Drain first, so "a row exists" below is this test's row and not someone else's leftover.
+        await().atMost(Duration.ofSeconds(30))
+                .untilAsserted(() -> assertThat(outstandingPublications()).isZero());
+
+        String containerId = KAFKA.getContainerId();
+        try {
+            DockerClientFactory.instance()
+                    .client()
+                    .pauseContainerCmd(containerId)
+                    .exec();
+            movements.deposit(
+                    new Deposit("bob", false, opened.accountId(), UUID.randomUUID(), Money.of("GBP", 500), "e12"));
+
+            // Held, not sampled once — the same correction E6's control needed. A row that merely has not
+            // been cleaned up yet is indistinguishable from a durable one at a single instant.
+            await().during(Duration.ofSeconds(2))
+                    .atMost(Duration.ofSeconds(20))
+                    .until(() -> outstandingPublications() >= 1);
+        } finally {
+            DockerClientFactory.instance()
+                    .client()
+                    .unpauseContainerCmd(containerId)
+                    .exec();
+        }
+
+        await().atMost(Duration.ofSeconds(120)).untilAsserted(() -> {
+            assertThat(outstandingPublications()).isZero();
+            assertThat(trail.eventStream(accountId, null, 50).entries()).hasSize(2);
+        });
+    }
+
+    private Long outstandingPublications() {
+        return jdbcTemplate.queryForObject("SELECT count(*) FROM event_publication", Long.class);
     }
 
     @Test
