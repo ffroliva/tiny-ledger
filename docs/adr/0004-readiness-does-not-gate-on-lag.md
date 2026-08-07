@@ -65,12 +65,32 @@ The mechanism is bounded (60 s TTL), visible to clients (`asOf`/`streamVersion`)
 Closing the window would mean moving eviction to a post-commit `TransactionSynchronization`, which
 `BalanceProjector`'s own comment names as the upgrade path. That is a §6.2 question, not a readiness one.
 
-**The lag that does exist is somewhere else.** The Kafka leg is the only asynchronous path: events reach
-the broker through the Modulith event-publication registry (`event_publication`, migration `004`), and
-`AuditKafkaListener` consumes them in the `audit` module. When Kafka is slow or down, incomplete
-publications accumulate and the audit consumer falls behind.
+**The lag that does exist is somewhere else — and there are two of them, which the first version of
+this ADR conflated.** The Kafka leg is the only asynchronous path: events reach the broker through the
+Modulith event-publication registry (`event_publication`, migration `004`), and `AuditKafkaListener`
+consumes them in the `audit` module.
 
-That lag makes the **audit trail** stale. It does not make balances stale.
+Those are **two independent lags separated by the broker**, and only the first is measurable here:
+
+| Lag | Measured by | Rises when |
+|---|---|---|
+| **Producer side** — event committed, not yet acked by Kafka | `ledger.outbox.pending.age.seconds` | The **broker** is slow or down |
+| **Consumer side** — acked by Kafka, not yet in the audit trail | **nothing today** | The **consumer** is slow, stopped, or rebalancing |
+
+The reason is `completion-mode=DELETE` (`application-full.properties:47-50`), whose own comment states
+it: *"the publication row goes **the moment Kafka acknowledges** — the queue only ever holds in-flight
+and failed work."* `AuditKafkaListener` is a `@KafkaListener` on its own consumer group, entirely
+downstream of that ack. **Stopping the consumer therefore leaves this gauge reading `0.0`.**
+
+So the gauge measures **outbox pending age**, not audit-trail lag. It was named
+`ledger.audit.lag.seconds` in the first version of this ADR, which described a quantity it cannot
+observe; renamed at spec v3.37. Neither lag makes balances stale.
+
+**Consumer lag is a real and currently unobserved gap**, recorded rather than quietly left: nothing in
+this repository watches consumer offsets, and `FullAdapterConfig` parks unprocessable records on
+`ledger.events.DLT` with a javadoc saying it exists to prevent "a silent, permanent hole in the
+compliance trail" — with nothing observing that topic either. Both belong to step 9 part 2, where an
+exporter exists to carry them.
 
 ## Decision
 
@@ -83,9 +103,9 @@ nothing gates on it.**
 | `readiness` | `readinessState` + `db` | In `full` the event store **is** Postgres. In `standalone` it is in-memory, so the group is `readinessState` alone |
 | — | `redis`, `kafka` **excluded** | See below |
 
-`ledger.audit.lag.seconds` is a gauge over the age of the oldest incomplete publication. It exists in
+`ledger.outbox.pending.age.seconds` is a gauge over the age of the oldest incomplete publication. It exists in
 `full` only, because `standalone` has no `event_publication` table. The spec's existing numbers survive
-as **alerting** thresholds, relabelled to describe audit-trail lag rather than projection lag: p99 < 2 s
+as **alerting** thresholds, relabelled to describe outbox pending age rather than projection lag: p99 < 2 s
 steady-state, 5 s worth paging on.
 
 ## Why gating on the real lag would be worse than not gating
@@ -102,17 +122,34 @@ instance from service during exactly that outage. The ledger would stop serving 
 provably capable of serving correctly, because a downstream compliance consumer was behind. That inverts
 the property ADR 0002 was written to protect.
 
-The same argument excludes Redis and Kafka from the readiness group. Spring Boot auto-configures a health
-indicator for each, and the default grouping would include them — so this is a decision that has to be
-*made*, not one that can be left alone. **E10** (Redis paused: rate limiting fails open, the write still
-`201`s, strong reads stay exact) and **E11** would both break against a readiness group that trusted
-Boot's defaults.
+The same argument excludes Redis from the readiness group. **Corrected at spec v3.37:** the first
+version of this ADR said Boot "auto-configures a health indicator for each" of Redis and Kafka. That is
+true of Redis and **false of Kafka** — `spring-boot-kafka-4.1.0.jar` ships no health contributor, while
+`spring-boot-data-redis` and `spring-boot-jdbc` both do. So the Redis exclusion is a **guard**, and the
+Kafka exclusion documents **intent** rather than restraining anything that would otherwise happen.
+
+The distinction matters beyond pedantry: naming a contributor that does not exist is a startup failure,
+not a no-op. `HealthContributorMembershipValidator` refuses to start when a group names an unknown
+contributor — so an attempt to *add* `kafka` to the readiness group, whether to test the exclusion or by
+mistake, fails at context creation rather than at an assertion.
+
+**E10** (Redis paused: rate limiting fails open, the write still `201`s, strong reads stay exact) would
+break against a readiness group that trusted Boot's defaults. **E11** is protected by the absence of a
+Kafka contributor rather than by this decision — which is worth knowing, because that absence is a
+property of the framework version and could change under an upgrade.
 
 ## Consequences
 
-- **`E9` is rewritten, not closed.** It now asserts the honest behaviour: pause the audit consumer, the
+- **`E9` is rewritten, not closed.** It now asserts the honest behaviour: pause **the broker**, the
   gauge rises past the threshold, balances stay exact, readiness stays **UP**. It remains the one open
-  case in §9.3 and closes when §14 step 9 lands.
+  case in §9.3 and closes when §14 step 9 lands. *The method was "pause the audit consumer" until spec
+  v3.37 — an experiment that reads `0.0`, for the `completion-mode=DELETE` reason above. Pausing the
+  broker is what makes publications accumulate.*
+- **The gauge's SQL must exclude `FAILED` rows.** Modulith's mark-failed path sets `status = 'FAILED'`
+  and never sets `completion_date`, and resubmission is restart-only
+  (`republish-outstanding-events-on-restart=true`). Without the exclusion, one poison row pins
+  `MIN(publication_date)` permanently: the alert fires forever and every genuine excursion after it is
+  invisible behind the stuck value.
 - **The 2 s / 5 s thresholds have no enforcement.** They are inputs to an alert this repository does not
   ship. Per `AGENTS.md` — *if you state a rule that this file does not enforce, say which gate enforces
   it, or say plainly that none does* — §6.6 now says plainly that none does.

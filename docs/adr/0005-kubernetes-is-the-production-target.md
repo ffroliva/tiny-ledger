@@ -85,7 +85,7 @@ probe matters even though nothing in ADR 0004's reasoning required it to.
 
 ### The lag gauge is global and must aggregate as `max`
 
-`ledger.audit.lag.seconds` reads a shared table, so every replica reports the *same* value. Summed
+`ledger.outbox.pending.age.seconds` reads a shared table, so every replica reports the *same* value. Summed
 across twenty pods it reads twenty times the truth. It aggregates with `max`, and dashboards and alerts
 must say so.
 

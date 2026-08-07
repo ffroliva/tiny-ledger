@@ -4,7 +4,7 @@
 > or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`)
 > syntax for tracking.
 
-**Goal:** Ship Actuator liveness/readiness probes and the `ledger.audit.lag.seconds` gauge, and close
+**Goal:** Ship Actuator liveness/readiness probes and the `ledger.outbox.pending.age.seconds` gauge, and close
 `E9` — the last open case in the spec's §9.3 catalogue.
 
 **Architecture:** Actuator is added to both run modes. Readiness contains `readinessState` + `db` and
@@ -72,7 +72,7 @@ exposing an endpoint by configuration does not open it to any valid token. Neith
 
 **Health detail is `never`, for everyone.** The probe body is `{"status":"UP"}` and nothing more. No
 caller — authenticated or not — sees which component is down. Which component *is* down is answerable
-from `ledger.audit.lag.seconds` and the logs, by someone who already has access to them. The rejected
+from `ledger.outbox.pending.age.seconds` and the logs, by someone who already has access to them. The rejected
 alternative was `show-details=when-authorized` behind a new `ledger:operator` role: a fourth role, a
 Keycloak realm change and new authorization tests, for detail that is already available to the people
 who would act on it.
@@ -143,7 +143,7 @@ Append to `src/main/resources/application.properties`:
 management.endpoints.web.exposure.include=health
 management.endpoint.health.probes.enabled=true
 # Never, for every caller, authenticated or not: the probe body is {"status":"UP"} and nothing more.
-# Which component is down is answerable from ledger.audit.lag.seconds and the logs, by people who
+# Which component is down is answerable from ledger.outbox.pending.age.seconds and the logs, by people who
 # already have access to them. `when-authorized` behind a new ledger:operator role was considered and
 # rejected — a fourth role and a realm change for detail those people can already reach.
 management.endpoint.health.show-details=never
@@ -520,7 +520,7 @@ restarts a process that was working."
 
 ---
 
-## Task 4: The `ledger.audit.lag.seconds` gauge
+## Task 4: The `ledger.outbox.pending.age.seconds` gauge
 
 **Estimated: 40 minutes.**
 
@@ -573,7 +573,7 @@ public class AuditLagGauge {
 
     public AuditLagGauge(JdbcTemplate jdbc, MeterRegistry registry) {
         this.jdbc = jdbc;
-        registry.gauge("ledger.audit.lag.seconds", this, AuditLagGauge::lagSeconds);
+        registry.gauge("ledger.outbox.pending.age.seconds", this, AuditLagGauge::lagSeconds);
     }
 
     /** Package-private for the IT to read directly without going through the registry. */
@@ -608,7 +608,7 @@ move it rather than relaxing the rule.
 ```bash
 git add src/main/java/com/ffroliva/tinyledger/platform/AuditLagGauge.java \
         src/main/java/com/ffroliva/tinyledger/config/FullAdapterConfig.java
-git commit -m "feat(observability): ledger.audit.lag.seconds gauge
+git commit -m "feat(observability): ledger.outbox.pending.age.seconds gauge
 
 The age of the oldest incomplete event publication. Nothing gates on it — see
 ADR 0004. This is not projection lag: the balance projection is synchronous on
@@ -808,7 +808,7 @@ route to ADR 0004 for the reasoning. The spec states the contract; the ADR carri
 | Liveness and readiness separate | 1 |
 | Readiness = `readinessState` + `db`; `redis`/`kafka` excluded | 1, proven by violation in 5 |
 | Probes reachable without a credential | 2 |
-| `ledger.audit.lag.seconds`, `full` only | 4 |
+| `ledger.outbox.pending.age.seconds`, `full` only | 4 |
 | Nothing gates on lag | 5 |
 | 2 s / 5 s as alerting thresholds with no gate consuming them | 5 asserts the 5 s reading; no gate is added, which is the requirement |
 | `E9` rewritten and closed | 5 |
