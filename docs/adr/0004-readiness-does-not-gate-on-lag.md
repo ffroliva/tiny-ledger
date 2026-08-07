@@ -35,9 +35,35 @@ and §6.6's trace-context table states the same fact four paragraphs above the c
 > publishing thread inside the same transaction (§4.3)* — and on each one an unconfigured setup silently
 > starts a fresh trace.
 
-So there is no window in which a balance is stale. A read either sees the write or the write has not
-committed. `E9`'s stated harm has no mechanism, and `E9`'s stated method — holding the listener — would
-block the write itself rather than produce lag behind it.
+So there is no window in which a **projection** is stale. A projection read either sees the write or the
+write has not committed. `E9`'s stated method — holding the listener — would block the write itself
+rather than produce lag behind it.
+
+Corroborated independently, and before this ADR was written: `PausableListenerGate` — the test-support
+class E1–E5 rest on — exists precisely because "a write is projected before the `PUT` returns and there
+is no window to observe" (`PausableListenerGate:13-16`). It creates E1's stale window by substituting a
+`@Primary` projector. **E1's window is test scaffolding; production has no equivalent.**
+
+### Correction: "stale balances" is not impossible, only unreachable by projection lag
+
+The first version of this ADR said `E9`'s stated harm — *"serving stale balances"* — had **no mechanism
+at all**. That was an overstatement, and the mechanism is in production code.
+
+`BalanceProjector:20-32` applies the event and then evicts the cache **inside the still-open append
+transaction**, before commit. A concurrent read arriving between the eviction and the commit repopulates
+the cache from the pre-write projection, and that entry is then stale for up to the 60 s TTL (§6.2). The
+class carries this in a comment; it was known and accepted, not discovered here.
+
+**This does not change the decision, and it strengthens the reason for it.** A stale cache entry lives
+in **shared Redis** and is therefore visible to every replica identically. Taking one instance out of
+service does not repair it, does not shorten it, and does not hide it — the next instance serves the same
+entry from the same store. Readiness gating is not merely the wrong tool for outbox lag; it is useless
+against the one staleness mechanism this system actually has.
+
+The mechanism is bounded (60 s TTL), visible to clients (`asOf`/`streamVersion`), and escapable
+(`?consistency=strong`, E3) — which is exactly the eventual-consistency contract §4.0 has always stated.
+Closing the window would mean moving eviction to a post-commit `TransactionSynchronization`, which
+`BalanceProjector`'s own comment names as the upgrade path. That is a §6.2 question, not a readiness one.
 
 **The lag that does exist is somewhere else.** The Kafka leg is the only asynchronous path: events reach
 the broker through the Modulith event-publication registry (`event_publication`, migration `004`), and

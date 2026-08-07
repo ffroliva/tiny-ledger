@@ -657,7 +657,14 @@ void lagIsVisibleAndReadinessStaysUp() throws Exception {
         await().atMost(Duration.ofSeconds(30))
                .untilAsserted(() -> assertThat(auditLagGauge.lagSeconds()).isGreaterThan(5.0));
 
-        // and: balances are exact, because the projection never depended on Kafka
+        // and: balances are exact, because the projection never depended on Kafka.
+        //
+        // consistency=strong is deliberate and must NOT be dropped to "simplify" this test. A plain
+        // cached read is not guaranteed exact here: BalanceProjector:20-32 evicts inside the open
+        // append transaction, so a read racing the commit can repopulate the cache with the pre-write
+        // balance for up to the 60s TTL (§6.2, ADR 0004's correction section). That window is real,
+        // bounded and unrelated to Kafka — asserting a cached read would make this test flaky for a
+        // reason that has nothing to do with E9.
         mockMvc.perform(get("/api/v1/accounts/" + accountUid + "/balance?consistency=strong").with(ALICE))
                .andExpect(status().isOk())
                .andExpect(jsonPath("$.amount.minorUnits").value(5_000));
