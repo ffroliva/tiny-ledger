@@ -9,7 +9,6 @@ import com.ffroliva.tinyledger.shared.AccountId;
 import com.ffroliva.tinyledger.shared.Money;
 import com.ffroliva.tinyledger.testsupport.AbstractIntegrationTest;
 import java.time.Duration;
-import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,7 +20,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(OutputCaptureExtension.class)
-class RedisBalanceCacheIT extends AbstractIntegrationTest {
+class RedisBalanceCacheIT extends AbstractIntegrationTest
+        implements com.ffroliva.tinyledger.contract.BalanceCacheContract {
 
     @Autowired
     private BalanceCachePort cache;
@@ -29,32 +29,15 @@ class RedisBalanceCacheIT extends AbstractIntegrationTest {
     @Autowired
     private StringRedisTemplate redis;
 
-    private static final Instant AS_OF = Instant.parse("2026-08-04T12:00:00Z");
-
-    @Test
-    void putThenGetRoundTripsTheView() {
-        AccountId id = AccountId.random();
-        BalanceView view = new BalanceView(id, Money.of("GBP", 5000), AS_OF, 7);
-
-        cache.put(id, view);
-
-        assertThat(cache.get(id)).contains(view);
+    @Override
+    public BalanceCachePort cache() {
+        return cache;
     }
 
-    @Test
-    void getIsEmptyForAnUncachedAccount() {
-        assertThat(cache.get(AccountId.random())).isEmpty();
-    }
-
-    @Test
-    void evictRemovesTheEntry() {
-        AccountId id = AccountId.random();
-        cache.put(id, new BalanceView(id, Money.of("GBP", 1), AS_OF, 1));
-
-        cache.evict(id);
-
-        assertThat(cache.get(id)).isEmpty();
-    }
+    // The round trip, the miss and the evict used to live here as three local tests. They are port
+    // semantics, not Redis semantics, so they moved to BalanceCacheContract (§9.2b) — where the
+    // in-memory adapter, which had none of them, now runs them too. What stays below is what is
+    // genuinely this adapter's: Redis key expiry, a corrupt payload, and a real outage.
 
     @Test
     void entriesCarryTheSixtySecondTtl() {
