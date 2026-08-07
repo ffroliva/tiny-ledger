@@ -5,6 +5,7 @@ import com.ffroliva.tinyledger.balance.application.port.out.BalanceProjectionPor
 import com.ffroliva.tinyledger.ledger.application.port.out.ClockPort;
 import com.ffroliva.tinyledger.ledger.application.port.out.EventStorePort;
 import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
+import com.ffroliva.tinyledger.ledger.domain.MovementEvent;
 import com.ffroliva.tinyledger.notification.application.Notification;
 import com.ffroliva.tinyledger.notification.application.NotificationPort;
 import com.ffroliva.tinyledger.shared.AccountId;
@@ -92,13 +93,13 @@ public class CucumberSpringConfig {
         private final List<Notification> records = new CopyOnWriteArrayList<>();
 
         @Override
-        public void record(Notification notification) {
+        public void recordNotification(Notification notification) {
             records.add(notification);
         }
 
         public List<Notification> forMovement(UUID movementUid) {
             return records.stream()
-                    .filter(record -> record.movementUid().equals(movementUid))
+                    .filter(movement -> movement.movementUid().equals(movementUid))
                     .toList();
         }
     }
@@ -145,12 +146,12 @@ public class CucumberSpringConfig {
         }
 
         @Override
-        public void append(AccountId streamId, long expectedVersion, List<LedgerEvent> events) {
+        public void append(AccountId streamId, long expectedVersion, List<? extends LedgerEvent> events) {
             delegate.append(streamId, expectedVersion, events);
         }
 
         @Override
-        public Optional<LedgerEvent> findByMovementUid(UUID movementUid) {
+        public Optional<MovementEvent> findByMovementUid(UUID movementUid) {
             return delegate.findByMovementUid(movementUid);
         }
     }

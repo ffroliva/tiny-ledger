@@ -61,18 +61,18 @@ public class AuditKafkaListener {
     // Topic literal rather than a shared constant: the audit module consumes this stream as an
     // external contract, not as a compile-time dependency on the publisher.
     @KafkaListener(topics = "ledger.events", groupId = "${spring.kafka.consumer.group-id}")
-    public void on(ConsumerRecord<String, String> record) {
-        Instant occurredAt = Instant.parse(header(record, "occurred-at"));
-        trail.record(new AuditTrailPort.AuditEntry(
-                UUID.fromString(record.key()),
-                header(record, "event-type"),
-                Long.parseLong(header(record, "stream-version")),
+    public void on(ConsumerRecord<String, String> consumed) {
+        Instant occurredAt = Instant.parse(header(consumed, "occurred-at"));
+        trail.recordEntry(new AuditTrailPort.AuditEntry(
+                UUID.fromString(consumed.key()),
+                header(consumed, "event-type"),
+                Long.parseLong(header(consumed, "stream-version")),
                 occurredAt,
                 // §7's recordedAt: when the audit module saw the event, which is here — the Kafka hop is
                 // exactly the gap between this and occurredAt.
                 Instant.now(),
-                record.value(),
-                actorOf(record, occurredAt)));
+                consumed.value(),
+                actorOf(consumed, occurredAt)));
     }
 
     /**
@@ -86,17 +86,17 @@ public class AuditKafkaListener {
      * absent    absent             cutover logic
      * </pre>
      */
-    private static String actorOf(ConsumerRecord<String, String> record, Instant occurredAt) {
-        Header header = record.headers().lastHeader("actor");
+    private static String actorOf(ConsumerRecord<String, String> consumed, Instant occurredAt) {
+        Header header = consumed.headers().lastHeader("actor");
         String headerActor = header == null ? null : new String(header.value(), StandardCharsets.UTF_8);
-        String payloadActor = payloadActor(record.value());
+        String payloadActor = payloadActor(consumed.value());
         if (headerActor != null) {
             if (payloadActor != null && !headerActor.equals(payloadActor)) {
                 // The record it was derived from disagrees — irreconcilable, so refuse to record either
                 // value rather than guess which of the two to trust.
                 throw new IllegalStateException(
                         "audit fault: actor header '%s' disagrees with payload actor '%s' for %s"
-                                .formatted(headerActor, payloadActor, record.key()));
+                                .formatted(headerActor, payloadActor, consumed.key()));
             }
             return headerActor;
         }
@@ -104,7 +104,7 @@ public class AuditKafkaListener {
             // The event payload is the record (§15.11): a dropped header is a transport gap, not a
             // contradiction, and a compliance trail losing a correctly-attributable entry is worse than
             // recording it with a warning.
-            log.warn("actor header missing for {}, using payload's actor '{}'", record.key(), payloadActor);
+            log.warn("actor header missing for {}, using payload's actor '{}'", consumed.key(), payloadActor);
             return payloadActor;
         }
         return occurredAt.isBefore(CUTOVER) ? null : "unknown";
@@ -116,8 +116,8 @@ public class AuditKafkaListener {
         return actor == null ? null : actor.toString();
     }
 
-    private static String header(ConsumerRecord<String, String> record, String name) {
-        Header header = record.headers().lastHeader(name);
+    private static String header(ConsumerRecord<String, String> consumed, String name) {
+        Header header = consumed.headers().lastHeader(name);
         if (header == null) throw new IllegalStateException("ledger event without header: " + name);
         return new String(header.value(), StandardCharsets.UTF_8);
     }
