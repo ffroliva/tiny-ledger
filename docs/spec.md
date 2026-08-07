@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.20
+**Version:** 3.21
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -1336,7 +1336,7 @@ indistinguishable from a bug, so the lag is asserted rather than hoped away.
 | E8 | **Full rebuild from the log.** Drop the projection entirely and replay the stream | Rebuilt state is byte-identical to the state before the drop. This is the strongest guarantee event sourcing offers, and the one that makes the design worth its cost |
 | E9 | **Lag gates readiness.** Hold the listener until projection lag exceeds the threshold | The readiness probe reports *not ready*; the instance stops receiving traffic rather than serving stale balances |
 | E10 | **Redis unavailable.** Pause Redis, keep writing | Rate limiting fails **open**, the write still `201`s, and `?consistency=strong` is still exact — Postgres is the record. **The stall must be bounded**: covered by `RedisOutageIT`. Its first run found the write costing **64 seconds**, because the balance cache's Spring Data Redis client had no timeout while the rate limiter's had 250 ms (`docs/performance-findings.md` §3.5) |
-| E11 | **Kafka unavailable.** Stop Kafka, keep writing | Writes still `201`; the projection lags; `?consistency=strong` still returns the correct balance |
+| E11 | **Kafka unavailable.** Pause Kafka, keep writing | Writes still `201`; the projection lags; `?consistency=strong` still returns the correct balance — and the write must not *block* on the broker. Covered by `KafkaOutageIT`. Measured 2026-08-07: **164 ms**, indistinguishable from a healthy write, so ADR 0002's "Kafka is the courier, Postgres is the record" holds under a real outage. Compare E10, which asked the same question of Redis and answered 64 seconds |
 
 **Method:** never `Thread.sleep`. Convergence is asserted with **Awaitility** and a stated timeout;
 the stale window is produced *deliberately* by pausing a listener, so the test observes the lag rather
@@ -1363,8 +1363,8 @@ comm -23 \
   <(grep -rhoE "\b(P|N|E)[0-9]{1,2}\b" src/test ledger-cli/tests | sort -u)
 ```
 
-**Known-open as of v3.20 — the whole expected output of that command, as a set** (it prints them
-lexicographically, so `E11` lands before `E6`): `E6 E7 E9 E11`.
+**Known-open as of v3.21 — the whole expected output of that command, as a set** (it prints them
+lexicographically): `E6 E7 E9`.
 Anything else appearing is a regression: a case that had a label and lost it. `E9` is deferred by decision
 (§14 step 9); the rest are the unplanned rows this pass added deliberately rather than quietly.
 
@@ -1738,3 +1738,4 @@ Javadoc, because a reader checks the spec:
 | 3.18 | 2026-08-07 | **N23 added, and it was a live 500.** A deposit of `9223372036854775807` into an account holding anything at all answered an opaque `500`: `Money.plus`'s `Math.addExact` throws `ArithmeticException`, which is neither a `TinyLedgerException` nor an `ErrorResponse`, so `ErrorHandlingAdvice`'s catch-all claimed it — reachable by any authenticated writer with input the OpenAPI schema admits, and each one an ERROR-level stack trace. Both operators now translate overflow to `InvalidAmountException` (400 `/errors/invalid-amount`), guarded in one place because a guard on `plus` alone is how it survived. Answered 4xx rather than a 422 `MovementRejected`: retrying is pointless, which is what separates the two. The plan carried this as "V3"; it is `N23` because the traceability sweep matches P/N/E and a `@V3` tag was invisible to it |
 | 3.19 | 2026-08-07 | N20 covered at the BDD layer: a `movementUid` reused against a *different* account is a `409` idempotency conflict, the second stream is untouched, and the original movement stands. The difference between a global and a per-stream lookup is only observable across accounts, and a per-stream one satisfies P6 and N11 completely — so nothing tested §6.3's "lookups are global" claim until now. Its red run needed **two** mutations: breaking the service lookup alone leaves all 25 scenarios green because the store's global unique index and the catch at `RecordMovementService:73` answer identically. That is the one case where that catch is load-bearing rather than redundant, confirming `docs/performance-findings.md` §6.7. Known-open narrows to `E6 E7 E9 E11 N22` |
 | 3.20 | 2026-08-07 | N22 covered: opening the same name twice returns two distinct `accountUid`s, each at stream version 1 — two independent streams, not one written twice. Pins §6.3's asymmetry (movement UIDs are client-supplied, account UIDs are server-generated) as a decision with a known cost: a client that retries an open whose response it never saw gets a second account, which is why `ledger-cli`'s `client.py` excludes that one POST from its transport retries. No discriminating mutation is recorded, and the scenario says why: every other scenario reopens `ACC-001`, so any name-based dedup fails ~everything and discriminates nothing. Known-open narrows to `E6 E7 E9 E11` |
+| 3.21 | 2026-08-07 | E11 covered by `KafkaOutageIT`, the control for E10. A write with the broker paused took **164 ms** — indistinguishable from a healthy one — so ADR 0002's separation holds under a real outage: Modulith writes the publication row inside the append transaction and delivers afterwards, and `?consistency=strong` stays exact because it folds the stream rather than the projection. The contrast is the finding: the same question asked of Redis answered **64 seconds** (§3.5). Its bound was tightened 15 s → 2 s *because* of the measurement — a ceiling loose enough to pass either way is not a guard. Known-open is now `E6 E7 E9`, all three deferred by decision |
