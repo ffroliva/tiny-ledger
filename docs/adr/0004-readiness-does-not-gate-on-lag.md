@@ -172,3 +172,92 @@ then gate on the lag that results. The only option under which `E9` is literally
 reverses a decision ratified at v3.5, breaks read-your-writes, makes the two run modes diverge in a way
 §9.2b treats as a defect, and is far outside §14 step 9's scope. Producing a failure mode in order to
 build a guard against it is not an improvement.
+
+---
+
+## Second decision: Actuator's endpoint exposure is assessed per endpoint, not defaulted
+
+Added 2026-08-07 (spec v3.40), when §14 step 9 part 1 was built. It belongs here rather than only in the
+execution plan for the reason `docs/INDEX.md` states: **plans are not contract, ADRs are** — and this is
+the largest attack surface this repository has added since the resource server.
+
+**Verdict: `health` only, and only its two probe groups are reachable.**
+
+| Endpoint | Verdict | Why |
+|---|---|---|
+| `health/liveness`, `health/readiness` | **Open, unauthenticated** | A probe that needs a credential cannot report the outage that took the token issuer away |
+| `health` (root) | **Closed** | The aggregate UP/DOWN tells an unauthenticated caller when the system is degraded — useful for timing an attack, useless to anyone else |
+| `heapdump` | **Never** | Dumps live process memory: balances, bearer tokens, the Redis password. The worst single endpoint in the set |
+| `env`, `configprops` | **Never** | Renders configuration including `issuer-uri` and the datasource URL. A direct §6.5 violation |
+| `loggers` | **Never** | `POST` mutates log level at runtime — a write that could switch on payload logging |
+| `httpexchanges` | **Never** | Recent request/response history, i.e. the PII §6.6 requires logs not to carry |
+| `threaddump` | **Never** | Stack traces and internal paths — §6.5 forbids leaking these even from `/error` |
+| `beans`, `mappings`, `conditions` | **Never** | Internal structure; §6.5's "no internal identifier crosses the API boundary" |
+| `caches` | **Never** | Remote eviction of the balance cache |
+| `shutdown` | **Never** | Remote kill. Off by default — stated so nobody turns it on believing it was an oversight |
+| `info` | **Closed** | Inert today: no `build-info.properties`, no git properties, no `info.*` keys, so it would render `{}`. Closed anyway, because adding the build-info goal is a thing a release pipeline does routinely and would start publishing version and commit SHA with no second decision point |
+| `liquibase`, `auditevents`, `sbom`, `startup`, `scheduledtasks` | **Closed** | No operational need in this system |
+| `metrics`, `prometheus` | **Closed** | Metrics leave over OTLP in part 2. A scrape endpoint is a second path to the same data and a second thing to secure |
+
+The table was **measured, not predicted**. Booting `standalone` with `exposure.include=*` maps twelve
+endpoints — `beans`, `conditions`, `configprops`, `env`, `health`, `info`, `loggers`, `mappings`,
+`metrics`, `sbom`, `scheduledtasks`, `threaddump`. `info` was absent from every draft of this list until
+that run; eight entries above do not exist on this classpath at all and are kept as decisions in advance.
+
+### Two layers, and they do not overlap where you would assume
+
+1. `management.endpoints.web.exposure.include=health` — anything absent is never web-mapped.
+2. `denyAll` on a management-scoped `SecurityFilterChain`, with only the two probe paths permitted.
+
+Layer 1 is a configuration line someone will eventually edit; layer 2 is why that edit stays harmless.
+
+**But layer 1 does not cover the health root.** Exposing `health` is exactly what maps `/actuator/health`,
+and the probe groups are sub-paths of it — there is no exposure setting that yields the groups without the
+root. Measured with layer 2 removed, the root answered `503` rather than `404`. So for the one endpoint
+whose disclosure this ADR most cares about, **`denyAll` is the only defence, not the second one.**
+
+That has a consequence for how it is tested, and it cost a false green to find. `ActuatorProbeTest`
+asserts the other nineteen endpoints as merely *not-200*, correctly: layer 1 answers `404` and layer 2
+answers `403`, and pinning either would turn the security rule into a test that the endpoint was never
+enabled. Applying the same assertion to the root is **vacuous** — under `standalone` it aggregates a
+`redis` contributor that can never be UP, so it answers `503` whether denied or rendered. The root is
+therefore asserted as **`403` exactly**.
+
+### `show-details=never`, for every caller
+
+The probe body is `{"status":"UP"}` and nothing more. No caller — authenticated or not — sees which
+component is down. That is answerable from `ledger.outbox.pending.age.seconds` and the logs, by people who
+already have access to them. The rejected alternative was `when-authorized` behind a new `ledger:operator`
+role: a fourth role, a Keycloak realm change and new authorization tests, for detail those people can
+already reach.
+
+### The separate management port is built, not deferred
+
+An earlier draft of this ADR carried it as an upgrade path behind the trigger *"revisit at deployment to an
+orchestrator"*. **That trigger fired**: ADR 0005 makes Kubernetes the production target, so the split is
+built. Probes bind to `management.server.port=9090`, so a misconfigured endpoint is *unreachable* rather
+than merely denied. Two qualifications, because the obvious version of this sentence claims too much:
+
+- **"Unpublished" is enforced by nothing in this repository.** A NetworkPolicy would enforce it and does
+  not exist.
+- **The address is pinned to loopback in `standalone` only.** `ManagementWebServerFactoryCustomizer`
+  applies `management.server.address` unconditionally, so declaring only the port overwrites the parent
+  bind and would give `standalone` — whose entire safety argument is its loopback bind — a `0.0.0.0`
+  listener. Pinning it in `full` would break every Kubernetes `httpGet` probe, because the kubelet dials
+  the pod IP.
+
+**No gate enforces that `application.properties` declares the port at all.** `ActuatorProbeTest` supplies
+its own `management.server.port=0` to avoid port contention between parallel runs, so deleting the base
+property leaves it green. Named rather than implied, per `AGENTS.md`.
+
+### One guard is provable more cheaply than expected
+
+`spring-boot-starter-data-redis` is an unconditional dependency, so Boot auto-configures
+`RedisHealthIndicator` under `standalone` too — where no Redis exists and none is wanted,
+`RateLimitConfig` using Caffeine there. Its contributor reads DOWN with no container running, which makes
+the `redis`-excluded readiness decision above **provable by violation on the fast `verify` path**: adding
+`redis` to the group reddens exactly two assertions. E10's own coverage needs a real outage under `-Pit`.
+
+The `kafka` exclusion has no equivalent and cannot get one: there is no Kafka health contributor to
+exclude, and naming a non-existent one is a startup failure rather than a no-op. **E11 is protected by a
+framework absence that an upgrade could remove silently.**

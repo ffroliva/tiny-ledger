@@ -65,6 +65,24 @@
 - Realm fixture user `trent` (`ledger:writer` + `ledger:reader` + `ledger:admin`) and the P9 /
   N13–N18 authorisation scenarios, exercised through the real chain against a Keycloak container
   — **Plan 4 (admin on-behalf-of) complete**, spec v3.12.
+- **Actuator liveness and readiness probes, on their own management port** (spec §14 step 9 part 1,
+  §6.6, ADR 0004/0005). `9090`, pinned to loopback in `standalone` only — the kubelet dials the pod
+  IP, so pinning it in `full` would fail every Kubernetes `httpGet` probe. The probes answer without a
+  credential, because one that needs a token cannot report the outage that took the issuer away.
+- **Endpoint exposure assessed per endpoint rather than defaulted**, and closed by two independent
+  layers: `exposure.include=health`, and `denyAll` on a management-scoped security chain. They do not
+  overlap on the health *root* — exposing `health` is what maps it — so `denyAll` is the only thing
+  withholding the aggregate status §6.6 refuses. `heapdump`, `env`, `configprops`, `loggers`,
+  `httpexchanges`, `threaddump` and the rest are unreachable, each for a stated reason.
+- **`ledger.outbox.pending.age.seconds`**, `full` only: the age of the oldest incomplete event
+  publication, excluding `FAILED` rows so one poison row cannot pin the reading forever. **Nothing
+  gates on it** — readiness gating on outbox lag would remove an instance during exactly the Kafka
+  outage `E11` requires the ledger to survive (ADR 0004).
+- `server.shutdown=graceful` — a correctness property for a ledger, not an operational nicety:
+  without it, in-flight writes die mid-request on an ordinary rolling deploy.
+- **`E9` closed, and the §9.3 catalogue now has no open cases for the first time.** `AuditLagIT`
+  pauses the broker, watches the gauge cross §6.6's 5 s threshold, reads the balance back exactly, and
+  asserts readiness stays `UP`.
 
 ### Removed
 - **CI stage 6 and the vendored ISO-compliance skill, deleted rather than repaired.** The script

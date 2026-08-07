@@ -153,7 +153,10 @@ on an account they do not own, but may not read its balance or transactions, and
 Every event records the acting principal as `actor`, so the audit trail carries who acted alongside
 who owns (spec §6.4, §2.3).
 
-**Not yet built:** observability, and the FAPI/DPoP work. The auditor endpoints
+**Not yet built:** tracing, OTLP export, JSON logs and the Collector — the rest of observability, and
+the FAPI/DPoP work. Health probes and the outbox-lag gauge *are* built: `/actuator/health/liveness`
+and `/actuator/health/readiness` answer unauthenticated on management port `9090`, and nothing else
+under `/actuator` is reachable at all (spec §6.6). The auditor endpoints
 `GET /api/v1/accounts/{id}/events` and `GET /api/v1/audit/entries` are `full`-only; in `standalone`
 both answer `501` with a problem detail rather than pretending (spec §6.5, §7).
 
