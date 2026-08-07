@@ -1,0 +1,54 @@
+# The CI-side Collector: OTLP in, the DEBUG exporter out, nothing else.
+#
+# No credential and no third party — which is exactly why §14 step 9's gate is "a Collector receives
+# OTLP" and not "Grafana Cloud receives OTLP". A fork's build passes with no secret at all, and CI
+# gains no dependency on an account it cannot have.
+#
+# ── Why `debug` and not `file`, which is what §9.4 originally named ───────────────────────────────
+# The file exporter was tried first and cost two CI rounds, both for reasons that had nothing to do
+# with telemetry:
+#
+#   1. This image is DISTROLESS and has no /tmp, so the exporter failed at startup with
+#      "open /tmp/otel-out.json: no such file or directory" — while Wait.forListeningPort() passed,
+#      because Docker had published the mapping against a process that had already given up.
+#   2. Mounting a tmpfs at /tmp fixed the startup, and then `docker cp` could not read back through
+#      the tmpfs mount, so the test saw an empty string and blamed the application again.
+#
+# The debug exporter removes the whole class of problem: no filesystem, no mount, no copy. The
+# assertion reads the container's own log, which Testcontainers already captures and which the test
+# already attaches to its failure message. §9.4 is corrected to say so.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  # Short, because the test's whole job is to observe arrival.
+  batch:
+    timeout: 200ms
+
+exporters:
+  debug:
+    # `detailed` is load-bearing, not noise: the default `basic` prints counts only, and the test
+    # asserts on span NAMES and on the ledger.* and service.* attributes. A quieter setting here
+    # would turn four specific assertions into "something arrived".
+    verbosity: detailed
+
+service:
+  telemetry:
+    logs:
+      # `info`, not `warn`, and it is load-bearing twice over: OtlpExportIT waits on the
+      # "Everything is ready" line, and the debug exporter writes its output at info level.
+      level: info
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]

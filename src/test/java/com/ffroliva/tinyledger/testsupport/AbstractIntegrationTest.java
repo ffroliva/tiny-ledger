@@ -5,6 +5,7 @@ import com.redis.testcontainers.RedisContainer;
 import java.time.Duration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -29,6 +30,7 @@ import org.testcontainers.utility.MountableFile;
 @SpringBootTest(classes = TinyLedgerApplication.class)
 @ActiveProfiles("full")
 @AutoConfigureMockMvc
+@Import(ObservabilityTestConfig.class)
 public abstract class AbstractIntegrationTest {
 
     /**
@@ -110,6 +112,15 @@ public abstract class AbstractIntegrationTest {
      * arithmetic; the test itself fails loudly on a 429 (it asserts {@code containsOnly(201, 422)}) rather
      * than reporting a wrong settled/refused split, so a budget mistake cannot read as a ledger defect.
      *
+     * <p><strong>Recounted for {@code ObservabilityIT} (§14 step 9 part 2): alice moves 11 -> 18.</strong>
+     * That class issues <b>7</b> requests, all as {@code alice} and all charged writes — three
+     * {@code openAnAccountAs}, two deposits, one withdrawal and one <em>refused</em> withdrawal, since a
+     * refused write still charges the bucket (the limiter runs ahead of authorisation). Against the
+     * limit of 150 that leaves the {@code ConcurrentWithdrawalIT} arithmetic below unchanged in shape:
+     * its ceiling of 122 plus alice's other 18 is <b>140</b>, so the margin narrows from 19 to <b>10</b>.
+     * Still a proof rather than an estimate, because the retry loop is capped — but it is the number to
+     * re-derive before adding another alice write, and the one to raise this constant for.
+     *
      * <p><strong>Measured, not just bounded:</strong> the first full {@code -Pit} run spent <b>44</b>
      * withdrawal calls on its ten outcomes (34 conflicts), so the real figure sits at about a third of the
      * 122 ceiling. The ceiling is what this constant is sized against anyway — a run under heavier
@@ -135,8 +146,10 @@ public abstract class AbstractIntegrationTest {
      * {@code 10 * 12} = 120 withdrawal attempts, and one strong read. {@code AuditLagIT} adds a fixed
      * <b>3</b> (E9's account, its deposit and one strong read; its readiness assertions go through
      * {@code HealthEndpoint} rather than HTTP and are charged nothing, which is one reason they do).
-     * Enumerated total: 69 - 21 + 151 + 123 + 3 =
-     * <b>325</b>, against the ~300 Awaitility ceiling below for a worst case near <b>625</b> — still
+     * <b>{@code ObservabilityIT} adds a fixed 7</b> (three accounts, two deposits, two withdrawals of
+     * which one is refused; its span assertions read the exporter directly and cost nothing).
+     * Enumerated total: 69 - 21 + 151 + 123 + 3 + 7 =
+     * <b>332</b>, against the ~300 Awaitility ceiling below for a worst case near <b>632</b> — still
      * comfortably inside the 1000 configured here, so this constant is deliberately <em>not</em> raised. The
      * 69/68 accounting below is kept intact because it is the audit trail the recount was done against.
      *
@@ -216,6 +229,21 @@ public abstract class AbstractIntegrationTest {
         // division; a thinned margin here shows up as an intermittent RateLimitIT failure, not as a
         // rate-limiting bug.
         registry.add("ledger.rate-limit.write-per-principal.period", () -> "90m");
+
+        // §14 step 9 part 2. Boot SILENCES telemetry export in tests:
+        // TracingContextCustomizerFactory injects `management.tracing.export.enabled=false` unless
+        // `spring.test.tracing.export` is set — read out of the bytecode of
+        // spring-boot-micrometer-tracing-test-4.1.0, not from documentation. Without it the
+        // InMemorySpanExporter bean is never wired to a processor and §9.4's assertions read an empty
+        // list, which looks exactly like "no spans are produced".
+        //
+        // Supplied as a PROPERTY through this existing source rather than with @AutoConfigureTracing:
+        // the annotation is a per-class declaration and would fork the context, which is precisely what
+        // ADR 0003 §1 forbids and what trap 5 warns costs a whole new set of Kafka consumers.
+        registry.add("spring.test.tracing.export", () -> "true");
+        // The batch span processor's default delay is 5s. Lowered so ObservabilityIT's Awaitility window
+        // is spent waiting for the Kafka hop rather than for a scheduler.
+        registry.add("management.opentelemetry.tracing.export.schedule-delay", () -> "100ms");
 
         registry.add("ledger.rate-limit.ip-backstop.capacity", () -> String.valueOf(RAISED_IP_BACKSTOP_LIMIT));
         registry.add("ledger.rate-limit.ip-backstop.burst", () -> "0");

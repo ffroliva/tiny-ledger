@@ -125,6 +125,46 @@ The integration suite is independent of both — Testcontainers starts its own P
 and Keycloak on random ports, so `./mvnw verify -Pit` exercises the real authenticated path without
 anything running beforehand.
 
+## Telemetry, and why it is off until you ask for it
+
+The application always *creates* spans and meters — that is what puts a trace id and a span id on
+every log line — but it **exports nothing by default**. There is no local Prometheus, Grafana, Tempo
+or Loki here, deliberately: a five-container visualisation stack that most runs never open is a cost
+paid on every `docker compose up` for a benefit taken occasionally (spec §6.6).
+
+Turning it on is one extra Compose profile and one flag on each exporter:
+
+```bash
+set -a; . ./.env.grafana; set +a          # names in .env.example; values never committed
+docker compose -f docker/docker-compose.yml --profile observability up -d
+
+./mvnw spring-boot:run -Dspring-boot.run.profiles=full \
+  -Dspring-boot.run.arguments="\
+    --management.tracing.export.otlp.enabled=true \
+    --management.opentelemetry.tracing.export.otlp.endpoint=http://localhost:4318/v1/traces \
+    --management.otlp.metrics.export.enabled=true \
+    --management.otlp.metrics.export.url=http://localhost:4318/v1/metrics"
+```
+
+Without the profile, `docker compose up` starts exactly the same four containers it always did.
+
+One Collector receives OTLP and forwards to hosted Grafana Cloud. It **tail-samples**: the
+application records 100% of traces because only the Collector can see how a trace *ended*, so every
+error and every request slower than 150 ms is kept and the rest is sampled at 5%. Metrics are never
+sampled — sampling a counter does not thin it, it corrupts it.
+
+**Nothing in CI runs any of this, and CI holds no Grafana credential.** Step 9's gate is
+`OtlpExportIT`, which starts its own Collector with a file exporter and asserts that real spans and
+metrics arrive — so a fork's build passes with no secret and no third-party account. The Compose
+Collector above has **no automated check at all**; it is proven by being run, and saying so is the
+point (`AGENTS.md`: an unenforced rule is a hope).
+
+Two things worth knowing before you debug it. The Grafana OTLP gateway accepts **OTLP/HTTP JSON**, so
+the endpoint can be probed by hand with `curl` and no OpenTelemetry dependency; the application
+itself still uses `http/protobuf`. And a value in `.env.grafana` that contains a space **must be
+quoted** — `Authorization=Basic <token>` sourced unquoted truncates at the space and the Collector
+authenticates with the word `Basic`, which fails as a 401 that looks like a bad token.
+
 ## The engineering, briefly
 
 Event-sourced write side with optimistic concurrency on the stream version, and client-generated

@@ -75,11 +75,31 @@
          application.properties and denied a second time in SecurityConfig — see the endpoint
          assessment in docs/superpowers/plans/2026-08-07-step-9-probes-and-lag-gauge.md. -->
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-actuator</artifactId></dependency>
+    <!-- Spec §6.6 / §14 step 9 part 2. ONE starter, not four: read out of the published POM,
+         spring-boot-starter-opentelemetry (4.1.0) brings micrometer-registry-otlp,
+         micrometer-tracing-bridge-otel and opentelemetry-exporter-otlp, plus
+         spring-boot-micrometer-tracing-opentelemetry and spring-boot-opentelemetry. Every version
+         comes from the Boot BOM (micrometer 1.17.0, micrometer-tracing 1.7.0, opentelemetry 1.62.0),
+         so nothing is pinned here.
+
+         Micrometer Tracing over the OTel BRIDGE, never the OTel Java agent (ADR 0005): domain spans
+         are written explicitly and stay reviewable in the source. Export is off by default in
+         application.properties — the classpath decides what CAN be exported, the properties decide
+         whether anything IS. -->
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-opentelemetry</artifactId></dependency>
     <!-- Spec §1: security is one mechanism with two configurations, not a dependency excluded in
          standalone. SecurityConfig declares a profile-scoped chain for each mode. -->
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-security</artifactId></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-oauth2-resource-server</artifactId></dependency>
     <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-test</artifactId><scope>test</scope></dependency>
+    <!-- §9.4's InMemorySpanExporter. Deliberately NOT spring-boot-starter-opentelemetry-test: that
+         module carries @AutoConfigureTracing and @AutoConfigureMetrics and no in-memory exporter at
+         all, and both annotations change a test's context cache key (AGENTS.md trap 5). The same
+         effect is reached by a property — see AbstractIntegrationTest. -->
+    <dependency><groupId>io.opentelemetry</groupId><artifactId>opentelemetry-sdk-testing</artifactId><scope>test</scope></dependency>
+    <!-- SimpleTracer/SimpleSpan: lets TracedUseCasesTest assert span names and tags with no Spring
+         context and no OTel SDK. Version from the Boot BOM's micrometer-tracing-bom import. -->
+    <dependency><groupId>io.micrometer</groupId><artifactId>micrometer-tracing-test</artifactId><scope>test</scope></dependency>
     <!-- JdbcTemplate only — no JPA anywhere in the adapters, so the JPA starter would just drag
          Hibernate and an eager EntityManagerFactory into the standalone profile. -->
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-jdbc</artifactId></dependency>

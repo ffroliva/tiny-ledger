@@ -93,5 +93,41 @@ services:
       timeout: 5s
       retries: 30
 
+  # §6.6 / §14 step 9 part 3. OFF BY DEFAULT: `profiles` means a plain `docker compose up` still starts
+  # exactly the four services above and this one is not among them. Turn it on with
+  #
+  #     set -a; . ./.env.grafana; set +a
+  #     docker compose -f docker/docker-compose.yml --profile observability up -d
+  #
+  # and point the application at it (export is off in application.properties, so this is deliberate
+  # on both sides):
+  #
+  #     ./mvnw spring-boot:run -Dspring-boot.run.profiles=full \
+  #       -Dspring-boot.run.arguments="\
+  #         --management.tracing.export.otlp.enabled=true \
+  #         --management.opentelemetry.tracing.export.otlp.endpoint=http://localhost:4318/v1/traces \
+  #         --management.otlp.metrics.export.enabled=true \
+  #         --management.otlp.metrics.export.url=http://localhost:4318/v1/metrics"
+  #
+  # The variables are read from the SHELL, exactly as `.mcp.json`'s are — nothing here loads a dotenv
+  # file (AGENTS.md, "Configuration"). A missing variable makes the Collector fail to start, which is
+  # the honest failure: a Collector that starts and silently drops everything is worse than one that
+  # refuses.
+  #
+  # NOTHING IN CI RUNS THIS. Step 9's gate is OtlpExportIT, which starts its own Collector with a file
+  # exporter and no credential at all.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.158.0
+    profiles: [observability]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+      OTEL_EXPORTER_OTLP_HEADERS_AUTHORIZATION: ${OTEL_EXPORTER_OTLP_HEADERS_AUTHORIZATION}
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+
 volumes:
   postgres-data:

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.ffroliva.tinyledger.audit.application.port.out.AuditTrailPort;
+import io.micrometer.tracing.test.simple.SimpleTracer;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Optional;
@@ -32,22 +33,60 @@ class AuditKafkaListenerTest {
 
     // AuditTrailPort has three abstract methods, so it is not a functional interface — a capturing
     // lambda cannot implement it. This fake needs only `record`; the other two are unused here.
-    private final AuditKafkaListener listener = new AuditKafkaListener(new AuditTrailPort() {
-        @Override
-        public void recordEntry(AuditEntry entry) {
-            recorded = entry;
-        }
+    private final SimpleTracer tracer = new SimpleTracer();
 
-        @Override
-        public Page eventStream(UUID accountId, String cursor, int limit) {
-            throw new UnsupportedOperationException();
-        }
+    private final AuditKafkaListener listener = new AuditKafkaListener(
+            new AuditTrailPort() {
+                @Override
+                public void recordEntry(AuditEntry entry) {
+                    recorded = entry;
+                }
 
-        @Override
-        public Page trail(TrailQuery query) {
-            throw new UnsupportedOperationException();
-        }
-    });
+                @Override
+                public Page eventStream(UUID accountId, String cursor, int limit) {
+                    throw new UnsupportedOperationException();
+                }
+
+                @Override
+                public Page trail(TrailQuery query) {
+                    throw new UnsupportedOperationException();
+                }
+            },
+            tracer);
+
+    /**
+     * §6.6's fan-out rule, proved here rather than only in {@code ObservabilityIT}: this needs no
+     * broker, so it fails in seconds on the fast {@code verify} path instead of in minutes under
+     * {@code -Pit}. The IT still asserts the same thing across a real hop, because only that can show
+     * the {@code traceparent} was actually injected by the producer.
+     */
+    @Test
+    void theConsumeSpanLinksToTheProducerAndIsARootRatherThanAChild() {
+        String traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        ConsumerRecord<String, String> record = consumed(Instant.parse("2026-08-10T00:00:00Z"), "trent", null);
+        record.headers().add("traceparent", traceparent.getBytes(StandardCharsets.UTF_8));
+
+        listener.on(record);
+
+        var span = tracer.onlySpan();
+        assertThat(span.getName()).isEqualTo("ledger.audit.record");
+        assertThat(span.getLinks())
+                .as("a child would make the request span last until the slowest consumer finished")
+                .hasSize(1);
+        assertThat(span.getLinks().getFirst().getTraceContext().traceId())
+                .isEqualTo("4bf92f3577b34da6a3ce929d0e0e4736");
+        assertThat(span.getEndTimestamp()).isNotNull();
+    }
+
+    @Test
+    void aRecordWithNoTraceparentStillRecordsItsEntry() {
+        listener.on(consumed(Instant.parse("2026-08-10T00:00:00Z"), "trent", null));
+
+        assertThat(recorded.actor()).isEqualTo("trent");
+        assertThat(tracer.onlySpan().getLinks())
+                .as("telemetry is not a precondition of a compliance entry")
+                .isEmpty();
+    }
 
     @Test
     void aPresentActorHeaderIsStoredVerbatim() {

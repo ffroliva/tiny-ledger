@@ -1,6 +1,9 @@
 package com.ffroliva.tinyledger.audit.adapter.in.events;
 
 import com.ffroliva.tinyledger.audit.application.port.out.AuditTrailPort;
+import io.micrometer.tracing.Link;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Map;
@@ -53,26 +56,62 @@ public class AuditKafkaListener {
     private static final TypeReference<Map<String, Object>> PAYLOAD_FIELDS = new TypeReference<>() {};
 
     private final AuditTrailPort trail;
+    private final Tracer tracer;
 
-    public AuditKafkaListener(AuditTrailPort trail) {
+    public AuditKafkaListener(AuditTrailPort trail, Tracer tracer) {
         this.trail = trail;
+        this.tracer = tracer;
     }
 
+    /**
+     * <strong>The consume span is LINKED to the producing span, not parented by it (§6.6).</strong>
+     * One write fans out to balance, notification and audit concurrently; modelling those as children
+     * of the HTTP span would make the request appear to last until the slowest of them finished, and
+     * would misreport {@code http.server.duration} to every dashboard built on it. A link is the OTel
+     * semantic for asynchronous fan-out, and it keeps the request's own duration honest.
+     *
+     * <p>Which is also why {@code spring.kafka.listener.observation-enabled} is declared {@code false}
+     * rather than left unset: Spring Kafka's listener observation would create exactly the child this
+     * refuses, and an omitted property gives a future reader no way to tell intent from oversight.
+     */
     // Topic literal rather than a shared constant: the audit module consumes this stream as an
     // external contract, not as a compile-time dependency on the publisher.
     @KafkaListener(topics = "ledger.events", groupId = "${spring.kafka.consumer.group-id}")
     public void on(ConsumerRecord<String, String> consumed) {
-        Instant occurredAt = Instant.parse(header(consumed, "occurred-at"));
-        trail.recordEntry(new AuditTrailPort.AuditEntry(
-                UUID.fromString(consumed.key()),
-                header(consumed, "event-type"),
-                Long.parseLong(header(consumed, "stream-version")),
-                occurredAt,
-                // §7's recordedAt: when the audit module saw the event, which is here — the Kafka hop is
-                // exactly the gap between this and occurredAt.
-                Instant.now(),
-                consumed.value(),
-                actorOf(consumed, occurredAt)));
+        Span span = consumeSpan(consumed);
+        try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
+            span.tag("ledger.account_id", consumed.key());
+            span.tag("ledger.stream_version", header(consumed, "stream-version"));
+            Instant occurredAt = Instant.parse(header(consumed, "occurred-at"));
+            trail.recordEntry(new AuditTrailPort.AuditEntry(
+                    UUID.fromString(consumed.key()),
+                    header(consumed, "event-type"),
+                    Long.parseLong(header(consumed, "stream-version")),
+                    occurredAt,
+                    // §7's recordedAt: when the audit module saw the event, which is here — the Kafka hop is
+                    // exactly the gap between this and occurredAt.
+                    Instant.now(),
+                    consumed.value(),
+                    actorOf(consumed, occurredAt)));
+        } catch (RuntimeException e) {
+            span.error(e);
+            throw e;
+        } finally {
+            span.end();
+        }
+    }
+
+    /**
+     * A new root, linked back to the producer — never a child. An absent or malformed
+     * {@code traceparent} yields a span with no link rather than a failure: see {@link TraceparentRef}.
+     */
+    private Span consumeSpan(ConsumerRecord<String, String> consumed) {
+        Span.Builder builder = tracer.spanBuilder().name("ledger.audit.record").setNoParent();
+        Header traceparent = consumed.headers().lastHeader("traceparent");
+        TraceparentRef.parse(traceparent == null ? null : new String(traceparent.value(), StandardCharsets.UTF_8))
+                .map(ref -> ref.toTraceContext(tracer.traceContextBuilder()))
+                .ifPresent(context -> builder.addLink(new Link(context)));
+        return builder.start();
     }
 
     /**

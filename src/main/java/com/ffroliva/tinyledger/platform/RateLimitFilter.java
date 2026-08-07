@@ -185,8 +185,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
         body.setType(URI.create(code.type()));
         body.setTitle(code.title());
         // §6.5/§6.6: the same correlating id ErrorHandlingAdvice and SecurityProblemHandler attach.
-        String traceId = MDC.get("traceId");
-        if (traceId != null) body.setProperty("traceId", traceId);
+        // Read from `interactionId`, published as `traceId`: Micrometer Tracing owns the MDC key
+        // `traceId` since step 9 part 2 and would overwrite this, while the JSON name is contract.
+        String interactionId = MDC.get(FapiInteractionIdFilter.MDC_KEY);
+        if (interactionId != null) body.setProperty("traceId", interactionId);
         response.setStatus(code.status());
         response.setHeader("Retry-After", String.valueOf(retryAfterSeconds));
         response.setContentType("application/problem+json");
