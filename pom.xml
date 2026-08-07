@@ -156,7 +156,29 @@
         named -exec (see scripts/e2e/run-e2e.sh).
       -->
       <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId>
-        <configuration><classifier>exec</classifier></configuration></plugin>
+        <configuration>
+          <classifier>exec</classifier>
+          <!--
+            Issue #11 / spec §12. Buildpacks, not a Dockerfile: the image is layered by construction
+            and there is no base image for this repository to patch and forget.
+
+            `image.name` is pinned to a local, unqualified name ON PURPOSE. Nothing publishes it —
+            stage 12 is a separate, unbuilt decision (§12.1) — so a registry-qualified name here would
+            imply a push that does not happen.
+
+            The classifier above is why this needs saying: build-image consumes the REPACKAGED jar,
+            and this project deliberately gives that jar an `exec` classifier so the plain jar stays
+            usable as a dependency by benchmarks/. Getting this wrong produces an image that builds
+            cleanly and fails at startup with a missing main class.
+
+            NO <executions>: nothing binds build-image to a lifecycle phase, for the same reason
+            sonar-maven-plugin and dependency-check-maven below carry none. `verify` must start ZERO
+            containers (ADR 0003) and build-image drives a Docker daemon build.
+          -->
+          <image>
+            <name>tiny-ledger:${project.version}</name>
+          </image>
+        </configuration></plugin>
       <plugin>
         <groupId>org.openapitools</groupId><artifactId>openapi-generator-maven-plugin</artifactId><version>${openapi-generator.version}</version>
         <executions><execution><goals><goal>generate</goal></goals>

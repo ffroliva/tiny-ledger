@@ -136,18 +136,46 @@ Expected: an image is listed. **First run pulls the builder and takes several mi
 A wrong jar produces an image that builds fine and dies on startup, so building is not the test.
 
 ```bash
-docker run --rm -d --name tl-smoke -p 18080:8080 tiny-ledger:0.1.0-SNAPSHOT
-until curl -sf http://127.0.0.1:18080/actuator/health >/dev/null 2>&1 || [ $((i++)) -gt 60 ]; do sleep 2; done
-docker logs tl-smoke 2>&1 | tail -20
+docker run --rm -d --name tl-smoke -p 18080:8080 -p 19090:9090 \
+  -e SERVER_ADDRESS=0.0.0.0 -e MANAGEMENT_SERVER_ADDRESS=0.0.0.0 \
+  tiny-ledger:0.1.0-SNAPSHOT
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:19090/actuator/health/readiness   # 200
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:19090/actuator/health             # 403
 docker rm -f tl-smoke
 ```
 
 Expected: the banner and `Started TinyLedgerApplication`. The default profile is `standalone`
 (`spring.profiles.default`), so it needs no database.
 
-**Note the management port.** `application.properties` pins `management.server.port=9090`, so
-`/actuator/health` is on **9090**, not 8080 — publish both or curl 9090. If the health check 404s on
-8080 that is the reason, and it is not an image fault.
+**CORRECTED 2026-08-08, on the first real run — this step was wrong in two ways, and both would have
+read as an image fault.** The draft curled `/actuator/health` on a published `8080` and expected
+success. Measured, that gives 404 on 8080 and *nothing at all* on 9090:
+
+1. **The management port is 9090** (`application.properties:79`), so 8080 was never going to answer.
+   That much the draft already said.
+2. **Under `standalone` BOTH listeners bind loopback** — `application-standalone.properties` sets
+   `server.address=127.0.0.1` *and* `management.server.address=127.0.0.1`, deliberately: §6.1 makes
+   loopback-only binding part of why an unauthenticated mode is safe. Inside a container that means a
+   published port reaches nothing. `SERVER_ADDRESS` / `MANAGEMENT_SERVER_ADDRESS` are the override,
+   and they are needed **only for this smoke test** — Task 3 runs `full`, where neither address is
+   pinned and the ports are reachable as published. Do **not** weaken the `standalone` properties to
+   make a smoke test convenient.
+3. **`/actuator/health` answers 403, not 200**, and that is the correct answer: exposure is locked to
+   `health` and the root is `denyAll` (§6.6). Probe **`/actuator/health/readiness`**. A checker that
+   accepts "any 2xx on the root" would be asserting the opposite of the security property.
+
+`curl -sf` hides all of this — it exits non-zero on 403 and 404 alike, so the two are
+indistinguishable from a container that never started. Print the code.
+
+**Measured on the first run (no AOT cache yet, so this is Task 2's baseline):**
+
+```
+9090 /actuator/health/readiness -> 200 {"status":"UP"}
+9090 /actuator/health/liveness  -> 200 {"status":"UP"}
+9090 /actuator/health           -> 403        <- denyAll, as §6.6 requires
+8080 /actuator/health           -> 404        <- management is on 9090
+Started TinyLedgerApplication in 7.161 / 6.318 / 6.285 s   (mean 6.588 s, 3 runs)
+```
 
 - [ ] **Step 5: Commit**
 
