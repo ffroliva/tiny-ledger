@@ -63,7 +63,8 @@ resource server, so the reasoning is recorded here rather than left in a propert
 | Endpoint | Verdict | Why |
 |---|---|---|
 | `health/liveness`, `health/readiness` | **Open, unauthenticated** | A probe that needs a credential cannot report the outage that took the issuer away |
-| `health` (root) | **Closed** | Aggregate UP/DOWN tells an unauthenticated caller when the system is degraded — useful for timing an attack, useless to anyone else |
+| `health` (root) | **Closed — by layer 2 ONLY** | Aggregate UP/DOWN tells an unauthenticated caller when the system is degraded — useful for timing an attack, useless to anyone else. **`include=health` does not hide it**: measured 2026-08-07, the root answers `503` on the management port with exposure at `health`. Only `denyAll` closes it. See the correction under Step 5 |
+| `info` | **Closed** | Measured, not predicted: it is one of the 12 endpoints this classpath actually maps and it was absent from this table until Step 4 enumerated it. Boot's default `info` contributors are inert here (no `build-info.properties`, no git properties, no `info.*` keys), so it would render `{}` today — which is exactly why it must be decided rather than left: adding the build-info goal, a thing a release pipeline routinely does, would start publishing version and commit SHA to an unauthenticated caller with no second decision point |
 | `heapdump` | **Never** | Dumps live process memory: balances, bearer tokens, the Redis password. The worst single endpoint in the set |
 | `env`, `configprops` | **Never** | Renders configuration including `issuer-uri` and the datasource URL. A direct §6.5 violation |
 | `loggers` | **Never** | `POST` mutates log level at runtime — a write operation that could switch on payload logging |
@@ -78,10 +79,18 @@ resource server, so the reasoning is recorded here rather than left in a propert
 **Two independent layers, and both are load-bearing:**
 
 1. `management.endpoints.web.exposure.include=health` — anything else is never web-mapped at all.
-2. `denyAll` on `/actuator/**` in the security chain, with only the two probe paths permitted.
+2. `denyAll` on the management chain, with only the two probe paths permitted.
 
 Layer 1 is a configuration line someone will eventually edit. Layer 2 is why that edit stays harmless:
 exposing an endpoint by configuration does not open it to any valid token. Neither alone is sufficient.
+
+**And they do not overlap the way an earlier draft of this plan assumed.** Layer 1 covers the other
+eleven endpoints; it does **not** cover the health root, because `include=health` exposes the health
+endpoint *and* its groups are sub-paths of it. Measured 2026-08-07 (Step 5): with exposure at `health`
+and no management chain yet, `/actuator/health` answered `503` — reachable, and rendering the aggregate
+status §6.6 refuses to give an unauthenticated caller. **The root is closed by layer 2 alone.** That
+makes Task 2 the only thing standing between this configuration and a §6.6 violation, rather than the
+belt to layer 1's braces.
 
 **Health detail is `never`, for everyone.** The probe body is `{"status":"UP"}` and nothing more. No
 caller — authenticated or not — sees which component is down. Which component *is* down is answerable
@@ -208,48 +217,91 @@ Append to `src/main/resources/application-full.properties`:
 management.endpoint.health.group.readiness.include=readinessState,db
 ```
 
-- [ ] **Step 4: Measure the real endpoint surface before trusting the assessment**
+- [ ] **Step 4: Measure the real endpoint surface before trusting the assessment — DONE 2026-08-07**
 
 The exposure table above was written from knowledge of Boot's endpoint set, not from this classpath.
-Boot's endpoints shift between versions, and a decision about attack surface should be made against
-what this application actually maps. Enumerate it — **on a throwaway commit you will revert**:
+Enumerate it, passing the override on the command line so no file needs reverting:
 
 ```bash
-# TEMPORARY — do not commit this line
-management.endpoints.web.exposure.include=*
+./mvnw -q package -DskipTests
+SPRING_PROFILES_ACTIVE=standalone java -jar target/tiny-ledger-0.1.0-SNAPSHOT-exec.jar \
+  --management.endpoints.web.exposure.include='*' &
+# probes are on the MANAGEMENT port, not 8080
+curl -s http://127.0.0.1:9090/actuator
 ```
 
-```bash
-./mvnw -q spring-boot:run -Dspring-boot.run.profiles=standalone &
-sleep 25
-curl -s http://127.0.0.1:8080/actuator | python -c "import json,sys; print('\n'.join(sorted(json.load(sys.stdin)['_links'])))"
-kill %1
-```
+**Measured, Boot 4.1.0, `standalone`: `Exposing 12 endpoints beneath base path '/actuator'` —**
+`beans`, `conditions`, `configprops`, `env`, **`info`**, `health`, `loggers`, `mappings`, `metrics`,
+`sbom`, `scheduledtasks`, `threaddump`.
 
-Record the output in the commit message. **Compare it against the assessment table**: any endpoint
-listed there that does not appear is fine, but any endpoint that appears and is *not* in the table is
-an unassessed one — decide it explicitly and add a row, rather than letting `include=health` hide it
-by luck. `git checkout` the properties file afterwards.
+Against the assessment table: **`info` appears and was not in it.** That is precisely the case this
+step exists to catch, and it has been decided and added above rather than left to `include=health` to
+hide by luck. Eight table entries do not appear on this classpath at all — `heapdump`, `httpexchanges`,
+`caches`, `shutdown`, `liquibase`, `auditevents`, `startup`, `prometheus` — which is fine, but note the
+enumeration ran under `standalone`; `liquibase` and `caches` are classpath- and profile-conditional and
+could appear under `full`. Both are already assessed, so neither would be an unassessed surface.
 
-- [ ] **Step 5: Verify the property names against the shipped jar rather than trusting this plan**
+Also measured, and absent from every draft of this table: the health **contributors** are `diskSpace`,
+`livenessState`, `ping`, `readinessState`, `redis` and `ssl`. Nothing needed to change, but see Step 5
+for what `redis` turns out to prove.
+
+- [ ] **Step 5: Verify the property names against the running application — DONE 2026-08-07, and it corrected two claims**
 
 With exposure back to `health`:
 
 ```bash
-./mvnw -q spring-boot:run -Dspring-boot.run.profiles=standalone &
-sleep 25
-for p in health/liveness health/readiness health metrics env heapdump; do
+SPRING_PROFILES_ACTIVE=standalone java -jar target/tiny-ledger-0.1.0-SNAPSHOT-exec.jar &
+for p in health/liveness health/readiness health info metrics env heapdump; do
   printf '%s -> ' "$p"
-  curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:8080/actuator/$p"
+  curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:9090/actuator/$p"
 done
-kill %1
 ```
 
-Expected: `200`, `200`, then `404` for the remaining four. **A `404` on either probe means the
-property names are wrong, not that the feature is absent** — fix them here before continuing, and
-correct this plan's Step 2 in the same commit so the next reader is not misled. Note that
-`/actuator/health` returning 404 at this point is layer 1 doing its job; Task 2 adds layer 2 so it
-stays closed even if layer 1 is later widened.
+**Measured:**
+
+```
+health/liveness  -> 200   {"status":"UP"}
+health/readiness -> 200   {"status":"UP"}
+health           -> 503   <-- NOT 404. This plan predicted 404.
+info metrics env heapdump beans loggers threaddump configprops mappings
+conditions sbom scheduledtasks prometheus caches shutdown liquibase
+auditevents startup httpexchanges  -> 404 (all)
+```
+
+Port 8080: every `/actuator/**` path answers `404`. Listeners: `127.0.0.1:8080` and `127.0.0.1:9090`,
+so `management.server.address` in `application-standalone.properties` is doing its job — without it the
+management listener would have come up on `0.0.0.0`.
+
+**Correction 1 — the health root is not covered by layer 1.** This plan said "`/actuator/health`
+returning 404 at this point is layer 1 doing its job." It returns **503**. `include=health` exposes the
+health endpoint, and the probe groups are sub-paths *of* it; there is no exposure setting that yields
+the groups without the root. So with Task 1 alone, an unauthenticated caller on the management port can
+read the aggregate status §6.6 refuses to give them. The exposure table and the two-layer argument above
+are corrected. **Task 2 is not defence in depth for the root — it is the only defence.**
+
+**Correction 2 — the 503 has a cause worth keeping.** Root health in `standalone` is permanently DOWN:
+
+```json
+{"redis":{"status":"DOWN","details":{"error":"RedisConnectionFailureException: Unable to connect"}}}
+```
+
+`spring-boot-starter-data-redis` is an unconditional dependency (`pom.xml:81`), so Boot auto-configures
+`RedisHealthIndicator` in **both** run modes — including the one that has no Redis and does not want
+one, because `RateLimitConfig` uses Caffeine there. Two consequences:
+
+- **The `redis` exclusion from the readiness group is now provable, cheaply, on the fast path.** Adding
+  `redis` to `management.endpoint.health.group.readiness.include` turns `standalone` readiness `DOWN`
+  with no container running at all. That is a better red proof than Task 4's, and unlike the `kafka`
+  case it actually executes — use it in Task 2 to pin the exclusion E10 depends on.
+- `noOtherActuatorEndpointIsReachable`'s `"health"` case answers 503 today and passes for the wrong
+  reason. Before Task 2 it would **fail** on any machine with a Redis on 6379. After Task 2 it is 403
+  unconditionally. Do not read a green on that case until layer 2 exists.
+
+**A `404` on either probe would have meant the property names were wrong, not that the feature was
+absent.** They were right. So were the three identity properties: `configprops` shows
+`management.observations` binding to `ObservationProperties.keyValues` with `service.namespace` and
+`service.instance.id` both populated, and the boot log carries `[tiny-ledger]` from
+`spring.application.name`. Those were bytecode readings until this step; they are now observations.
 
 - [ ] **Step 6: Run the fast gate**
 
@@ -342,7 +394,7 @@ void theReadinessProbeAnswersWithoutACredential() {
  */
 @ParameterizedTest
 @ValueSource(strings = {
-    "health", "metrics", "prometheus", "env", "configprops", "beans", "mappings",
+    "health", "info", "metrics", "prometheus", "env", "configprops", "beans", "mappings",
     "heapdump", "threaddump", "loggers", "httpexchanges", "auditevents", "caches",
     "conditions", "shutdown", "liquibase", "sbom", "startup", "scheduledtasks"
 })
@@ -460,11 +512,39 @@ many entries — `env`, `heapdump`, `configprops` and the rest now answer 200. R
 `include=*`, re-run: expected **green**, every entry now 403 rather than 404. That green is the proof
 layer 2 stands on its own. Then restore `include=health`.
 
-**Layer permit:** delete the two `permitAll` matchers, re-run, confirm the probe tests go 401, restore.
+**Layer permit:** delete the two `permitAll` matchers, re-run, confirm the probe tests stop answering
+200, restore.
 
-Record both run results in the commit message. A test that cannot fail is not coverage
-(`AGENTS.md` trap 4), and here the same file holds one test that could not fail for a reason the other
-tests do not share.
+**The health ROOT specifically.** It is the one entry in the `@ValueSource` that layer 1 does not cover
+(Task 1 Step 5, correction 1) and the one an over-clever refactor would reopen: replacing the two
+literal `permitAll` matchers with `EndpointRequest.to(HealthEndpoint.class)` permits the root along
+with its groups. Make that edit, re-run, and confirm `noOtherActuatorEndpointIsReachable("health")`
+goes **200 and fails**. Restore the literal matchers. This is the cheapest available proof that the
+§6.6 posture survives the refactor most likely to be attempted on this code.
+
+**And pin the `redis` exclusion while you are here — it is provable now and nothing else proves it.**
+Task 1 Step 5 measured that `RedisHealthIndicator` is auto-configured under `standalone`, where no
+Redis exists, so it reads DOWN with no container running. Add:
+
+```java
+/**
+ * ADR 0004 / E10: the ledger must keep serving while Redis is down, so `redis` is deliberately not in
+ * the readiness group. Under standalone there is no Redis at all and its contributor reads DOWN —
+ * which makes this the one assertion in the suite that fails the moment someone "completes" the group.
+ */
+@Test
+void redisBeingDownDoesNotMakeTheInstanceUnready() {
+    assertThat(statusOfManagement("health/readiness")).isEqualTo(200);
+}
+```
+
+Prove it: add `redis` to `management.endpoint.health.group.readiness.include`, re-run, confirm this
+test fails with 503, remove it. That red costs one property edit and no containers — where E10's own
+coverage needs a real Redis outage under `-Pit`.
+
+Record every run result in the commit message. A test that cannot fail is not coverage
+(`AGENTS.md` trap 4), and this file holds several that could not fail for reasons the others do not
+share.
 
 - [ ] **Step 6: Commit**
 
