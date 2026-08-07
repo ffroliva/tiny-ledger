@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.31
+**Version:** 3.32
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -23,7 +23,7 @@ codebase**:
 | Mode | Command | What runs | Purpose |
 |---|---|---|---|
 | **`standalone`** (default) | `./mvnw spring-boot:run` | In-memory event store, in-memory cache, no auth, no broker. Binds `127.0.0.1` only; the startup banner prints `AUTH DISABLED (standalone)`. **JDK 25** is the only prerequisite. | The brief's runtime in one command: clone, run, curl the APIs. The scope beyond the brief is a recorded, deliberate choice (`agentic-workflow.md` §6) — an accepted submission risk, not claimed compliance. |
-| **`full`** | `docker compose -f docker/docker-compose.yml up -d`, then `./mvnw spring-boot:run -Dspring-boot.run.profiles=full` — **two steps: the app is not a Compose service** (§12) | **Built:** PostgreSQL, Kafka (KRaft, no ZooKeeper), Redis — see `docker/docker-compose.yml`; the jar runs on the host against their published ports. **Keycloak is built as an integration but absent from Compose:** the realm, the resource server and role enforcement are delivered (§6.4, §14 step 8) and every IT runs against a real Keycloak container, but `docker-compose.yml` declares no Keycloak service — so a hand-run `full` boot must supply its own issuer via `LEDGER_ISSUER_URI` (`application-full.properties:15`), whose default `localhost:8081` nothing in this repository serves. **Specified, not yet built:** an OTel Collector, Prometheus, Grafana, Tempo, Loki — §14 step 9 adds them. | The production-shaped system. |
+| **`full`** | `docker compose -f docker/docker-compose.yml up -d`, then `./mvnw spring-boot:run -Dspring-boot.run.profiles=full` — **two steps: the app is not a Compose service** (§12) | **Built:** PostgreSQL, Kafka (KRaft, no ZooKeeper), Redis — see `docker/docker-compose.yml`; the jar runs on the host against their published ports. **Keycloak is built as an integration but absent from Compose:** the realm, the resource server and role enforcement are delivered (§6.4, §14 step 8) and every IT runs against a real Keycloak container, but `docker-compose.yml` declares no Keycloak service — so a hand-run `full` boot must supply its own issuer via `LEDGER_ISSUER_URI` (`application-full.properties:15`), whose default `localhost:8081` nothing in this repository serves. **Observability, §14 step 9:** the Actuator probes and OTLP instrumentation ship inside the application, and the telemetry backend is an **opt-in** Compose profile carrying an OTel Collector *alone* — the default `up` is unchanged, and there is deliberately no Prometheus, Grafana, Tempo or Loki service (§6.6). | The production-shaped system. |
 
 Both modes run the **same domain code and the same core ledger API** — the two auditor operations
 are `full`-only (§7), a declared profile-gated exclusion from parity, not an adapter difference.
@@ -854,12 +854,34 @@ accident.
 ### 6.6 Observability
 
 **OpenTelemetry is the single instrumentation API for all three signals.** Traces, metrics and logs
-are emitted via OTLP to an OTel Collector, which fans out to Tempo, Prometheus and Loki. The
-application knows only OTLP; swapping a backend is Collector configuration, not a code change.
+are emitted via OTLP to an OTel Collector, which forwards them to whatever backend the operator has
+configured. The application knows only OTLP; swapping a backend is Collector configuration, not a
+code change.
 
 Instrumentation is Micrometer + Micrometer Tracing with the OTel bridge — the Spring Boot-native
 path — rather than the standalone Java agent, so domain spans are written explicitly and stay
 reviewable in the source.
+
+**Domain spans are added by decoration, not by annotation.** `UseCaseConfig` already wraps every
+command use case in a `TransactionalUseCaseDecorator` (§4.5), and the use-case span decorator is the
+same shape in the same place. This is what keeps §9.2's framework-free application layer intact: no
+Micrometer type is imported by `..application..`, exactly as no `@Transactional` is. Event-append
+spans live in the store adapters and projection-apply spans on `LedgerEventsListener`, both of which
+are adapters where framework coupling is already allowed.
+
+**The backend is opt-in, and it is not local.** The Collector is a single Compose service behind a
+`profiles: [observability]` key, so the default `docker compose up` is unchanged and still starts
+four containers. It forwards to **Grafana Cloud** over OTLP, addressed by
+`GRAFANA_CLOUD_OTLP_ENDPOINT` and a token supplied as environment variables (§1.5, `.env.example`).
+The posture is the one the `load` profile already takes: a five-container visualisation stack that
+most runs never open is a cost paid on every `up` for a benefit taken occasionally.
+
+With the profile inactive, **OTLP export is off by default** — `management.otlp.*.export.enabled` is
+`false` in the base configuration. Spans and meters are still *created*, so `trace_id` and `span_id`
+still reach every log line and the §9.4 assertions still have something to read; nothing is shipped,
+and nothing fills the log with failed-export retries against a port no one is listening on. Turning
+the Collector on means starting the profile and flipping one variable, and the README documents it
+rather than implying it.
 
 #### Trace context across async boundaries — the part that usually breaks
 
@@ -886,9 +908,9 @@ asynchronous fan-out, and it keeps `http.server.duration` honest.
 | Signal | Content |
 |---|---|
 | **Spans** | HTTP (auto), use-case execution, event append with `expectedVersion`, projection apply, Kafka produce/consume, Redis, Postgres. Domain attributes on every one: `ledger.account_id`, `ledger.stream_version`, `ledger.movement_type`, `ledger.rejection_reason` |
-| **Metrics** | RED per endpoint, USE per resource. Domain: movements/sec by type, **rejection rate by reason**, **concurrency-conflict rate**, **projection lag (seconds)**, cache hit ratio, rate-limit rejections, idempotent-replay count |
+| **Metrics** | RED per endpoint, USE per resource. Domain: movements/sec by type, **rejection rate by reason**, **concurrency-conflict rate**, **`ledger.audit.lag.seconds`** (the outbox/audit-consumer gauge — *not* projection lag, which is structurally zero here; see Health below), cache hit ratio, rate-limit rejections, idempotent-replay count |
 | **Logs** | Structured JSON via `structlog`-equivalent (Logstash encoder), no PII, every line carrying `trace_id` and `span_id` |
-| **Exemplars** | Prometheus exemplars link a latency histogram bucket directly to a sampled trace — click the p99 spike, land on the request that caused it |
+| **Exemplars** | **Specified, not delivered.** Prometheus exemplars link a latency histogram bucket directly to a sampled trace — click the p99 spike, land on the request that caused it. They are a feature of Micrometer's *Prometheus* registry; this application exports metrics over OTLP and publishes no scrape endpoint, and there is no flag that turns them on along that path. Recorded as absent rather than carried as a promise nothing is building |
 
 Semantic conventions are the OTel standard ones (`messaging.*`, `db.*`, `http.*`); domain attributes
 use a `ledger.*` prefix so they never collide with a future convention.
@@ -897,16 +919,42 @@ use a `ledger.*` prefix so they never collide with a future convention.
 containing an error, a `409`, a `422` or a duration over p99. Sampling that discards the interesting
 traces is the same as no tracing.
 
-**Health:** liveness and readiness are separate. Readiness gates on event-store reachability **and
-projection lag under threshold**, so an instance whose read models have fallen behind stops taking
-traffic instead of serving stale balances. **The numbers, so E2/E9 are implementable:** projection
-lag SLO is **p99 < 2 s** steady-state; the readiness threshold is **5 s**. Both are configuration,
-not constants — but they are the defaults the tests assert.
+**Health:** liveness and readiness are separate, and what each group *contains* is a decision here
+rather than a default.
+
+| Probe | Group contains | Why |
+|---|---|---|
+| `liveness` | `livenessState` | A liveness probe that fails on a dependency restarts a process that was working |
+| `readiness` | `readinessState` + `db` | Event-store reachability. In `full` the event store **is** Postgres, so Boot's `db` indicator is that check; in `standalone` the store is in-memory and the group is `readinessState` alone |
+| — | **`redis` and `kafka` deliberately excluded** | Boot auto-configures an indicator for each, and the default grouping would pull them in. Leaving them would contradict **E10** and **E11**, which require the ledger to keep answering — and `?consistency=strong` to stay exact — while Redis or Kafka is down. An instance that removed itself from service during a broker outage would fail two cases this suite already passes |
+
+**Readiness does not gate on lag, and the reason is architectural rather than a preference.** This
+section said the opposite through v3.31, and `E9` was written against it. It cannot hold here: the
+balance projection is a synchronous `@EventListener` on the publishing thread inside the write
+transaction — the trace-context table above says so four paragraphs earlier, and §4.3 ratified it —
+so balance-projection lag is structurally **zero**, not merely small. The harm the old wording named,
+*"serving stale balances"*, has no mechanism that can produce it.
+
+The lag that genuinely exists is on the Kafka leg: the outbox (`event_publication`, migration `004`)
+and the audit consumer reading behind it. That lag makes the **audit trail** stale, not balances —
+and gating readiness on it would take every instance out of service during precisely the Kafka
+outage **E11** requires the ledger to survive. So it is **measured and not gated**:
+`ledger.audit.lag.seconds` is a gauge over the age of the oldest incomplete publication, `full` only,
+because `standalone` has no such table.
+
+**The numbers survive as alerting thresholds, relabelled to what they actually describe:**
+audit-trail lag SLO **p99 < 2 s** steady-state, **5 s** the level worth paging on. Both are
+configuration, not constants, and they are the defaults `E9` asserts. **No probe and no gate consumes
+them** — they are inputs to an alert this repository does not ship, and naming that is the point
+(`AGENTS.md`: an unenforced rule is a hope). [`adr/0004-readiness-does-not-gate-on-lag.md`](adr/0004-readiness-does-not-gate-on-lag.md)
+records the decision and the two cases that forced it.
 
 **Observability is tested, not assumed** (§9.4): integration tests assert with an
 `InMemorySpanExporter` that a withdrawal produces the expected span tree, that `traceparent` survives
 the Kafka hop, and that a `MovementRejected` increments the rejection counter with the right reason
-tag. Untested instrumentation rots into dashboards full of zeroes.
+tag. One test goes further and asserts telemetry actually **leaves the process** — a Collector
+container with a file exporter receives real spans and metrics over OTLP — which is the closest a
+build can get to "the dashboard works". Untested instrumentation rots into dashboards full of zeroes.
 
 ---
 
@@ -1056,7 +1104,7 @@ build already runs.
 | Quadrant | Where it lives today | Answers |
 |---|---|---|
 | **Tutorial** — learning | `README.md` | "I have never seen this before. Get me to a working ledger." |
-| **How-to** — a task | *Nothing written* | "Projection lag is alerting. What do I do?" |
+| **How-to** — a task | *Nothing written* | "Audit-trail lag is alerting. What do I do?" |
 | **Reference** — facts | `docs/api/openapi.yaml` | "What exactly does this endpoint return?" |
 | **Explanation** — why | `docs/spec.md`, `docs/architecture.md`, `docs/adr/`, `docs/agentic-workflow.md` | "Why Postgres and not Kafka as the event store?" |
 
@@ -1065,8 +1113,10 @@ The most common documentation failure is a single file trying to be all four. Th
 **The How-to quadrant is empty, and the directory that used to stand in for it is gone.** `docs/`
 carried `how-to/` and `tutorial/` trees holding nothing but `.gitkeep`, routed to from `INDEX.md`. An
 empty directory a router points at is worse than an acknowledged absence: it costs a reader a click
-to learn nothing. A runbook belongs with the observability stack (§14 step 9), which is unbuilt —
-there is no live projection lag to respond to yet.
+to learn nothing. A runbook belongs with the observability stack (§14 step 9). Step 9 gives the
+gauges a value, but **nothing alerts on them** (§6.6) — so the how-to this quadrant wants still has no
+trigger to describe, and it stays unwritten and stays named as absent rather than being filled with a
+procedure nobody can be paged into.
 
 ### 8.2 Generated, not written
 
@@ -1337,7 +1387,7 @@ indistinguishable from a bug, so the lag is asserted rather than hoped away.
 | E7 | **Restart replays incomplete publications.** Kill the app mid-publication, restart | Spring Modulith's incomplete-publication retry completes the delivery; the projection converges without manual intervention. Covered by `scripts/e2e/restart-replay.sh`, where the application is a real OS process and can actually be `kill -9`'d — no shutdown hook, no graceful drain. Measured 2026-08-07: deposit `201` with Kafka paused → 1 `event_publication` row → process killed, **row survives the process** → restart → row drains to 0 and the entry reaches the trail, unaided. **Not wired into CI stage 9**: killing and restarting a process is a different shape of job from the scenario suite, and adding a stage is a decision to take deliberately |
 | E12 | **An in-flight publication survives a broker outage.** Pause Kafka, write a movement | The `event_publication` row *stays on disk* for the duration — with `completion-mode=DELETE` a surviving row is an incomplete one — and the delivery completes with no manual intervention once the broker returns. This is E7's precondition: if the work were not durable at that instant there would be nothing for a restart to replay, whatever the restart did. It does **not** attribute the recovery to the restart hook — the producer's own in-flight send can complete it |
 | E8 | **Full rebuild from the log.** Drop the projection entirely and replay the stream | Rebuilt state is byte-identical to the state before the drop. This is the strongest guarantee event sourcing offers, and the one that makes the design worth its cost |
-| E9 | **Lag gates readiness.** Hold the listener until projection lag exceeds the threshold | The readiness probe reports *not ready*; the instance stops receiving traffic rather than serving stale balances |
+| E9 | **Lag is visible and does not gate.** Pause the audit consumer, keep writing | `ledger.audit.lag.seconds` climbs past the 5 s threshold while balances stay exact and `readiness` stays **UP**. **Rewritten at v3.32.** The original row asked the readiness probe to shed traffic on projection lag; that behaviour cannot occur here, because the balance projection is synchronous on the write thread (§4.3) and its lag is structurally zero — and gating on the lag that *does* exist would contradict E11 directly. §6.6 and `adr/0004` carry the reasoning |
 | E10 | **Redis unavailable.** Pause Redis, keep writing | Rate limiting fails **open**, the write still `201`s, and `?consistency=strong` is still exact — Postgres is the record. **The stall must be bounded**: covered by `RedisOutageIT`. Its first run found the write costing **64 seconds**, because the balance cache's Spring Data Redis client had no timeout while the rate limiter's had 250 ms (`docs/performance-findings.md` §3.5) |
 | E11 | **Kafka unavailable.** Pause Kafka, keep writing | Writes still `201`; the projection lags; `?consistency=strong` still returns the correct balance — and the write must not *block* on the broker. Covered by `KafkaOutageIT`. Measured 2026-08-07: **164 ms**, indistinguishable from a healthy write, so ADR 0002's "Kafka is the courier, Postgres is the record" holds under a real outage. Compare E10, which asked the same question of Redis and answered 64 seconds |
 
@@ -1366,18 +1416,23 @@ comm -23 \
   <(grep -rhoE "\b(P|N|E)[0-9]{1,2}\b" src/test ledger-cli/tests scripts/e2e | sort -u)
 ```
 
-**Known-open as of v3.26: `E9` alone.** Every other case in this catalogue has a test.
+**Known-open as of v3.32: `E9` alone**, and at v3.32 its state changed in *kind*. Every other case in
+this catalogue has a test.
 
-`E9`'s deferral was **checked rather than inherited**, on 2026-08-07, because it had been repeated as
-"deferred by decision (§14 step 9)" for a dozen revisions without anyone re-reading it. It holds, and for
-a stronger reason than "decision": the feature does not exist. There is no readiness probe, no health
-indicator and no projection-lag gauge in `src/main/java`, and no `management.*` or Actuator
-configuration anywhere — §8.1 already says the observability stack is unbuilt and "there is no live
-projection lag to respond to yet". A test for `E9` would assert against nothing.
+Through v3.31 `E9` was open because **the feature was absent**. That was checked rather than inherited
+on 2026-08-07 (v3.26), after the deferral had been repeated as "deferred by decision (§14 step 9)" for
+a dozen revisions without anyone re-reading it: there was no readiness probe, no health indicator and
+no lag gauge in `src/main/java`, and no `management.*` or Actuator configuration anywhere. A test would
+have asserted against nothing. Verified differentially per `AGENTS.md` trap 7, because the finding was
+an *absence*: the identical search returned 6 files for a term known to be present (`RateLimitFilter`)
+and 0 for the readiness terms, so the zero was an absence and not a broken search.
 
-Verified differentially, per `AGENTS.md` trap 7, because the finding is an *absence*: the identical
-search returns 6 files for a term known to be present (`RateLimitFilter`) and 0 for the readiness terms.
-The zero is an absence, not a broken search.
+It is now open for a different reason — **the feature is being built (§14 step 9), and the case itself
+was wrong.** Reading `E9` against §4.3 rather than against its own wording showed it asked for a
+behaviour this architecture cannot produce, and whose implementable substitute would contradict `E11`.
+The row above is the rewritten case; it closes when step 9 lands. This is the third instance of the
+failure v3.26 and v3.31 each caught — a claim carried forward without re-derivation — except that here
+the unchecked claim was *in* the catalogue rather than about it.
 
 `E7` closed on 2026-08-07 by moving it to the layer that could hold it: `scripts/e2e/restart-replay.sh`,
 where the application is a real OS process and `kill -9` is available. The search path above now includes
@@ -1421,7 +1476,13 @@ the build itself, so nobody can accidentally put a Testcontainers suite on the u
 - `traceparent` survives the Kafka hop — the `audit` consumer's span carries a **link** back to the
   producing span, and is not a detached root.
 - A `MovementRejected` increments the rejection counter tagged with the correct reason.
-- Projection lag is reported as a gauge and drives the readiness probe (E9).
+- Audit-trail lag is reported as a gauge and **does not** drive the readiness probe: with the
+  consumer paused the gauge rises, balances stay exact, and readiness stays UP (E9, §6.6).
+- Telemetry leaves the process — an OTel Collector container with a file exporter receives real spans
+  and metrics over OTLP. This one **forks the Spring context deliberately**: it needs
+  `@DynamicPropertySource` to address the container's port, which is exactly what `AGENTS.md` trap 5
+  warns costs a whole new context. ADR 0003 carries the written reason that trap demands, and this is
+  the only fork in the suite.
 
 ### 9.5 Use-case / validation testing
 One test per use case — commands (§2.4) and queries (§4.0) — asserting the *complete* observable
@@ -1542,8 +1603,10 @@ either.
   the published ports (§1). **No Keycloak service either, though Keycloak itself is built:** the realm
   file `docker/keycloak/realm-tiny-ledger.json` exists and the integration suite imports it into a real
   container (§6.4, §9.4) — what is missing is a Compose service for a hand-run `full` boot, which
-  therefore needs `LEDGER_ISSUER_URI` pointed at an issuer of the operator's own. **Specified, not yet
-  built:** an OTel Collector, Prometheus, Grafana, Tempo, Loki — §14 step 9 adds them.
+  therefore needs `LEDGER_ISSUER_URI` pointed at an issuer of the operator's own. **Observability
+  (§14 step 9):** one **opt-in** OTel Collector service behind `profiles: [observability]`, forwarding
+  to Grafana Cloud over OTLP. The default `up` is unchanged. There is deliberately **no** Prometheus,
+  Grafana, Tempo or Loki service — the backend is hosted, and §6.6 says why.
 - **Migrations:** Liquibase, versioned changelogs, applied on startup.
 - **Config:** environment variables only; no secrets in images or compose files — `.env.sample`
   (§1.5) documents every variable.
@@ -1633,7 +1696,7 @@ Each step ends green and demonstrable.
 | 6 | Projections + Redis cache + event-driven eviction | Use-case tests assert projection and cache state |
 | 7 | Kafka relay + `audit` module | Audit trail rebuilt from the stream |
 | 8 | Keycloak + RBAC + rate limiting | Security and rate-limit integration tests green |
-| 9 | Observability stack | Dashboards render live traffic; readiness gates on projection lag |
+| 9 | Observability stack | Actuator liveness/readiness probes, OTLP traces and metrics, JSON logs carrying `trace_id`, and an opt-in Collector forwarding to a hosted backend. **Done when** the §9.4 assertions pass *and* a Collector container receives real spans and metrics over OTLP. Both halves of the original wording are withdrawn and neither is the gate: *"dashboards render live traffic"* cannot be asserted by any build against a hosted backend — the Collector-reachability test is the nearest thing that can, and the dashboard itself is a documented manual step — and *"readiness gates on projection lag"* is architecturally impossible here (§6.6, the E9 row, `adr/0004`) |
 | 10 | Python CLI + e2e scenarios | `ledger-cli scenario run edge-cases` green against compose |
 | 11 | Gatling + JMH + thresholds | Planned pipeline gate fails on regression once stage 10 is built |
 | 12 | **JVM assessment with `jvm-pulse`** — once the system is stable under load | GC + JFR telemetry captured against the composed stack (`pulse attach --docker <container> --duration 30s`) during a Gatling run; `report.html` committed to `docs/profiling/`; a `compare` against the pre-tuning baseline; tuning conclusions recorded as an ADR. **Run last, deliberately** — profiling an unstable system measures the instability, not the system |
@@ -1780,3 +1843,4 @@ Javadoc, because a reader checks the spec:
 | 3.29 | 2026-08-07 | **`AGENTS.md` trap 6 had no test, and the trap is that its failure is silent.** `spring.autoconfigure.exclude` replaces rather than appends, so `application-standalone.properties` must restate every entry the base file contributes; it does, and that line records the measured symptom of removing it — `GET /error` under `standalone` reverts to `BasicErrorController`'s shape and echoes the request path §6.5 forbids. But the guard was a properties line with nothing enforcing it: the suite's only assertion on the `/error` endpoint lives in `SecurityConfigIT`, which runs under `full`. Verified before writing the test — one hit for the endpoint across `src/test`, against a control of 53 for `/errors/` problem types. `StandaloneErrorDispatchTest` now covers the mode the trap names, boots `standalone` so it starts no containers, and carries a positive twin because an empty body would satisfy "does not contain the path" perfectly. Red run: drop the entry and **217 tests run with exactly 2 failures, both this class** — nothing else in the suite notices |
 | 3.30 | 2026-08-07 | **All seven `AGENTS.md` traps accounted for, five of them verified by running rather than by reading.** Trap 1's `failOnEmptyShould=true` is set; trap 2's five string literals all fail loudly if left stale — measured by pointing `@AnalyzeClasses` at a renamed package (9 rules fail "failed to check any classes") and the Cucumber glue at one (27 scenarios error), so trap 1's setting is what protects four of trap 2's five and Cucumber protects the fifth; trap 3's CI gate counts `<testcase>` elements from XML with no `if:`, so it runs only after a green build — the exit-code pairing the trap demands; trap 4's guard fires on both sides, verified by `-Dtest=NoSuchTestClassXyz` failing the build; trap 6 gained its first test (v3.29); trap 5 caught a context fork introduced by that very test, now removed; trap 7 is methodology and was applied throughout — it caught a broken search whose control returned 0 for a term with 53 occurrences |
 | 3.31 | 2026-08-07 | **Two documentation defects, both inherited rather than reasoned.** (1) The P/N/E case catalogue lives in **§9.3**, not §12 — §12 is Docker and delivery. The battle-testing plan called it "the spec's §12 catalogue" and this pass propagated that into five places (two revision rows, two test javadocs, one script header) without anyone opening §12 to check. Corrected; the three remaining `§12` references are genuinely about delivery, including `LiquibaseMigrationIT`'s, since §12 does cover migrations. (2) `AGENTS.md` described the remote as **private**; it is **public**, and has been. That one is not cosmetic: it told every agent that pushing is "not a publication event", when in fact each push makes commit messages and comments world-readable and a force-push does not unpublish them. Both are the same failure this pass kept finding — a claim passed along and never re-derived, like `E9`'s deferral at v3.26 |
+| 3.32 | 2026-08-07 | **Observability specified against this architecture instead of a generic one, ahead of §14 step 9 being built.** §6.6 gains the deployment shape — Micrometer Tracing over the OTel bridge, domain spans added by a use-case *decorator* so §9.2's framework-free application layer survives instrumentation, and a backend that is **opt-in and hosted**: one Collector service behind a Compose `profiles: [observability]` key forwarding to Grafana Cloud, with no Prometheus/Grafana/Tempo/Loki container anywhere and OTLP export off by default so an inactive profile costs no failed-export noise. **The substantive correction is `E9` and the §6.6 health paragraph, which described a system this is not.** Readiness was specified to gate on projection lag; the balance projection is a synchronous `@EventListener` on the publishing thread inside the write transaction (§4.3 — and §6.6's own trace-context table said so four paragraphs above the claim), so its lag is structurally **zero** and `E9`'s stated harm, "serving stale balances", has no mechanism. The lag that exists is the outbox and audit consumer, it makes the *audit trail* stale rather than balances, and gating readiness on it would take instances out of service during exactly the Kafka outage **E11** requires the ledger to survive. So it is gauged and not gated: `ledger.audit.lag.seconds`, `full` only, with the 2 s/5 s numbers kept as alerting thresholds and stated plainly to have **no probe and no gate consuming them**. `E9` is rewritten to assert the honest behaviour and stays open; `adr/0004` records the decision. Readiness composition is now explicit for the same reason — `db` in, `redis` and `kafka` deliberately out, because Boot's defaults would have pulled in indicators that contradict `E10` and `E11`. Also: exemplars are demoted from a table row to **specified-and-not-delivered** (a Prometheus-registry feature unreachable on the OTLP path), and §14 step 9's done-when loses both of its original clauses — no build can assert a hosted dashboard, so a Collector-reachability test is named as the nearest gate and the dashboard as a manual step. **The known-divergences label still reads `v3.12` and was deliberately not bumped:** this pass did not re-audit those three rows, and moving the version on them would have claimed an audit that did not happen — the precise error v3.26 and v3.31 were spent correcting |
