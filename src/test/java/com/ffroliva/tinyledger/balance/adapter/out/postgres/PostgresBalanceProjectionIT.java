@@ -20,10 +20,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
+class PostgresBalanceProjectionIT extends AbstractIntegrationTest
+        implements com.ffroliva.tinyledger.contract.BalanceProjectionContract {
 
     @Autowired
     private BalanceProjectionPort projection;
+
+    @Override
+    public BalanceProjectionPort projection() {
+        return projection;
+    }
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
