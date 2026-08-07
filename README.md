@@ -8,6 +8,7 @@
 [![Security](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=security_rating)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger)
 [![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=sqale_rating)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger)
 [![Duplication](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=duplicated_lines_density)](https://sonarcloud.io/component_measures?id=ffroliva_tiny-ledger&metric=duplicated_lines_density)
+[![Licence: MIT](https://img.shields.io/github/license/ffroliva/tiny-ledger)](LICENSE)
 
 <!-- Every badge above is LIVE: each is fetched from CI or SonarCloud at render time and cannot drift
      from the thing it claims. That is deliberate, and it is why there is no hand-written "Java 25" or
