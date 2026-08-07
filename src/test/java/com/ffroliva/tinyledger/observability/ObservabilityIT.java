@@ -15,6 +15,7 @@ import io.opentelemetry.sdk.trace.data.SpanData;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -57,7 +58,6 @@ class ObservabilityIT extends AbstractIntegrationTest {
     void aWithdrawalProducesTheExpectedSpanTreeWithTheDomainAttributes() throws Exception {
         UUID account = openAnAccountAs("alice");
         deposit(account, 10000);
-        spans.reset();
 
         mvc.perform(put("/api/v1/accounts/{a}/withdrawals/{w}", account, UUID.randomUUID())
                         .header("Authorization", bearer("alice"))
@@ -66,17 +66,23 @@ class ObservabilityIT extends AbstractIntegrationTest {
                 .andExpect(status().isCreated());
 
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
-            SpanData movement = spanNamed("ledger.record-movement");
-            assertThat(attribute(movement, "ledger.account_id")).isEqualTo(account.toString());
-            assertThat(attribute(movement, "ledger.movement_type")).isEqualTo("WITHDRAWAL");
+            // Selected by ATTRIBUTE, never by "the only one since the last reset". Measured on CI: a
+            // reset placed between the deposit and the withdrawal does not clear the deposit's span,
+            // because the batch processor's 100ms flush had not run yet — so the assertion read the
+            // deposit and failed with expected:<WITHDRAWAL> but was:<DEPOSIT>. A test whose subject
+            // depends on an exporter's flush timing is a flaky test wearing a green tick.
+            SpanData movement = spanWhere(
+                    "ledger.record-movement",
+                    s -> account.toString().equals(attribute(s, "ledger.account_id"))
+                            && "WITHDRAWAL".equals(attribute(s, "ledger.movement_type")));
             assertThat(attribute(movement, "ledger.stream_version")).isNotBlank();
 
-            SpanData projection = spanNamed("ledger.projection.apply");
-            assertThat(projection.getParentSpanId())
-                    .as("the projection is synchronous inside the write (§4.3), so its span NESTS —"
-                            + " a detached one would contradict ADR 0004's structurally-zero lag")
-                    .isEqualTo(movement.getSpanId());
-            assertThat(projection.getTraceId()).isEqualTo(movement.getTraceId());
+            SpanData projection = spanWhere(
+                    "ledger.projection.apply", s -> movement.getSpanId().equals(s.getParentSpanId()));
+            assertThat(projection.getTraceId())
+                    .as("the projection is synchronous inside the write (§4.3), so its span NESTS in the"
+                            + " same trace — a detached one would contradict ADR 0004's zero lag")
+                    .isEqualTo(movement.getTraceId());
         });
     }
 
@@ -143,13 +149,21 @@ class ObservabilityIT extends AbstractIntegrationTest {
                 .andExpect(status().isCreated());
     }
 
-    /** Fails naming every span that WAS seen — "not found" with no list is the least useful red there is. */
     private SpanData spanNamed(String name) {
+        return spanWhere(name, s -> true);
+    }
+
+    /**
+     * Fails naming every span that WAS seen — "not found" with no list is the least useful red there is,
+     * and on a context shared by nine IT classes the list is usually the whole diagnosis.
+     */
+    private SpanData spanWhere(String name, Predicate<SpanData> match) {
         List<SpanData> finished = spans.getFinishedSpanItems();
         return finished.stream()
                 .filter(s -> name.equals(s.getName()))
+                .filter(match)
                 .findFirst()
-                .orElseThrow(() -> new AssertionError("no span named " + name + "; saw "
+                .orElseThrow(() -> new AssertionError("no matching span named " + name + "; saw "
                         + finished.stream().map(SpanData::getName).toList()));
     }
 
