@@ -115,8 +115,12 @@ profile boundary is a startup failure here by design, not a style issue.
 - Commit per logical change, with explicit pathspecs. **Never `git add -A`** — another agent may have
   uncommitted work in the tree.
 - **Push freely to `origin`; that is how the heavy suite runs.** The remote is
-  `github.com/ffroliva/tiny-ledger`, **private**. Pushing a working branch is the normal workflow, not
-  a publication event. **Never merge without being asked** — integration is still the user's decision.
+  `github.com/ffroliva/tiny-ledger` and it is **PUBLIC** — corrected 2026-08-07, having said "private"
+  since the first revision. Pushing a working branch is still the normal workflow, but it *is* a
+  publication event: every commit message, comment and log excerpt is world-readable the moment it
+  lands, and force-pushing does not unpublish what was fetched or indexed. Treat anything you write
+  into a commit as public. **Never merge without being asked** — integration is still the user's
+  decision.
 - Business refusals are **return values** (`MovementResult`), not exceptions. Exceptions are for
   catalogued errors (§6.5) and for bugs.
 - Errors are RFC 7807 problem details. `type` is the machine-readable contract; keep it stable.

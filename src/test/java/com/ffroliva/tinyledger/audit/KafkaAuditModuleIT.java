@@ -70,7 +70,7 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
     @Autowired
     private org.springframework.kafka.config.KafkaListenerEndpointRegistry listeners;
 
-    /** §12 E6 asks for 50. Written through the use case, not HTTP, so no rate-limit budget is spent. */
+    /** §9.3 E6 asks for 50. Written through the use case, not HTTP, so no rate-limit budget is spent. */
     private static final int E6_MOVEMENTS = 50;
 
     /**
