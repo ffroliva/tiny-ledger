@@ -51,7 +51,8 @@ class RecordMovementServiceTest {
     void sameUidDifferentAmountIsAnIdempotencyConflict() {
         UUID uid = UUID.randomUUID();
         service.deposit(new Deposit("alice", false, opened, uid, new Money(GBP, 10_000), null));
-        assertThatThrownBy(() -> service.deposit(new Deposit("alice", false, opened, uid, new Money(GBP, 999), null)))
+        Deposit differentAmount = new Deposit("alice", false, opened, uid, new Money(GBP, 999), null);
+        assertThatThrownBy(() -> service.deposit(differentAmount))
                 .isInstanceOf(IdempotencyConflictException.class)
                 // §6.4's fifth mutant: movementUidOf could return null for a call site with nothing
                 // noticing, because the exception's type was asserted and its payload never was. The uid is
@@ -64,8 +65,8 @@ class RecordMovementServiceTest {
     void foreignCallerIsRefusedBeforeAnyIdempotencyAnswer() {
         UUID uid = UUID.randomUUID();
         service.deposit(new Deposit("alice", false, opened, uid, new Money(GBP, 10_000), null));
-        assertThatThrownBy(
-                        () -> service.deposit(new Deposit("mallory", false, opened, uid, new Money(GBP, 10_000), null)))
+        Deposit byAStranger = new Deposit("mallory", false, opened, uid, new Money(GBP, 10_000), null);
+        assertThatThrownBy(() -> service.deposit(byAStranger))
                 .isInstanceOf(OwnershipException.class); // NOT IdempotencyConflict — §4.1 ordering
     }
 
@@ -89,9 +90,8 @@ class RecordMovementServiceTest {
 
     @Test // the control: same caller, same account, callerIsAdmin=false — proves the flag gates the widening
     void nonAdminCallerStillCannotDepositOnAnAccountTheyDoNotOwn() {
-        assertThatThrownBy(() -> service.deposit(
-                        new Deposit("mallory", false, opened, UUID.randomUUID(), new Money(GBP, 10_000), null)))
-                .isInstanceOf(OwnershipException.class);
+        Deposit byAStranger = new Deposit("mallory", false, opened, UUID.randomUUID(), new Money(GBP, 10_000), null);
+        assertThatThrownBy(() -> service.deposit(byAStranger)).isInstanceOf(OwnershipException.class);
     }
 
     @Test // a movement is recorded as an event only the FIRST time it succeeds (§4.1/§4.5): the log
@@ -165,15 +165,15 @@ class RecordMovementServiceTest {
         UUID uid = UUID.randomUUID();
         service.withdraw(new Withdraw("alice", false, opened, uid, new Money(GBP, 4_000), null));
 
-        assertThatThrownBy(() -> service.withdraw(new Withdraw("alice", false, opened, uid, new Money(GBP, 999), null)))
-                .isInstanceOf(IdempotencyConflictException.class);
+        Withdraw differentAmount = new Withdraw("alice", false, opened, uid, new Money(GBP, 999), null);
+        assertThatThrownBy(() -> service.withdraw(differentAmount)).isInstanceOf(IdempotencyConflictException.class);
     }
 
     @Test
     void unknownAccountIs404Shaped() {
-        assertThatThrownBy(() -> service.deposit(
-                        new Deposit("alice", false, AccountId.random(), UUID.randomUUID(), new Money(GBP, 1), null)))
-                .isInstanceOf(AccountNotFoundException.class);
+        Deposit intoNothing =
+                new Deposit("alice", false, AccountId.random(), UUID.randomUUID(), new Money(GBP, 1), null);
+        assertThatThrownBy(() -> service.deposit(intoNothing)).isInstanceOf(AccountNotFoundException.class);
     }
 
     /** Minimal fake honouring the port contract; the real contract suite is Task 6. */
