@@ -13,14 +13,17 @@ public class RecordMovementService implements RecordMovementUseCase {
     private final EventStorePort store;
     private final EventPublisherPort publisher;
     private final ClockPort clock;
-    private final IdGeneratorPort ids;
 
-    public RecordMovementService(
-            EventStorePort store, EventPublisherPort publisher, ClockPort clock, IdGeneratorPort ids) {
+    /**
+     * No {@code IdGeneratorPort}, deliberately. It used to take one and never call it, which read as
+     * though this service mints identities — the opposite of §6.3, where the <em>client</em> supplies
+     * the {@code movementUid} and only account opening is server-uid'd (N22). A constructor parameter
+     * that is never used is a claim about the design, and this one was false.
+     */
+    public RecordMovementService(EventStorePort store, EventPublisherPort publisher, ClockPort clock) {
         this.store = store;
         this.publisher = publisher;
         this.clock = clock;
-        this.ids = ids;
     }
 
     @Override
