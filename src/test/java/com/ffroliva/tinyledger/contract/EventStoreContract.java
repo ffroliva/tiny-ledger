@@ -69,7 +69,7 @@ public interface EventStoreContract {
                 try {
                     store.append(id, 1, List.of(deposit(id, 2, UUID.randomUUID())));
                     return true;
-                } catch (ConcurrencyConflictException e) {
+                } catch (ConcurrencyConflictException _) {
                     return false;
                 }
             });

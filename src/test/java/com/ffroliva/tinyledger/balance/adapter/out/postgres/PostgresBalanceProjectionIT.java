@@ -50,7 +50,7 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest
 
         Optional<BalanceView> balance = projection.balance(id);
         assertThat(balance).isPresent();
-        assertThat(balance.get().amount().minorUnits()).isEqualTo(0);
+        assertThat(balance.get().amount().minorUnits()).isZero();
         assertThat(balance.get().streamVersion()).isEqualTo(1);
 
         Optional<AccountView> account = projection.account(id);

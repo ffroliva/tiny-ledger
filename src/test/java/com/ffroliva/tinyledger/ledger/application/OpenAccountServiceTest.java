@@ -43,7 +43,10 @@ class OpenAccountServiceTest {
     /** Opening reads nothing and cannot conflict; only the returned value and the published event matter here. */
     private static final class NoStore implements EventStorePort {
         @Override
-        public void append(AccountId streamId, long expectedVersion, List<? extends LedgerEvent> events) {}
+        public void append(AccountId streamId, long expectedVersion, List<? extends LedgerEvent> events) {
+            // Intentionally inert: this fake exists to prove OpenAccountService's behaviour when the
+            // store accepts everything, so recording the append would only add state nothing asserts.
+        }
 
         @Override
         public List<LedgerEvent> read(AccountId streamId) {

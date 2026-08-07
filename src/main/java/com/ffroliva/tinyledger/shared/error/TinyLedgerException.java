@@ -15,7 +15,7 @@ package com.ffroliva.tinyledger.shared.error;
 public abstract class TinyLedgerException extends RuntimeException {
 
     private final ErrorCode code;
-    private final Object[] args;
+    private final transient Object[] args;
 
     protected TinyLedgerException(ErrorCode code, String message, Object... args) {
         super(message);

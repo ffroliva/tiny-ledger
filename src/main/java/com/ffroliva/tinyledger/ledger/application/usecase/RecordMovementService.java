@@ -73,7 +73,7 @@ public class RecordMovementService implements RecordMovementUseCase {
         List<MovementEvent> events = action.apply(account); // ⑤
         try {
             store.append(accountId, account.version(), events); // ⑥
-        } catch (DuplicateMovementException raced) {
+        } catch (DuplicateMovementException _) {
             return replayOf(store.findByMovementUid(movementUid).orElseThrow(), accountId, type, amount, reference);
         }
         events.forEach(publisher::publish); // ⑦
