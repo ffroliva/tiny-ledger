@@ -65,6 +65,9 @@ until they bite.
    references here are *string literals* an IDE rename does not touch: `@AnalyzeClasses`, the
    `slices().matching(...)` cycle rule, two `api.generated..` fence strings, and `CucumberTest`'s glue
    package. Run `git grep -nE '\bOldName\b' -- ':!target'` and require empty output.
+   **Measured 2026-08-07:** all five now fail loudly if left stale — the four ArchUnit literals via
+   trap 1's setting (9 rules fail "failed to check any classes"), the glue package via Cucumber
+   itself (27 scenarios error). The grep is still the right habit; it is no longer the only net.
 3. **Count tests from surefire XML, not the `.txt` reports** — and only ever **paired with that run's
    exit code**. `.txt` reports `Tests run: 0` for `@Nested` classes and undercounts. But a build that
    fails early leaves the *previous* run's XML on disk, where it reports passing: a count without its
