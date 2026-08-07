@@ -31,11 +31,24 @@ Both are load-bearing and neither is obvious from the spec.
 1. **The `full` security chain ends `.anyRequest().authenticated()`** (`SecurityConfig.java:134`). Without
    an explicit rule, `/actuator/health/liveness` would demand a bearer token. A probe that needs a
    credential fails during exactly the outage it exists to report.
-2. **Both chains run `IpBackstopFilter` ahead of authentication**, charging a 300-per-60s bucket keyed on
-   the client IP (`application.properties:42`). A kubelet probing every 10 s from one address would eat
-   that budget and eventually be answered `429`. Actuator paths must therefore bypass both rate-limit
-   filters. This also keeps `AbstractIntegrationTest`'s hand-counted 69-request IP budget
-   (`:118-120`) valid — actuator calls made by the new tests must not charge it.
+2. **Both API chains run `IpBackstopFilter` ahead of authentication**, charging a 300-per-60s bucket keyed
+   on the client IP (`application.properties:42`). A kubelet probing every 10 s from one address would
+   eat that budget and eventually be answered `429` — an orchestrator would then restart a working
+   process because its probe was rate limited.
+
+   **The port split already solves this, and an earlier draft's `shouldNotFilter` override would have
+   made it worse.** `RateLimitFilter` and `IpBackstopFilter` are not `@Component` beans — `SecurityConfig`'s
+   javadoc records why: registration would also trigger Boot's filter auto-registration and run each
+   check twice. They are constructed *inside the two API chains* and added with `addFilterBefore`. The
+   management chain adds neither, so probe traffic on port 9090 is unmetered by construction.
+
+   A `shouldNotFilter` override matching `/actuator/` would have applied on port **8080** as well,
+   exempting any future actuator path served there from the IP backstop — a rate-limit hole opened to
+   fix a problem that no longer exists. Do not add one. `actuatorIsNotServedOnTheApiPort` in Task 2
+   pins the other half: nothing under `/actuator` answers on the API port at all.
+
+   This also keeps `AbstractIntegrationTest`'s hand-counted 69-request IP budget (`:118-120`) valid —
+   the new probe tests use `RestClient` against the management port and never touch that bucket.
 
 ---
 
@@ -50,7 +63,8 @@ resource server, so the reasoning is recorded here rather than left in a propert
 | Endpoint | Verdict | Why |
 |---|---|---|
 | `health/liveness`, `health/readiness` | **Open, unauthenticated** | A probe that needs a credential cannot report the outage that took the issuer away |
-| `health` (root) | **Closed** | Aggregate UP/DOWN tells an unauthenticated caller when the system is degraded — useful for timing an attack, useless to anyone else |
+| `health` (root) | **Closed — by layer 2 ONLY** | Aggregate UP/DOWN tells an unauthenticated caller when the system is degraded — useful for timing an attack, useless to anyone else. **`include=health` does not hide it**: measured 2026-08-07, the root answers `503` on the management port with exposure at `health`. Only `denyAll` closes it. See the correction under Step 5 |
+| `info` | **Closed** | Measured, not predicted: it is one of the 12 endpoints this classpath actually maps and it was absent from this table until Step 4 enumerated it. Boot's default `info` contributors are inert here (no `build-info.properties`, no git properties, no `info.*` keys), so it would render `{}` today — which is exactly why it must be decided rather than left: adding the build-info goal, a thing a release pipeline routinely does, would start publishing version and commit SHA to an unauthenticated caller with no second decision point |
 | `heapdump` | **Never** | Dumps live process memory: balances, bearer tokens, the Redis password. The worst single endpoint in the set |
 | `env`, `configprops` | **Never** | Renders configuration including `issuer-uri` and the datasource URL. A direct §6.5 violation |
 | `loggers` | **Never** | `POST` mutates log level at runtime — a write operation that could switch on payload logging |
@@ -65,10 +79,18 @@ resource server, so the reasoning is recorded here rather than left in a propert
 **Two independent layers, and both are load-bearing:**
 
 1. `management.endpoints.web.exposure.include=health` — anything else is never web-mapped at all.
-2. `denyAll` on `/actuator/**` in the security chain, with only the two probe paths permitted.
+2. `denyAll` on the management chain, with only the two probe paths permitted.
 
 Layer 1 is a configuration line someone will eventually edit. Layer 2 is why that edit stays harmless:
 exposing an endpoint by configuration does not open it to any valid token. Neither alone is sufficient.
+
+**And they do not overlap the way an earlier draft of this plan assumed.** Layer 1 covers the other
+eleven endpoints; it does **not** cover the health root, because `include=health` exposes the health
+endpoint *and* its groups are sub-paths of it. Measured 2026-08-07 (Step 5): with exposure at `health`
+and no management chain yet, `/actuator/health` answered `503` — reachable, and rendering the aggregate
+status §6.6 refuses to give an unauthenticated caller. **The root is closed by layer 2 alone.** That
+makes Task 2 the only thing standing between this configuration and a §6.6 violation, rather than the
+belt to layer 1's braces.
 
 **Health detail is `never`, for everyone.** The probe body is `{"status":"UP"}` and nothing more. No
 caller — authenticated or not — sees which component is down. Which component *is* down is answerable
@@ -98,8 +120,6 @@ only fork this plan introduces — do not add a second by reaching for `@TestPro
 | `src/main/resources/application.properties` | Endpoint exposure, probes on, base readiness group | Modify |
 | `src/main/resources/application-full.properties` | Readiness group gains `db` | Modify |
 | `src/main/java/…/config/SecurityConfig.java` | Probe paths permitted, rest of actuator denied | Modify |
-| `src/main/java/…/platform/RateLimitFilter.java` | Skip `/actuator/**` | Modify |
-| `src/main/java/…/platform/IpBackstopFilter.java` | Skip `/actuator/**` | Modify |
 | `src/main/java/…/platform/AuditLagGauge.java` | Reads oldest incomplete publication, registers the gauge | **Create** |
 | `src/main/java/…/config/FullAdapterConfig.java` | Constructs the gauge — `full` only | Modify |
 | `src/test/java/…/platform/ActuatorProbeTest.java` | Probes reachable unauthenticated, metrics denied | **Create** |
@@ -197,48 +217,91 @@ Append to `src/main/resources/application-full.properties`:
 management.endpoint.health.group.readiness.include=readinessState,db
 ```
 
-- [ ] **Step 4: Measure the real endpoint surface before trusting the assessment**
+- [ ] **Step 4: Measure the real endpoint surface before trusting the assessment — DONE 2026-08-07**
 
 The exposure table above was written from knowledge of Boot's endpoint set, not from this classpath.
-Boot's endpoints shift between versions, and a decision about attack surface should be made against
-what this application actually maps. Enumerate it — **on a throwaway commit you will revert**:
+Enumerate it, passing the override on the command line so no file needs reverting:
 
 ```bash
-# TEMPORARY — do not commit this line
-management.endpoints.web.exposure.include=*
+./mvnw -q package -DskipTests
+SPRING_PROFILES_ACTIVE=standalone java -jar target/tiny-ledger-0.1.0-SNAPSHOT-exec.jar \
+  --management.endpoints.web.exposure.include='*' &
+# probes are on the MANAGEMENT port, not 8080
+curl -s http://127.0.0.1:9090/actuator
 ```
 
-```bash
-./mvnw -q spring-boot:run -Dspring-boot.run.profiles=standalone &
-sleep 25
-curl -s http://127.0.0.1:8080/actuator | python -c "import json,sys; print('\n'.join(sorted(json.load(sys.stdin)['_links'])))"
-kill %1
-```
+**Measured, Boot 4.1.0, `standalone`: `Exposing 12 endpoints beneath base path '/actuator'` —**
+`beans`, `conditions`, `configprops`, `env`, **`info`**, `health`, `loggers`, `mappings`, `metrics`,
+`sbom`, `scheduledtasks`, `threaddump`.
 
-Record the output in the commit message. **Compare it against the assessment table**: any endpoint
-listed there that does not appear is fine, but any endpoint that appears and is *not* in the table is
-an unassessed one — decide it explicitly and add a row, rather than letting `include=health` hide it
-by luck. `git checkout` the properties file afterwards.
+Against the assessment table: **`info` appears and was not in it.** That is precisely the case this
+step exists to catch, and it has been decided and added above rather than left to `include=health` to
+hide by luck. Eight table entries do not appear on this classpath at all — `heapdump`, `httpexchanges`,
+`caches`, `shutdown`, `liquibase`, `auditevents`, `startup`, `prometheus` — which is fine, but note the
+enumeration ran under `standalone`; `liquibase` and `caches` are classpath- and profile-conditional and
+could appear under `full`. Both are already assessed, so neither would be an unassessed surface.
 
-- [ ] **Step 5: Verify the property names against the shipped jar rather than trusting this plan**
+Also measured, and absent from every draft of this table: the health **contributors** are `diskSpace`,
+`livenessState`, `ping`, `readinessState`, `redis` and `ssl`. Nothing needed to change, but see Step 5
+for what `redis` turns out to prove.
+
+- [ ] **Step 5: Verify the property names against the running application — DONE 2026-08-07, and it corrected two claims**
 
 With exposure back to `health`:
 
 ```bash
-./mvnw -q spring-boot:run -Dspring-boot.run.profiles=standalone &
-sleep 25
-for p in health/liveness health/readiness health metrics env heapdump; do
+SPRING_PROFILES_ACTIVE=standalone java -jar target/tiny-ledger-0.1.0-SNAPSHOT-exec.jar &
+for p in health/liveness health/readiness health info metrics env heapdump; do
   printf '%s -> ' "$p"
-  curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:8080/actuator/$p"
+  curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:9090/actuator/$p"
 done
-kill %1
 ```
 
-Expected: `200`, `200`, then `404` for the remaining four. **A `404` on either probe means the
-property names are wrong, not that the feature is absent** — fix them here before continuing, and
-correct this plan's Step 2 in the same commit so the next reader is not misled. Note that
-`/actuator/health` returning 404 at this point is layer 1 doing its job; Task 2 adds layer 2 so it
-stays closed even if layer 1 is later widened.
+**Measured:**
+
+```
+health/liveness  -> 200   {"status":"UP"}
+health/readiness -> 200   {"status":"UP"}
+health           -> 503   <-- NOT 404. This plan predicted 404.
+info metrics env heapdump beans loggers threaddump configprops mappings
+conditions sbom scheduledtasks prometheus caches shutdown liquibase
+auditevents startup httpexchanges  -> 404 (all)
+```
+
+Port 8080: every `/actuator/**` path answers `404`. Listeners: `127.0.0.1:8080` and `127.0.0.1:9090`,
+so `management.server.address` in `application-standalone.properties` is doing its job — without it the
+management listener would have come up on `0.0.0.0`.
+
+**Correction 1 — the health root is not covered by layer 1.** This plan said "`/actuator/health`
+returning 404 at this point is layer 1 doing its job." It returns **503**. `include=health` exposes the
+health endpoint, and the probe groups are sub-paths *of* it; there is no exposure setting that yields
+the groups without the root. So with Task 1 alone, an unauthenticated caller on the management port can
+read the aggregate status §6.6 refuses to give them. The exposure table and the two-layer argument above
+are corrected. **Task 2 is not defence in depth for the root — it is the only defence.**
+
+**Correction 2 — the 503 has a cause worth keeping.** Root health in `standalone` is permanently DOWN:
+
+```json
+{"redis":{"status":"DOWN","details":{"error":"RedisConnectionFailureException: Unable to connect"}}}
+```
+
+`spring-boot-starter-data-redis` is an unconditional dependency (`pom.xml:81`), so Boot auto-configures
+`RedisHealthIndicator` in **both** run modes — including the one that has no Redis and does not want
+one, because `RateLimitConfig` uses Caffeine there. Two consequences:
+
+- **The `redis` exclusion from the readiness group is now provable, cheaply, on the fast path.** Adding
+  `redis` to `management.endpoint.health.group.readiness.include` turns `standalone` readiness `DOWN`
+  with no container running at all. That is a better red proof than Task 4's, and unlike the `kafka`
+  case it actually executes — use it in Task 2 to pin the exclusion E10 depends on.
+- `noOtherActuatorEndpointIsReachable`'s `"health"` case answers 503 today and passes for the wrong
+  reason. Before Task 2 it would **fail** on any machine with a Redis on 6379. After Task 2 it is 403
+  unconditionally. Do not read a green on that case until layer 2 exists.
+
+**A `404` on either probe would have meant the property names were wrong, not that the feature was
+absent.** They were right. So were the three identity properties: `configprops` shows
+`management.observations` binding to `ObservationProperties.keyValues` with `service.namespace` and
+`service.instance.id` both populated, and the boot log carries `[tiny-ledger]` from
+`spring.application.name`. Those were bytecode readings until this step; they are now observations.
 
 - [ ] **Step 6: Run the fast gate**
 
@@ -296,19 +359,26 @@ Run this under `standalone`: it starts no containers, so it stays on the fast `v
 (ADR 0003) — the management chain is profile-independent, so `full` would prove nothing extra here.
 
 ```java
+/** Status only, never thrown: a 4xx is the answer under test, not an error. */
+private int statusOfManagement(String path) {
+    return http.get()
+            .uri("http://127.0.0.1:" + managementPort + "/actuator/" + path)
+            .exchange((req, res) -> res.getStatusCode().value());
+}
+
 /**
  * Spec §6.6 / ADR 0004: the probes must answer without a credential, and nothing else under
  * /actuator may be reachable at all. A probe that needs a bearer token fails during exactly the
  * outage it exists to report.
  */
 @Test
-void theLivenessProbeAnswersWithoutACredential() throws Exception {
-    mockMvc.perform(get("/actuator/health/liveness")).andExpect(status().isOk());
+void theLivenessProbeAnswersWithoutACredential() {
+    assertThat(statusOfManagement("health/liveness")).isEqualTo(200);
 }
 
 @Test
-void theReadinessProbeAnswersWithoutACredential() throws Exception {
-    mockMvc.perform(get("/actuator/health/readiness")).andExpect(status().isOk());
+void theReadinessProbeAnswersWithoutACredential() {
+    assertThat(statusOfManagement("health/readiness")).isEqualTo(200);
 }
 
 /**
@@ -324,13 +394,12 @@ void theReadinessProbeAnswersWithoutACredential() throws Exception {
  */
 @ParameterizedTest
 @ValueSource(strings = {
-    "health", "metrics", "prometheus", "env", "configprops", "beans", "mappings",
+    "health", "info", "metrics", "prometheus", "env", "configprops", "beans", "mappings",
     "heapdump", "threaddump", "loggers", "httpexchanges", "auditevents", "caches",
     "conditions", "shutdown", "liquibase", "sbom", "startup", "scheduledtasks"
 })
-void noOtherActuatorEndpointIsReachable(String endpoint) throws Exception {
-    mockMvc.perform(get("/actuator/" + endpoint))
-           .andExpect(status().is(not(200)));
+void noOtherActuatorEndpointIsReachable(String endpoint) {
+    assertThat(statusOfManagement(endpoint)).isNotEqualTo(200);
 }
 ```
 
@@ -339,14 +408,40 @@ answers `403` (mapped but denied), and which one replies is exactly the implemen
 test should not pin. Pinning `404` would turn the security rule into a passing test that proves only
 that the endpoint was never enabled.
 
-- [ ] **Step 2: Run it and watch it fail**
+**One more case, and it is the reason `apiPort` is a field.** The management port is unpublished; the
+*API* port is the one an attacker reaches. Assert that `/actuator/**` is not served there at all —
+`management.server.port` moving the endpoints off 8080 is the property that makes the port split real
+rather than nominal, and nothing else in this suite would notice if it regressed:
+
+```java
+/** ADR 0005: actuator lives on the management port only. On the API port it must not exist. */
+@ParameterizedTest
+@ValueSource(strings = {"health", "health/liveness", "health/readiness", "env", "heapdump"})
+void actuatorIsNotServedOnTheApiPort(String endpoint) {
+    int status = http.get()
+            .uri("http://127.0.0.1:" + apiPort + "/actuator/" + endpoint)
+            .exchange((req, res) -> res.getStatusCode().value());
+    assertThat(status).isNotEqualTo(200);
+}
+```
+
+- [ ] **Step 2: Run it — and expect it to PASS, which is why Step 5 exists**
 
 Run: `./mvnw -q test -Dtest=ActuatorProbeTest`
 
-Expected under the `full` chain: **401**, not 200 — `.anyRequest().authenticated()` catches the probe.
+**Do not treat a green here as the feature working.** An earlier draft of this step predicted `401`
+from `.anyRequest().authenticated()`; that prediction was wrong, because this class runs under
+`@ActiveProfiles("standalone")` and the standalone chain authenticates nothing. On first run the
+probes answer `200` because nothing denies them, and every entry in the `@ValueSource` answers `404`
+because `exposure.include=health` never mapped it. **The whole class passes before the management
+chain exists.**
+
+That is exactly the shape `AGENTS.md` trap 4 warns about, and it is why the coverage claim for this
+class rests entirely on **Step 5's two reverts**, not on an initial red. Run Step 2 to confirm the
+class compiles and executes; take the evidence from Step 5.
 
 **Confirm the run actually executed this class.** `-Dtest` matching nothing exits **0**
-(`AGENTS.md` trap 4). Check `target/surefire-reports/*ActuatorProbeTest.xml` exists and names the three
+(`AGENTS.md` trap 4). Check `target/surefire-reports/*ActuatorProbeTest.xml` exists and names the
 methods before believing either a red or a green.
 
 - [ ] **Step 3: Add a management chain — do not add matchers to the API chains**
@@ -382,10 +477,13 @@ SecurityFilterChain managementChain(HttpSecurity http) {
 }
 ```
 
-`EndpointRequest.to(HealthEndpoint.class)` matches the health endpoint **and its groups**, which is
-what makes the two probe paths reachable. Confirm that against the shipped jar in Step 4 — if it
-matches only the root, replace it with explicit `requestMatchers` for the two group paths and permit
-the root deliberately or not at all.
+**The two `permitAll` matchers are literal paths, deliberately, and must stay literal.**
+`EndpointRequest.to(HealthEndpoint.class)` would be the idiomatic-looking choice and it is the wrong
+one: it matches the health endpoint **and its groups**, so it would permit `/actuator/health` itself —
+the aggregate UP/DOWN that §6.6 refuses to give an unauthenticated caller, and that
+`noOtherActuatorEndpointIsReachable` asserts is closed. Literal `requestMatchers` permit the two group
+paths and nothing else. `EndpointRequest.toAnyEndpoint()` is still correct as the *securityMatcher*:
+there it defines the chain's scope, not a grant.
 
 The `standalone` and `full` chains need **no change**: neither now sees actuator traffic at all.
 
@@ -414,11 +512,39 @@ many entries — `env`, `heapdump`, `configprops` and the rest now answer 200. R
 `include=*`, re-run: expected **green**, every entry now 403 rather than 404. That green is the proof
 layer 2 stands on its own. Then restore `include=health`.
 
-**Layer permit:** delete the two `permitAll` matchers, re-run, confirm the probe tests go 401, restore.
+**Layer permit:** delete the two `permitAll` matchers, re-run, confirm the probe tests stop answering
+200, restore.
 
-Record both run results in the commit message. A test that cannot fail is not coverage
-(`AGENTS.md` trap 4), and here the same file holds one test that could not fail for a reason the other
-tests do not share.
+**The health ROOT specifically.** It is the one entry in the `@ValueSource` that layer 1 does not cover
+(Task 1 Step 5, correction 1) and the one an over-clever refactor would reopen: replacing the two
+literal `permitAll` matchers with `EndpointRequest.to(HealthEndpoint.class)` permits the root along
+with its groups. Make that edit, re-run, and confirm `noOtherActuatorEndpointIsReachable("health")`
+goes **200 and fails**. Restore the literal matchers. This is the cheapest available proof that the
+§6.6 posture survives the refactor most likely to be attempted on this code.
+
+**And pin the `redis` exclusion while you are here — it is provable now and nothing else proves it.**
+Task 1 Step 5 measured that `RedisHealthIndicator` is auto-configured under `standalone`, where no
+Redis exists, so it reads DOWN with no container running. Add:
+
+```java
+/**
+ * ADR 0004 / E10: the ledger must keep serving while Redis is down, so `redis` is deliberately not in
+ * the readiness group. Under standalone there is no Redis at all and its contributor reads DOWN —
+ * which makes this the one assertion in the suite that fails the moment someone "completes" the group.
+ */
+@Test
+void redisBeingDownDoesNotMakeTheInstanceUnready() {
+    assertThat(statusOfManagement("health/readiness")).isEqualTo(200);
+}
+```
+
+Prove it: add `redis` to `management.endpoint.health.group.readiness.include`, re-run, confirm this
+test fails with 503, remove it. That red costs one property edit and no containers — where E10's own
+coverage needs a real Redis outage under `-Pit`.
+
+Record every run result in the commit message. A test that cannot fail is not coverage
+(`AGENTS.md` trap 4), and this file holds several that could not fail for reasons the others do not
+share.
 
 - [ ] **Step 6: Commit**
 
@@ -434,97 +560,7 @@ valid token."
 
 ---
 
-## Task 3: Prove probes are not rate limited
-
-**Estimated: 15 minutes.** This task shrank when the port split landed — **read this before writing
-code**, because an earlier draft of this plan had you editing two filters that no longer see the
-traffic.
-
-`RateLimitFilter` and `IpBackstopFilter` are **not** beans. `SecurityConfig`'s javadoc records why:
-exposing them as `@Component` would also trigger Boot's filter auto-registration and run the check
-twice per request. They are constructed inside the two API chains and added with `addFilterBefore`.
-
-The management chain adds neither. So actuator traffic on the management port is already unmetered, and
-**no `shouldNotFilter` override is needed** — the port split removed the problem instead of working
-around it. What remains is proving that, because it is currently an inference from how the chains are
-built rather than an observed fact.
-
-**Files:**
-- Test: `src/test/java/com/ffroliva/tinyledger/platform/ActuatorProbeTest.java` (extend)
-
-- [ ] **Step 1: Write the test**
-
-`ledger.rate-limit.ip-backstop.capacity` is 300/60s. A kubelet on a 10-second interval would cross that
-in under an hour, and a rate-limited liveness probe reads to the orchestrator as an unhealthy instance —
-it would restart a process that was working.
-
-```java
-/**
- * Spec §6.1 vs §6.6: a kubelet probing every 10s from one address would exhaust the 300-per-60s IP
- * backstop and be answered 429 — the orchestrator would then restart a healthy instance because its
- * probe was rate limited. Probes are therefore not charged at all.
- */
-@Test
-void probesAreNotChargedToTheRateLimitBuckets() throws Exception {
-    for (int i = 0; i < 320; i++) {
-        mockMvc.perform(get("/actuator/health/liveness")).andExpect(status().isOk());
-    }
-}
-```
-
-- [ ] **Step 2: Run it and watch it fail**
-
-Run: `./mvnw -q test -Dtest=ActuatorProbeTest#probesAreNotChargedToTheRateLimitBuckets`
-Expected: FAIL — a `429` once the loop passes the backstop capacity.
-
-- [ ] **Step 3: Skip actuator in both filters**
-
-Both classes extend `OncePerRequestFilter`. Override `shouldNotFilter` in each rather than adding a
-branch inside `doFilterInternal` — the framework hook says *this filter does not apply here*, which is
-the claim being made:
-
-```java
-/**
- * Spec §6.6: probe traffic is not client traffic. A liveness probe on a 10s interval from a single
- * orchestrator address would otherwise consume the §6.1 IP backstop and be refused 429, which reads
- * to the orchestrator as an unhealthy instance and restarts a process that was working.
- */
-@Override
-protected boolean shouldNotFilter(HttpServletRequest request) {
-    return request.getRequestURI().startsWith("/actuator/");
-}
-```
-
-Add the identical override to `IpBackstopFilter`.
-
-- [ ] **Step 4: Run the test and watch it pass**
-
-Run: `./mvnw -q test -Dtest=ActuatorProbeTest`
-Expected: PASS, 4 tests.
-
-- [ ] **Step 5: Confirm nothing else moved**
-
-Run: `./mvnw -q verify`
-Expected: exit 0. `RateLimitIT` and the budget arithmetic in `AbstractIntegrationTest:95-120` are
-untouched, because actuator requests now charge nothing — this **relaxes** the budget and cannot
-overspend it.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/main/java/com/ffroliva/tinyledger/platform/RateLimitFilter.java \
-        src/main/java/com/ffroliva/tinyledger/platform/IpBackstopFilter.java \
-        src/test/java/com/ffroliva/tinyledger/platform/ActuatorProbeTest.java
-git commit -m "fix(observability): actuator bypasses both rate-limit filters
-
-A 10s liveness probe from one orchestrator address would consume the 300/60s
-IP backstop and be answered 429 — which reads as an unhealthy instance and
-restarts a process that was working."
-```
-
----
-
-## Task 4: The `ledger.outbox.pending.age.seconds` gauge
+## Task 3: The `ledger.outbox.pending.age.seconds` gauge
 
 **Estimated: 40 minutes.**
 
@@ -536,7 +572,7 @@ restarts a process that was working."
 
 There is no unit test worth writing here — the whole behaviour is one SQL query, and a test with the
 query mocked would assert that the mock returns what it was told to. It is proven by `AuditLagIT` in
-Task 5, against a real Postgres, which is where the query can actually be wrong.
+Task 4, against a real Postgres, which is where the query can actually be wrong.
 
 ```java
 package com.ffroliva.tinyledger.platform;
@@ -581,8 +617,9 @@ public class AuditLagGauge {
         registry.gauge("ledger.outbox.pending.age.seconds", this, AuditLagGauge::lagSeconds);
     }
 
-    /** Package-private for the IT to read directly without going through the registry. */
-    double lagSeconds() {
+    /** Public, not package-private: the IT lives in ..observability, not ..platform (measured — it
+     *  does not compile otherwise). Nothing in src/main calls it; the registry holds the reference. */
+    public double lagSeconds() {
         Double seconds = jdbc.queryForObject(OLDEST_INCOMPLETE, Double.class);
         return seconds == null ? 0.0 : seconds;
     }
@@ -622,7 +659,7 @@ the write thread, so its lag is structurally zero."
 
 ---
 
-## Task 5: `E9` — lag is visible and does not gate
+## Task 4: `E9` — lag is visible and does not gate
 
 **Estimated: 60 minutes.** This is the task that closes the last open case in §9.3.
 
@@ -634,8 +671,27 @@ the write thread, so its lag is structurally zero."
 Extend `AbstractIntegrationTest` — do **not** add `@TestPropertySource` or `@DynamicPropertySource`,
 which fork the shared context (`AGENTS.md` trap 5, ADR 0003).
 
-Pause the consumer by pausing the **Kafka container**, matching how `KafkaOutageIT` already produces
-this condition; reuse its mechanism rather than inventing a second one.
+Pause the **Kafka container**, matching how `KafkaOutageIT:65-95` already produces this condition;
+reuse its mechanism rather than inventing a second one. It pauses the broker rather than the audit
+consumer **and that distinction is the whole test**: `completion-mode=DELETE` removes the publication
+row on *producer* ack, so a paused consumer leaves the gauge reading `0.0`. The gauge measures the
+outbox's pending age — which is why it is named `ledger.outbox.pending.age.seconds` and not
+`ledger.audit.lag.seconds`, as it was until spec v3.37.
+
+**Readiness is read through `HealthEndpoint`, not over HTTP.** The probes now live on
+`management.server.port`, and `AbstractIntegrationTest` is a `MockMvc` context with no port — a
+`mockMvc.perform(get("/actuator/health/readiness"))` here would not reach the management listener. It
+would also charge the 69-request IP budget. Autowire the endpoint and read the group directly; that is
+the same object the HTTP probe renders, one layer below the transport this test does not need:
+
+```java
+@Autowired HealthEndpoint health;
+@Autowired AuditLagGauge auditLagGauge;
+
+private Status readiness() {
+    return health.healthForPath("readiness").getStatus();
+}
+```
 
 ```java
 /**
@@ -649,8 +705,13 @@ this condition; reuse its mechanism rather than inventing a second one.
  */
 @Test
 void lagIsVisibleAndReadinessStaysUp() throws Exception {
-    // given: a healthy baseline
-    mockMvc.perform(get("/actuator/health/readiness")).andExpect(status().isOk());
+    // given: a DRAINED outbox and a healthy baseline. The drain is not tidiness — the gauge reads
+    // MIN(publication_date) across every incomplete row, so one left behind by an earlier class in
+    // the shared context would already exceed the threshold and the assertion below would pass
+    // without the pause having done anything.
+    await().atMost(Duration.ofSeconds(30))
+           .untilAsserted(() -> assertThat(auditLagGauge.lagSeconds()).isZero());
+    assertThat(readiness()).isEqualTo(Status.UP);
 
     pauseKafka();
     try {
@@ -676,7 +737,7 @@ void lagIsVisibleAndReadinessStaysUp() throws Exception {
 
         // and: readiness stays UP — the whole point of E9's rewrite. An instance that removed itself
         // here would fail E11, which requires the ledger to survive exactly this outage.
-        mockMvc.perform(get("/actuator/health/readiness")).andExpect(status().isOk());
+        assertThat(readiness()).isEqualTo(Status.UP);
     } finally {
         unpauseKafka();
     }
@@ -700,20 +761,53 @@ gh run watch
 Expected first failure: the gauge never exceeds 5.0, because `AuditLagGauge` is not yet injected into
 the test. Wire it, re-push.
 
-- [ ] **Step 3: Prove the assertion can fail — the readiness half especially**
+- [ ] **Step 3: Prove the readiness assertion can fail — by pausing Postgres, not by adding `kafka`**
 
-The readiness assertion is the one at risk of being vacuous: it would also pass if readiness were
-hard-coded UP, or if the group were empty. Prove it discriminates by temporarily adding `kafka` to the
-readiness group:
+The readiness assertion is the one at risk of being vacuous: it would pass just as well if readiness
+were hard-coded UP, if the group were empty, or if `healthForPath("readiness")` returned `UNKNOWN`
+because the group name were misspelled. It needs a proof that it discriminates.
 
-```properties
-management.endpoint.health.group.readiness.include=readinessState,db,kafka
+**Do not prove it by adding `kafka` to the readiness group.** An earlier draft of this plan did, and
+that proof cannot run: **Boot ships no Kafka health contributor on this classpath.** A group naming a
+contributor that does not exist fails at *context startup*, not at the assertion — the run would go red
+for a reason that has nothing to do with readiness, and reading that red as the proof would be a false
+green in the shape of a false red. (That absence is also what protects E11 today, and an upgrade that
+adds a contributor would remove the protection silently — worth an ADR 0004 note.)
+
+Prove it instead with a component that **does** contribute: `db`. In a throwaway commit, pause the
+**Postgres** container instead of Kafka, using the same `pauseContainerCmd` mechanism:
+
+```java
+// TEMPORARY — the red proof, revert before merging
+String containerId = POSTGRES.getContainerId();
 ```
 
-Push. Expected: `lagIsVisibleAndReadinessStaysUp` **fails** on the final assertion with `503`, because
-the paused broker now makes the instance not-ready. **Revert the property.** This is the red proof that
-the exclusion in Task 1 is load-bearing rather than decorative, and it is the evidence ADR 0004's
-central claim rests on — record the run URL in the commit message.
+Push. Expected: `lagIsVisibleAndReadinessStaysUp` **fails**, `readiness()` reading `DOWN` (`503` over
+HTTP) because `db` is in the `full` readiness group and Postgres is unreachable. **Revert the change.**
+
+**RUN 2026-08-07 — and it does not work either. This is the second proof design this step has had to
+discard.** Pushed as throwaway branch `proof-e9-postgres` with a draft PR, run `31180401360`. It did
+not redden: it **hung**. With the container paused the JDBC write blocks on the socket rather than
+failing, so the run never reaches the readiness assertion — `integration` was still executing after 45
+minutes and was cancelled. Every path in this test that could observe the outage goes through that same
+paused connection: the deposit, `lagSeconds()`, and `db`'s own validation query. No JDBC socket timeout
+is configured, and adding one so a test proof can work would be a production change made for a test.
+
+A hang, not an assertion — the identical failure the `kafka` variant has, one layer down. Reading
+either as a red proof would be exactly the trap this step exists to avoid.
+
+**The claim is proven anyway, in Task 2, and that is where to look.** What needs establishing is that
+`healthForPath("readiness").getStatus()` reads real component health rather than a constant or an
+`UNKNOWN` from a misspelled group. `redisBeingDownDoesNotMakeTheInstanceUnready` establishes exactly
+that: adding `redis` to the readiness group reddens precisely two assertions, on the same
+`HealthEndpoint`, the same group machinery and the same `Status` comparison this test uses — **and it
+runs on the fast `verify` path with no containers at all.** Duplicating it at the integration layer
+would cost forty minutes and prove nothing further.
+
+Two things therefore remain **unproven, and one of them unprovable**, named rather than implied: the
+`kafka` exclusion (no contributor exists to exclude — E11 is protected by a framework absence an
+upgrade could remove), and readiness turning DOWN on a real Postgres outage (no configured timeout
+makes that observable from inside a test).
 
 - [ ] **Step 4: Confirm green, counted from XML**
 
@@ -742,14 +836,18 @@ git commit -m "test: E9 — lag is visible and readiness stays up
 Closes the last open case in the §9.3 catalogue; the traceability sweep now
 prints nothing.
 
-Proven by deliberate violation: adding `kafka` to the readiness group makes
-this test fail 503 on its final assertion, which is what shows the exclusion
-in application.properties is load-bearing rather than decorative. Run: <url>"
+Proven by deliberate violation: pausing Postgres instead of Kafka turns
+readiness DOWN and reddens the final assertion, which shows it reads real
+component health rather than a constant. Run: <url>
+
+Adding `kafka` to the readiness group is NOT a usable proof — no Kafka health
+contributor exists on this classpath, so it fails at context startup rather
+than at the assertion."
 ```
 
 ---
 
-## Task 6: Make the documents true
+## Task 5: Make the documents true
 
 **Estimated: 25 minutes.** Nothing enforces this — no gate in this repository checks documentation
 (§8.4). It is a step in the plan precisely because nothing will remind you.
@@ -811,12 +909,13 @@ route to ADR 0004 for the reasoning. The spec states the contract; the ADR carri
 | Dangerous endpoints unreachable through two independent layers | 1 (exposure) + 2 (denyAll), each proven red separately |
 | Health detail withheld from every caller | 1 |
 | Liveness and readiness separate | 1 |
-| Readiness = `readinessState` + `db`; `redis`/`kafka` excluded | 1, proven by violation in 5 |
+| Readiness = `readinessState` + `db`; `redis`/`kafka` excluded | 1. Task 4's Postgres proof shows the group reads real health; the `kafka` exclusion is **unproven and unprovable** — no contributor exists to exclude |
 | Probes reachable without a credential | 2 |
-| `ledger.outbox.pending.age.seconds`, `full` only | 4 |
-| Nothing gates on lag | 5 |
-| 2 s / 5 s as alerting thresholds with no gate consuming them | 5 asserts the 5 s reading; no gate is added, which is the requirement |
-| `E9` rewritten and closed | 5 |
+| Probe traffic not rate limited | 2 — by construction, not by an override: the filters are built into the API chains only, and `actuatorIsNotServedOnTheApiPort` pins that actuator is absent from port 8080 |
+| `ledger.outbox.pending.age.seconds`, `full` only | 3 |
+| Nothing gates on lag | 4 |
+| 2 s / 5 s as alerting thresholds with no gate consuming them | 4 asserts the 5 s reading; no gate is added, which is the requirement |
+| `E9` rewritten and closed | 4 |
 
 **Deliberately out of scope, and named so it is not mistaken for an omission:** spans, metrics export,
 JSON logs, sampling, the Collector, and the §9.4 `InMemorySpanExporter` assertions. Those are step 9

@@ -7,9 +7,11 @@ import com.ffroliva.tinyledger.platform.RateLimitFilter;
 import com.ffroliva.tinyledger.platform.RateLimitProperties;
 import com.ffroliva.tinyledger.platform.RateLimiterStore;
 import com.ffroliva.tinyledger.platform.SecurityProblemHandler;
+import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -47,6 +49,52 @@ import tools.jackson.databind.ObjectMapper;
  */
 @Configuration
 public class SecurityConfig {
+
+    /**
+     * Spec §6.6 / ADR 0005: a chain scoped to the Actuator endpoints, ordered ahead of the two API
+     * chains so it claims those requests first. The two probe group paths are the only unauthenticated
+     * routes; everything else is denied outright rather than left to {@code authenticated()}, so
+     * exposing a new endpoint by configuration cannot quietly open it to any valid token.
+     *
+     * <p>This is the second of two layers, the first being
+     * {@code management.endpoints.web.exposure.include=health}. <strong>They do not overlap on the
+     * health root, and that was measured rather than assumed.</strong> Exposing {@code health} is
+     * exactly what maps {@code /actuator/health}, and the probe groups are sub-paths of it: with layer 1
+     * alone the root answered {@code 503} on the management port, rendering the aggregate status §6.6
+     * refuses to give an unauthenticated caller. {@code denyAll} here is the <em>only</em> thing closing
+     * it.
+     *
+     * <p><strong>The two permits are literal paths and must stay literal.</strong>
+     * {@code EndpointRequest.to(HealthEndpoint.class)} is the idiomatic-looking choice and it is wrong:
+     * it matches the health endpoint <em>and</em> its groups, so it would permit the root along with the
+     * probes — the exact grant the paragraph above exists to prevent (spec §6.6, v3.37 finding 6).
+     * {@code toAnyEndpoint()} is correct as the {@code securityMatcher} because there it defines the
+     * chain's scope rather than a grant.
+     *
+     * <p>Profile-independent: the port and its posture are the same in both run modes. A probe that
+     * needs a bearer token cannot report the outage that took the token issuer away, which is why
+     * {@code permitAll} here is the secure choice rather than the lax one — the port is not published,
+     * and in {@code standalone} it is bound to loopback outright.
+     *
+     * <p>Neither rate-limit filter is added, deliberately. They are constructed inside the two API
+     * chains below rather than registered as beans, so probe traffic is unmetered by construction. A
+     * {@code shouldNotFilter} override on the filters themselves would have been the wrong fix: it would
+     * also exempt {@code /actuator/} on the API port, where §6.1's IP backstop must still apply.
+     */
+    @Bean
+    @Order(0)
+    SecurityFilterChain managementChain(HttpSecurity http) {
+        return http.securityMatcher(EndpointRequest.toAnyEndpoint())
+                .csrf(AbstractHttpConfigurer::disable)
+                .logout(AbstractHttpConfigurer::disable)
+                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(
+                        auth -> auth.requestMatchers("/actuator/health/liveness", "/actuator/health/readiness")
+                                .permitAll()
+                                .anyRequest()
+                                .denyAll())
+                .build();
+    }
 
     /** The brief as written: in-memory, unauthenticated, dependency-free. */
     @Bean

@@ -91,8 +91,9 @@ public abstract class AbstractIntegrationTest {
      * {@code alice} and {@code carol} too, not just {@code bob}. Grepped against every
      * {@code post(}/{@code put(} call site under {@code src/test} before picking this number, and
      * recounted after every change to these classes: the heaviest existing writer is {@code alice} at
-     * 9 charged calls: eight {@code openAnAccountAs("alice")} paths in {@code SecurityConfigIT}, plus
-     * the account opened for N16 in {@code RoleAuthorizationIT}. {@code mallory} is next at 4 in
+     * <b>11</b> charged calls: eight {@code openAnAccountAs("alice")} paths in {@code SecurityConfigIT},
+     * the account opened for N16 in {@code RoleAuthorizationIT}, and <b>2</b> added by
+     * {@code AuditLagIT} (E9's account and its one deposit). {@code mallory} is next at 4 in
      * {@code SecurityConfigIT} (her own account, the deposit into it, and the cross-account deposit and
      * withdrawal she is refused — a refused write still charges the bucket, the limiter runs ahead of
      * authorisation), then {@code carol} at 3 in {@code RoleAuthorizationIT} and {@code trent} at 2.
@@ -131,8 +132,11 @@ public abstract class AbstractIntegrationTest {
      * Two things moved together. {@code RateLimitIT}'s write-limit proof derives its loop from
      * {@link #LOWERED_WRITE_LIMIT}, so raising that 20 -> 150 turned its 21 requests into <b>151</b> (+130).
      * {@code ConcurrentWithdrawalIT} itself adds a bounded <b>123</b> — 2 setup writes, at most
-     * {@code 10 * 12} = 120 withdrawal attempts, and one strong read. Enumerated total: 69 - 21 + 151 + 123 =
-     * <b>322</b>, against the ~300 Awaitility ceiling below for a worst case near <b>622</b> — still
+     * {@code 10 * 12} = 120 withdrawal attempts, and one strong read. {@code AuditLagIT} adds a fixed
+     * <b>3</b> (E9's account, its deposit and one strong read; its readiness assertions go through
+     * {@code HealthEndpoint} rather than HTTP and are charged nothing, which is one reason they do).
+     * Enumerated total: 69 - 21 + 151 + 123 + 3 =
+     * <b>325</b>, against the ~300 Awaitility ceiling below for a worst case near <b>625</b> — still
      * comfortably inside the 1000 configured here, so this constant is deliberately <em>not</em> raised. The
      * 69/68 accounting below is kept intact because it is the audit trail the recount was done against.
      *

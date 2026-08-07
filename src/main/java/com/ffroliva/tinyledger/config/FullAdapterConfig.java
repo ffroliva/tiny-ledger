@@ -18,6 +18,8 @@ import com.ffroliva.tinyledger.ledger.application.usecase.RecordMovementService;
 import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
 import com.ffroliva.tinyledger.notification.adapter.out.log.LogNotificationAdapter;
 import com.ffroliva.tinyledger.notification.application.NotificationPort;
+import com.ffroliva.tinyledger.platform.AuditLagGauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -114,6 +116,19 @@ public class FullAdapterConfig {
     @Bean
     public AuditKafkaListener auditKafkaListener(AuditTrailPort trail) {
         return new AuditKafkaListener(trail);
+    }
+
+    /**
+     * Spec §6.6 / ADR 0004. Constructed here rather than annotated as a {@code @Component} for the
+     * reason {@code AGENTS.md} states as a build-enforced rule: {@code AuditLagGauge} reads an
+     * outbound adapter, and only {@code config} and {@code adapter.out} may touch those —
+     * {@code HexagonalRulesTest} fails the build otherwise. This class is already
+     * {@code @Profile("full")}, so the {@code standalone} case, where migration 004's
+     * {@code event_publication} table does not exist, needs no further guard.
+     */
+    @Bean
+    public AuditLagGauge auditLagGauge(JdbcTemplate jdbcTemplate, MeterRegistry meterRegistry) {
+        return new AuditLagGauge(jdbcTemplate, meterRegistry);
     }
 
     /**
