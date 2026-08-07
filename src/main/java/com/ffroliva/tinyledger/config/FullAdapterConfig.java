@@ -17,6 +17,7 @@ import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
 import com.ffroliva.tinyledger.notification.adapter.out.log.LogNotificationAdapter;
 import com.ffroliva.tinyledger.notification.application.NotificationPort;
 import com.ffroliva.tinyledger.platform.AuditLagGauge;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.tracing.Tracer;
 import java.time.Duration;
@@ -141,7 +142,8 @@ public class FullAdapterConfig {
      * audit consumer read.
      */
     @Bean
-    public DefaultErrorHandler auditListenerErrorHandler(ProducerFactory<?, ?> producerFactory) {
+    public DefaultErrorHandler auditListenerErrorHandler(
+            ProducerFactory<?, ?> producerFactory, MeterRegistry meterRegistry) {
         KafkaTemplate<String, String> deadLetters = new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(
                 producerFactory.getConfigurationProperties(), new StringSerializer(), new StringSerializer()));
         // The destination is named rather than left to the default, which is `<topic>-dlt` in Spring
@@ -150,9 +152,27 @@ public class FullAdapterConfig {
         // partition index: that keeps per-account order on the DLT too, and a DLT provisioned with
         // fewer partitions than `ledger.events` still accepts it. Pinning the index would fail the
         // publish exactly when the trail depends on it.
+        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
+                deadLetters, (consumed, exception) -> new TopicPartition(LEDGER_EVENTS_DLT, -1));
+
+        // §6.6 / §14 step 9 part 2. This handler's own javadoc above says it exists to prevent "a
+        // silent, permanent hole in the compliance trail" — and until now nothing counted what it
+        // parked, so it produced one: records left the live path and no signal said so. §6.6 records
+        // this as belonging to part 2, "where an exporter exists to carry them".
+        //
+        // UNTAGGED on purpose. The account id and the exception type are both unbounded, and this is a
+        // meter (§6.6's cardinality rule, which no gate enforces). Which record was parked and why stays
+        // answerable from the DLT itself, from the span, and from the log line the recoverer writes —
+        // this counter's whole job is to make someone go and look.
+        Counter deadLettered = Counter.builder("ledger.audit.dead_lettered")
+                .description("Records parked on " + LEDGER_EVENTS_DLT + " by the audit consumer (spec §6.6)")
+                .register(meterRegistry);
+
         return new DefaultErrorHandler(
-                new DeadLetterPublishingRecoverer(
-                        deadLetters, (consumed, exception) -> new TopicPartition(LEDGER_EVENTS_DLT, -1)),
+                (consumed, exception) -> {
+                    deadLettered.increment();
+                    recoverer.accept(consumed, exception);
+                },
                 new FixedBackOff(1_000L, 9));
     }
 
