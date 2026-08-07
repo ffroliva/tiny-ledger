@@ -52,7 +52,12 @@ class RecordMovementServiceTest {
         UUID uid = UUID.randomUUID();
         service.deposit(new Deposit("alice", false, opened, uid, new Money(GBP, 10_000), null));
         assertThatThrownBy(() -> service.deposit(new Deposit("alice", false, opened, uid, new Money(GBP, 999), null)))
-                .isInstanceOf(IdempotencyConflictException.class);
+                .isInstanceOf(IdempotencyConflictException.class)
+                // §6.4's fifth mutant: movementUidOf could return null for a call site with nothing
+                // noticing, because the exception's type was asserted and its payload never was. The uid is
+                // the whole content of this error — it tells the client *which* movement it collided with.
+                .extracting("movementUid")
+                .isEqualTo(uid);
     }
 
     @Test
@@ -121,6 +126,47 @@ class RecordMovementServiceTest {
         MovementResult replay =
                 service.withdraw(new Withdraw("alice", false, opened, uid, new Money(GBP, 5_000), null));
         assertThat(replay.outcome()).isEqualTo(Outcome.REJECTED_REPLAYED);
+    }
+
+    /**
+     * `performance-findings` §6.4 row 3: {@code replayOf}'s {@code MoneyWithdrawn} branch had
+     * <b>NO_COVERAGE</b> — not a surviving mutant but an unreached one — while the {@code MoneyDeposited}
+     * branch three lines above was covered and its mutants killed. The same deposit/withdrawal asymmetry as
+     * the other two rows.
+     *
+     * <p>The balance assertion is the one that matters: a replay that re-applied the command instead of
+     * answering from the stored event would debit twice and leave 2 000 here, and the caller would be
+     * charged twice for one instruction they retried once.
+     */
+    @Test
+    void replayingASettledWithdrawalReturnsTheOriginalWithoutDebitingTwice() {
+        service.deposit(new Deposit("alice", false, opened, UUID.randomUUID(), new Money(GBP, 10_000), null));
+        UUID uid = UUID.randomUUID();
+        Withdraw cmd = new Withdraw("alice", false, opened, uid, new Money(GBP, 4_000), "rent");
+
+        MovementResult first = service.withdraw(cmd);
+        assertThat(first.outcome()).isEqualTo(Outcome.CREATED);
+        assertThat(first.balanceAfter()).isEqualTo(new Money(GBP, 6_000));
+
+        MovementResult replay = service.withdraw(cmd);
+        assertThat(replay.outcome()).isEqualTo(Outcome.REPLAYED);
+        assertThat(replay.balanceAfter()).isEqualTo(new Money(GBP, 6_000));
+        assertThat(store.read(opened)).hasSize(3); // opened + deposit + one withdrawal, no fourth event
+    }
+
+    /**
+     * The other half of that branch: {@code samePayload}'s comparison for a withdrawal. Without this the
+     * negated-conditional mutants on lines 94–97 have nothing to fail — the deposit twin of this case is
+     * {@link #sameUidDifferentAmountIsAnIdempotencyConflict}, which existed; the withdrawal one did not.
+     */
+    @Test
+    void replayingASettledWithdrawalUidWithADifferentAmountIsAConflict() {
+        service.deposit(new Deposit("alice", false, opened, UUID.randomUUID(), new Money(GBP, 10_000), null));
+        UUID uid = UUID.randomUUID();
+        service.withdraw(new Withdraw("alice", false, opened, uid, new Money(GBP, 4_000), null));
+
+        assertThatThrownBy(() -> service.withdraw(new Withdraw("alice", false, opened, uid, new Money(GBP, 999), null)))
+                .isInstanceOf(IdempotencyConflictException.class);
     }
 
     @Test
