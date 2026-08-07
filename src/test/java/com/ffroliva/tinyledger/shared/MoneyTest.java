@@ -18,8 +18,9 @@ class MoneyTest {
 
     @Test
     void refusesCrossCurrencyArithmetic() {
-        assertThatThrownBy(() -> new Money(GBP, 1).plus(Money.of("EUR", 1)))
-                .isInstanceOf(CurrencyMismatchException.class);
+        Money oneGbp = new Money(GBP, 1);
+        Money oneEur = Money.of("EUR", 1);
+        assertThatThrownBy(() -> oneGbp.plus(oneEur)).isInstanceOf(CurrencyMismatchException.class);
     }
 
     /**
@@ -31,8 +32,9 @@ class MoneyTest {
      */
     @Test
     void refusesCrossCurrencySubtractionToo() {
-        assertThatThrownBy(() -> new Money(GBP, 1).minus(Money.of("EUR", 1)))
-                .isInstanceOf(CurrencyMismatchException.class);
+        Money oneGbp = new Money(GBP, 1);
+        Money oneEur = Money.of("EUR", 1);
+        assertThatThrownBy(() -> oneGbp.minus(oneEur)).isInstanceOf(CurrencyMismatchException.class);
     }
 
     @Test
@@ -50,7 +52,9 @@ class MoneyTest {
      */
     @Test
     void overflowFailsAsACataloguedInvalidAmountRatherThanAnUncaughtArithmeticException() {
-        assertThatThrownBy(() -> new Money(GBP, Long.MAX_VALUE).plus(new Money(GBP, 1)))
+        Money atTheCeiling = new Money(GBP, Long.MAX_VALUE);
+        Money one = new Money(GBP, 1);
+        assertThatThrownBy(() -> atTheCeiling.plus(one))
                 .isInstanceOf(InvalidAmountException.class)
                 .isNotInstanceOf(ArithmeticException.class);
     }
@@ -58,7 +62,8 @@ class MoneyTest {
     /** The other operator, which had no overflow test at all — see {@code Money#exact}'s javadoc. */
     @Test
     void underflowOnSubtractionIsCataloguedTheSameWay() {
-        assertThatThrownBy(() -> new Money(GBP, Long.MIN_VALUE).minus(new Money(GBP, 1)))
-                .isInstanceOf(InvalidAmountException.class);
+        Money atTheFloor = new Money(GBP, Long.MIN_VALUE);
+        Money one = new Money(GBP, 1);
+        assertThatThrownBy(() -> atTheFloor.minus(one)).isInstanceOf(InvalidAmountException.class);
     }
 }

@@ -150,12 +150,6 @@ class AccountTest {
     }
 
     /**
-     * The owner is the authorisation subject: {@code RecordMovementService} and
-     * {@code StrongBalanceService} both decide access with {@code account.owner().equals(caller)}, so an
-     * ownerless account is a NullPointerException on the authorisation path — which Sonar reported as
-     * two S2259 bugs, one per call site. Guarded at construction so neither caller can meet one.
-     */
-    /**
      * The stream-shape invariant, and the actual cause behind Sonar's two S2259 reports. A history whose
      * first event is not {@code AccountOpened} used to rehydrate happily — the version-gap rule cannot
      * catch it, because a {@code MoneyDeposited} at version 1 satisfies {@code version + 1} just as well
@@ -173,9 +167,16 @@ class AccountTest {
                 .hasMessageContaining("must begin with AccountOpened");
     }
 
+    /**
+     * The owner is the authorisation subject: {@code RecordMovementService} and
+     * {@code StrongBalanceService} both decide access with {@code account.owner().equals(caller)}, so an
+     * ownerless account is a NullPointerException on the authorisation path — which Sonar reported as
+     * two S2259 bugs, one per call site. Guarded at construction so neither caller can meet one.
+     */
     @Test
     void anAccountCannotBeOpenedWithoutAnOwner() {
-        assertThatThrownBy(() -> new AccountOpened(AccountId.random(), 1, T, null, "ACC-001", GBP))
+        AccountId id = AccountId.random();
+        assertThatThrownBy(() -> new AccountOpened(id, 1, T, null, "ACC-001", GBP))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("owner");
     }
@@ -200,8 +201,8 @@ class AccountTest {
     @Test
     void nonPositiveAmountsAreRejectedByTheAggregateToo() {
         Account account = openedWith(5_000);
-        assertThatThrownBy(() -> account.deposit(
-                        new Deposit("alice", false, account.id(), UUID.randomUUID(), new Money(GBP, 0), null), T))
+        Deposit zero = new Deposit("alice", false, account.id(), UUID.randomUUID(), new Money(GBP, 0), null);
+        assertThatThrownBy(() -> account.deposit(zero, T))
                 .isInstanceOf(InvalidAmountException.class); // defence in depth; the boundary 400s first (§4.6)
     }
 
@@ -213,12 +214,10 @@ class AccountTest {
     @Test
     void nonPositiveAmountsAreRejectedOnWithdrawalToo() {
         Account account = openedWith(5_000);
-        assertThatThrownBy(() -> account.withdraw(
-                        new Withdraw("alice", false, account.id(), UUID.randomUUID(), new Money(GBP, 0), null), T))
-                .isInstanceOf(InvalidAmountException.class);
-        assertThatThrownBy(() -> account.withdraw(
-                        new Withdraw("alice", false, account.id(), UUID.randomUUID(), new Money(GBP, -1), null), T))
-                .isInstanceOf(InvalidAmountException.class);
+        Withdraw zero = new Withdraw("alice", false, account.id(), UUID.randomUUID(), new Money(GBP, 0), null);
+        Withdraw negative = new Withdraw("alice", false, account.id(), UUID.randomUUID(), new Money(GBP, -1), null);
+        assertThatThrownBy(() -> account.withdraw(zero, T)).isInstanceOf(InvalidAmountException.class);
+        assertThatThrownBy(() -> account.withdraw(negative, T)).isInstanceOf(InvalidAmountException.class);
     }
 
     /**

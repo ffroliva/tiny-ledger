@@ -16,10 +16,10 @@ class RecordMovementServiceTest {
     private static final Currency GBP = Currency.getInstance("GBP");
     private final FakeStore store = new FakeStore();
     private final List<LedgerEvent> published = new ArrayList<>();
-    private final RecordMovementService service = new RecordMovementService(
-            store, published::add, () -> Instant.parse("2026-08-03T12:00:00Z"), UUID::randomUUID);
+    private final RecordMovementService service =
+            new RecordMovementService(store, published::add, () -> Instant.parse("2026-08-03T12:00:00Z"));
     private final OpenAccountService openService = new OpenAccountService(
-            store, published::add, () -> Instant.parse("2026-08-03T12:00:00Z"), () -> UUID.randomUUID());
+            store, published::add, () -> Instant.parse("2026-08-03T12:00:00Z"), UUID::randomUUID);
 
     private AccountId opened;
 
