@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalManagementPort;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.core.env.Environment;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.client.RestClient;
 
@@ -78,6 +79,29 @@ class ActuatorProbeTest {
             @Autowired ObjectProvider<Tracer> tracer, @Autowired ObjectProvider<MeterRegistry> meters) {
         assertThat(tracer.getIfAvailable()).as("Tracer bean").isNotNull();
         assertThat(meters.getIfAvailable()).as("MeterRegistry bean").isNotNull();
+    }
+
+    /**
+     * §6.6 / ADR 0005, and a regression pin for the part-1 defect corrected at v3.41: these must be
+     * OTel RESOURCE attributes, not observation key-values. Asserted through the {@code Environment}
+     * rather than through the SDK because the binding is the thing that was wrong — the value
+     * arrived, at the wrong address, and every property-name claim in these documents has to be
+     * checked against a running context rather than against a jar (part 1's own finding).
+     *
+     * <p>The third assertion is the one that matters most: {@code service.instance.id} is a
+     * per-process UUID, so as an observation key-value it is a meter tag, and a meter tag whose value
+     * set grows without bound is the one-way door §6.6 refuses. Nothing else in this repository would
+     * catch it being put back.
+     */
+    @Test
+    void serviceIdentityIsDeclaredAsResourceAttributesAndNotAsObservationKeyValues(@Autowired Environment env) {
+        assertThat(env.getProperty("management.opentelemetry.resource-attributes.service.namespace"))
+                .isNotBlank();
+        assertThat(env.getProperty("management.opentelemetry.resource-attributes.service.instance.id"))
+                .isNotBlank();
+        assertThat(env.getProperty("management.observations.key-values.service.instance.id"))
+                .as("a per-process UUID as a meter tag is an unbounded time series (§6.6)")
+                .isNull();
     }
 
     @Test
