@@ -1,13 +1,22 @@
-# The CI-side Collector: OTLP in, a file out, nothing else.
+# The CI-side Collector: OTLP in, the DEBUG exporter out, nothing else.
 #
 # No credential and no third party — which is exactly why §14 step 9's gate is "a Collector receives
 # OTLP" and not "Grafana Cloud receives OTLP". A fork's build passes with no secret at all, and CI
 # gains no dependency on an account it cannot have.
 #
-# Deliberately NOT docker/otel-collector.yaml, and the two are not generated from one another. That
-# one tail-samples and forwards to Grafana Cloud; tail sampling here would make this test wait out a
-# sampling decision and could drop the very traces it asserts on. The difference is the point, and
-# §6.6 records that no gate covers the Compose config as a result.
+# ── Why `debug` and not `file`, which is what §9.4 originally named ───────────────────────────────
+# The file exporter was tried first and cost two CI rounds, both for reasons that had nothing to do
+# with telemetry:
+#
+#   1. This image is DISTROLESS and has no /tmp, so the exporter failed at startup with
+#      "open /tmp/otel-out.json: no such file or directory" — while Wait.forListeningPort() passed,
+#      because Docker had published the mapping against a process that had already given up.
+#   2. Mounting a tmpfs at /tmp fixed the startup, and then `docker cp` could not read back through
+#      the tmpfs mount, so the test saw an empty string and blamed the application again.
+#
+# The debug exporter removes the whole class of problem: no filesystem, no mount, no copy. The
+# assertion reads the container's own log, which Testcontainers already captures and which the test
+# already attaches to its failure message. §9.4 is corrected to say so.
 receivers:
   otlp:
     protocols:
@@ -17,36 +26,29 @@ receivers:
         endpoint: 0.0.0.0:4317
 
 processors:
-  # Short, because the test's whole job is to observe arrival. The default 200ms send batch timeout
-  # would be fine; it is written out so nobody has to look it up when the test goes slow.
+  # Short, because the test's whole job is to observe arrival.
   batch:
     timeout: 200ms
 
 exporters:
-  # Read back with Testcontainers' copyFileFromContainer, which goes through the Docker API. The
-  # contrib image ships no shell and no `cat`, so execInContainer would fail with something that
-  # looks like a Collector problem rather than a test one.
-  #
-  # /tmp DOES NOT EXIST in this image — it is distroless. OtlpExportIT mounts a tmpfs there, and
-  # without it the Collector exits at startup with "open /tmp/otel-out.json: no such file or
-  # directory". Measured on CI, which is the only reason this comment exists: Wait.forListeningPort()
-  # passed anyway, so the container looked healthy and every export was refused for sixty seconds.
-  file:
-    path: /tmp/otel-out.json
+  debug:
+    # `detailed` is load-bearing, not noise: the default `basic` prints counts only, and the test
+    # asserts on span NAMES and on the ledger.* and service.* attributes. A quieter setting here
+    # would turn four specific assertions into "something arrived".
+    verbosity: detailed
 
 service:
   telemetry:
     logs:
-      # `info`, not `warn`, and it is load-bearing: OtlpExportIT waits on the "Everything is ready"
-      # line, which `warn` suppresses. A quieter log here would silently downgrade that wait back to
-      # a port check — the check that already let a dead Collector through once.
+      # `info`, not `warn`, and it is load-bearing twice over: OtlpExportIT waits on the
+      # "Everything is ready" line, and the debug exporter writes its output at info level.
       level: info
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [file]
+      exporters: [debug]
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [file]
+      exporters: [debug]

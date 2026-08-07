@@ -6,7 +6,6 @@ import static org.awaitility.Awaitility.await;
 import com.ffroliva.tinyledger.TinyLedgerApplication;
 import com.jayway.jsonpath.JsonPath;
 import java.time.Duration;
-import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -42,8 +41,6 @@ import org.testcontainers.utility.MountableFile;
 @ActiveProfiles("standalone")
 class OtlpExportIT {
 
-    private static final String OUTPUT = "/tmp/otel-out.json";
-
     /**
      * Pinned, like every other version here, and <strong>checked to exist</strong> rather than guessed:
      * {@code 0.158.0} is the current release, published 2026-08-04. The plan's draft named a tag from
@@ -56,15 +53,11 @@ class OtlpExportIT {
                     MountableFile.forClasspathResource("otel-collector-test.yaml"), "/etc/otelcol/config.yaml")
             .withCommand("--config=/etc/otelcol/config.yaml")
             .withExposedPorts(4318)
-            // The image is DISTROLESS and has no /tmp, so the file exporter cannot create its output
-            // and the Collector exits during startup. Measured on CI (run 31218191269): without this
-            // the container reported started, every export was refused, and the test spent sixty
-            // seconds timing out on an assertion about spans.
-            .withTmpFs(Map.of("/tmp", "rw"))
-            // Wait on READINESS, not on a listening port. Wait.forListeningPort() is what let that dead
-            // Collector through — Docker had published the mapping, so the check passed against a
-            // process that had already given up. This line is why the test config keeps log level
-            // `info`: `warn` suppresses the message.
+            // Wait on READINESS, not on a listening port. Wait.forListeningPort() is what let a dead
+            // Collector through on CI run 31218191269 — Docker had published the mapping, so the check
+            // passed against a process that had already exited, and the test then blamed the
+            // application for sixty seconds. This line is why the config keeps log level `info`:
+            // `warn` suppresses the message.
             .waitingFor(Wait.forLogMessage(".*Everything is ready.*\\n", 1));
 
     static {
@@ -116,12 +109,9 @@ class OtlpExportIT {
                 .toBodilessEntity();
 
         await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
-            String received = collectorOutput();
+            String received = COLLECTOR.getLogs();
             assertThat(received)
-                    // The Collector's own log goes into the failure, because the first red here was a
-                    // sixty-second timeout that said only "no span" while the real cause — the exporter
-                    // refusing to start — was sitting unread in the container's stderr.
-                    .as("the use-case span must reach the Collector over OTLP. Collector log:%n%s", COLLECTOR.getLogs())
+                    .as("the use-case span must reach the Collector over OTLP")
                     .contains("ledger.record-movement");
             assertThat(received)
                     .as("...carrying the domain attribute §6.6 mandates on every span")
@@ -135,18 +125,5 @@ class OtlpExportIT {
                             + " without it twenty replicas emit one indistinguishable stream")
                     .contains("service.namespace");
         });
-    }
-
-    /**
-     * Empty rather than throwing while the file does not yet exist: the Collector creates it on its
-     * first flush, so the first few Awaitility attempts race it. A raw exception there would end the
-     * test instead of retrying, and would read as a Collector fault.
-     */
-    private static String collectorOutput() {
-        try {
-            return COLLECTOR.copyFileFromContainer(OUTPUT, in -> new String(in.readAllBytes()));
-        } catch (RuntimeException notYetWritten) {
-            return "";
-        }
     }
 }
