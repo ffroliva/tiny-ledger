@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # E7 — restart replays incomplete publications.
 #
-# The one case the integration suite cannot reach. §12 E7 asks for the application to be KILLED
+# The one case the integration suite cannot reach. §9.3 E7 asks for the application to be KILLED
 # mid-publication and restarted, so that Spring Modulith's `republish-outstanding-events-on-restart`
 # completes the delivery. `KafkaAuditModuleIT` runs inside a shared Spring context (ADR 0003) that no
 # test may kill, so E7 stayed open while E12 covered only its precondition — that the in-flight work is

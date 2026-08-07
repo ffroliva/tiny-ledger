@@ -90,7 +90,7 @@ class RoleAuthorizationIT extends AbstractIntegrationTest {
     // none — a typo in the withdrawal pattern would fail open into anyRequest().authenticated() and all
     // 43 tests would have stayed green.
     //
-    // §12 N6 says "403; no event". Only the 403 is asserted, and deliberately: the refusal happens at the
+    // §9.3 N6 says "403; no event". Only the 403 is asserted, and deliberately: the refusal happens at the
     // filter chain, so no handler — and therefore no event store call — is reached at all. Asserting the
     // absence of an event here would be asserting that a code path that never ran did not run.
     @Test
