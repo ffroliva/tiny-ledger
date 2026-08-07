@@ -18,6 +18,7 @@ import com.ffroliva.tinyledger.notification.adapter.out.log.LogNotificationAdapt
 import com.ffroliva.tinyledger.notification.application.NotificationPort;
 import com.ffroliva.tinyledger.platform.AuditLagGauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Tracer;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -111,8 +112,8 @@ public class FullAdapterConfig {
     }
 
     @Bean
-    public AuditKafkaListener auditKafkaListener(AuditTrailPort trail) {
-        return new AuditKafkaListener(trail);
+    public AuditKafkaListener auditKafkaListener(AuditTrailPort trail, Tracer tracer) {
+        return new AuditKafkaListener(trail, tracer);
     }
 
     /**
