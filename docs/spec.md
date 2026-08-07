@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.33
+**Version:** 3.34
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -915,6 +915,27 @@ asynchronous fan-out, and it keeps `http.server.duration` honest.
 Semantic conventions are the OTel standard ones (`messaging.*`, `db.*`, `http.*`); domain attributes
 use a `ledger.*` prefix so they never collide with a future convention.
 
+**Cardinality is a one-way door, and the rule is absolute: account identifiers, movement UIDs and
+interaction ids go on spans and logs, never on meters.** A span is a sampled individual record, and
+high-cardinality attributes are most of why it is worth keeping. A meter is one time series per unique
+tag combination — tagging a counter with an account id creates one series per account, permanently, and
+at scale that does not slow a metrics backend down, it takes it out. Meter tags stay bounded and
+enumerable: movement type, rejection reason, endpoint, status class, outcome. **If a proposed tag's
+value set grows with traffic, it belongs on the span.** *No gate enforces this* — it is a review rule,
+and it is written down because it looks harmless in a diff and is discovered in production
+(ADR 0005).
+
+**Resource attributes are not optional, because replicas are the point.** Every signal carries
+`service.name`, `service.namespace` and `service.instance.id` from the environment, plus the `k8s.*`
+conventions where the platform supplies them. Without them, twenty replicas emit one indistinguishable
+stream and *"which instance is slow"* has no answer. This is the retrofit that costs most: invisible in
+the application, visible in every dashboard and alert built before it.
+
+**`ledger.audit.lag.seconds` aggregates with `max`, never `sum`.** It reads a shared table, so every
+replica reports the same global value; summed across twenty pods it reads twenty times the truth. A
+wrong aggregation here is not visibly wrong on a chart — it is a plausible number that is false, which
+is the hardest class of monitoring defect to catch.
+
 **Sampling:** parent-based, 100% in `standalone` and CI, tail-sampled in `full` — always keep traces
 containing an error, a `409`, a `422` or a duration over p99. Sampling that discards the interesting
 traces is the same as no tracing.
@@ -927,6 +948,23 @@ rather than a default.
 | `liveness` | `livenessState` | A liveness probe that fails on a dependency restarts a process that was working |
 | `readiness` | `readinessState` + `db` | Event-store reachability. In `full` the event store **is** Postgres, so Boot's `db` indicator is that check; in `standalone` the store is in-memory and the group is `readinessState` alone |
 | — | **`redis` and `kafka` deliberately excluded** | Boot auto-configures an indicator for each, and the default grouping would pull them in. Leaving them would contradict **E10** and **E11**, which require the ledger to keep answering — and `?consistency=strong` to stay exact — while Redis or Kafka is down. An instance that removed itself from service during a broker outage would fail two cases this suite already passes |
+
+**Endpoint exposure is assessed, not defaulted.** `health` alone is web-mapped; the two probe groups
+are the only unauthenticated routes, and `/actuator/**` is otherwise denied — two independent layers,
+so widening the exposure property cannot by itself open an endpoint to any valid token. `heapdump`
+would render balances and bearer tokens, `env` and `configprops` the issuer URI and datasource URL,
+`loggers` is a runtime write and `httpexchanges` is PII: each is refused for a stated reason in
+ADR 0005's companion, `adr/0004`. Health detail is `never`, for every caller — which component is down
+is answerable from the gauge and the logs, by people who already have access to them.
+
+**Probes bind to a separate management port**, unpublished and reachable from inside the network only,
+so a misconfigured endpoint is unreachable rather than merely denied (ADR 0005).
+
+**Readiness has a second job under an orchestrator, and it is a correctness one.** On `SIGTERM` the
+instance must leave the load balancer *before* the listener stops: `server.shutdown=graceful` plus
+Boot's readiness flip on shutdown is what makes a rolling deploy or a scale-down safe. Without it,
+in-flight writes die mid-request during an ordinary deployment. For a ledger that is not an operational
+nicety — and note it is a reason readiness matters that ADR 0004's own reasoning never needed.
 
 **Readiness does not gate on lag, and the reason is architectural rather than a preference.** This
 section said the opposite through v3.31, and `E9` was written against it. It cannot hold here: the
@@ -1594,6 +1632,14 @@ either.
 
 ## 12. Docker and delivery
 
+**Kubernetes is the production runtime and Terraform is what produces it; Compose is for local
+development and the test suite and is not a deployment artefact** (ADR 0005). *Neither the manifests
+nor the Terraform exist* — deliberately, and this sentence is the whole of the claim. What the decision
+binds today is code being written now: the cardinality rule, resource attributes, graceful shutdown and
+the management port in §6.6, each of which is different in a cluster than in one hand-run process and
+none of which can be quietly corrected once dashboards consume it. Everything below describes what is
+actually built.
+
 - **Multi-stage `Dockerfile`:** Maven build stage → `eclipse-temurin:25-jre` runtime. Non-root user,
   read-only root filesystem, no shell in the final image, JVM container-aware flags. `dr-jskill`'s
   AOT, native (GraalVM 25) and CRaC variants are carried alongside — startup time is a legitimate
@@ -1834,6 +1880,28 @@ records the history. When an escalations section is non-empty, it is the canonic
 **Known divergences between this document and the code at v3.12.** Recorded here rather than left in
 Javadoc, because a reader checks the spec:
 
+**Backlog, opened 2026-08-07, not a finding: multi-replica event-publication resubmission.**
+**Nothing is concluded here, and this blocks nothing currently being built** — the ledger runs as a
+single process, Kubernetes is a direction rather than today's target (ADR 0005), and this cannot bite
+until a second replica exists. It is tracked so it is re-derived rather than discovered.
+
+*Measured:* `application-full.properties:56` enables
+`spring.modulith.events.republish-outstanding-events-on-restart`, so the resubmission mechanism is
+active; and `audit_entries` carries `UNIQUE (account_id, stream_version)`, so a duplicate would meet a
+constraint rather than duplicate a row silently.
+
+*Not established, and not to be assumed either way:* whether two instances can resubmit the same
+incomplete publication; what `AuditKafkaListener` does when the unique index rejects a duplicate —
+absorbed as an idempotent replay, or surfaced as a consumer error that retries forever, which would be
+the worse outcome; and whether §6.3's idempotency reaches this path or only the client-facing
+`movementUid` one.
+
+ADR 0005 carries the use case and the method — research the mechanism at the pinned version, reproduce
+with two instances against one Postgres and Kafka with a control per `AGENTS.md` trap 7, characterise
+the downstream, and only then decide. **Acceptance is evidence, not reasoning: a cited mechanism with a
+passing reproduction, or a defect with a red test.** **Owner: unassigned**; settle it before a second
+replica runs anywhere.
+
 | Gap | Spec says | Code does | Owner |
 |---|---|---|---|
 | `GET /api/v1/accounts/{accountUid}` for an account owned by someone else | 403 (§6.5, "wrong-owner access returns 403, not 404") | **404** — the controller filters by `accountsOwnedBy` and cannot distinguish absent from unowned | **Unassigned.** A wire-contract change; needs its own test and its own decision |
@@ -1880,3 +1948,4 @@ Javadoc, because a reader checks the spec:
 | 3.31 | 2026-08-07 | **Two documentation defects, both inherited rather than reasoned.** (1) The P/N/E case catalogue lives in **§9.3**, not §12 — §12 is Docker and delivery. The battle-testing plan called it "the spec's §12 catalogue" and this pass propagated that into five places (two revision rows, two test javadocs, one script header) without anyone opening §12 to check. Corrected; the three remaining `§12` references are genuinely about delivery, including `LiquibaseMigrationIT`'s, since §12 does cover migrations. (2) `AGENTS.md` described the remote as **private**; it is **public**, and has been. That one is not cosmetic: it told every agent that pushing is "not a publication event", when in fact each push makes commit messages and comments world-readable and a force-push does not unpublish them. Both are the same failure this pass kept finding — a claim passed along and never re-derived, like `E9`'s deferral at v3.26 |
 | 3.32 | 2026-08-07 | **Observability specified against this architecture instead of a generic one, ahead of §14 step 9 being built.** §6.6 gains the deployment shape — Micrometer Tracing over the OTel bridge, domain spans added by a use-case *decorator* so §9.2's framework-free application layer survives instrumentation, and a backend that is **opt-in and hosted**: one Collector service behind a Compose `profiles: [observability]` key forwarding to Grafana Cloud, with no Prometheus/Grafana/Tempo/Loki container anywhere and OTLP export off by default so an inactive profile costs no failed-export noise. **The substantive correction is `E9` and the §6.6 health paragraph, which described a system this is not.** Readiness was specified to gate on projection lag; the balance projection is a synchronous `@EventListener` on the publishing thread inside the write transaction (§4.3 — and §6.6's own trace-context table said so four paragraphs above the claim), so its lag is structurally **zero** and `E9`'s stated harm, "serving stale balances", has no mechanism. The lag that exists is the outbox and audit consumer, it makes the *audit trail* stale rather than balances, and gating readiness on it would take instances out of service during exactly the Kafka outage **E11** requires the ledger to survive. So it is gauged and not gated: `ledger.audit.lag.seconds`, `full` only, with the 2 s/5 s numbers kept as alerting thresholds and stated plainly to have **no probe and no gate consuming them**. `E9` is rewritten to assert the honest behaviour and stays open; `adr/0004` records the decision. Readiness composition is now explicit for the same reason — `db` in, `redis` and `kafka` deliberately out, because Boot's defaults would have pulled in indicators that contradict `E10` and `E11`. Also: exemplars are demoted from a table row to **specified-and-not-delivered** (a Prometheus-registry feature unreachable on the OTLP path), and §14 step 9's done-when loses both of its original clauses — no build can assert a hosted dashboard, so a Collector-reachability test is named as the nearest gate and the dashboard as a manual step. **The known-divergences label still reads `v3.12` and was deliberately not bumped:** this pass did not re-audit those three rows, and moving the version on them would have claimed an audit that did not happen — the precise error v3.26 and v3.31 were spent correcting |
 | 3.33 | 2026-08-07 | **§12.1 caught up with SonarCloud, which had been wired while the section still said it was refused.** The paragraph read "No SonarQube/SonarCloud, deliberately", arguing a locally reproducible gate beats "a SaaS badge that needs an account and token to verify" — the tool landed in PR #4 and the sentence never moved. Stage **13** now exists in the table, and the two properties that are easy to invert are stated: it **reports and does not gate** (no `-Dsonar.qualitygate.wait=true`, deliberately, matching `performance-findings.md` §6's posture on mutation coverage), so **the Quality Gate badge can go red while CI stays green**; and `sonar` is nevertheless one of **seven required status checks** on `main` (verified against the branch-protection API, not recalled — `load` is deliberately excluded, being `workflow_dispatch`-only, and requiring it would deadlock every PR). Those two combine into a property worth knowing rather than discovering: the required job **exits 0 with a warning when `SONAR_TOKEN` is absent**, so on a fork the check is green having analysed nothing — `AGENTS.md` trap 4's exact shape, kept as a stated property. The old paragraph's objection is answered rather than deleted: keys and scanner version live in `pom.xml`, so `./mvnw sonar:sonar` reproduces CI by hand. Also recorded: coverage is fed from **both** JaCoCo reports and guarded twice, because `sonar.coverage.jacoco.xmlReportPaths` ignores a missing file and would turn a lost artifact into a coverage dip rather than a failure. **Badges are documented as visibility, not gates** — six of the seven read from a tool that gates nothing. Two smaller staleness fixes in the same section: the intro called the load stage "planned" when it is built and `workflow_dispatch`-only, and stage 13 needed adding to a table that stopped at 12 |
+| 3.34 | 2026-08-07 | **A production target, stated before the observability work hardens around its absence.** Kubernetes is the production runtime, Terraform produces it, and Compose is local-only — `adr/0005-kubernetes-is-the-production-target.md`. The premise: a ledger that is not scalable is not a real ledger, and observability is the subsystem whose decisions are least reversible, because metric names and tag sets are consumed by dashboards and alerts outside this repository. **No manifests and no Terraform are written, deliberately** — this repository's own evidence is that specification for unbuilt infrastructure rots into a claim that reads as delivered (§14 step 13 struck, CI stage 6 deleted). What lands is only what constrains code being written this week: (1) **cardinality is a one-way door** — account ids, movement UIDs and interaction ids go on spans and logs and *never* on meters, since a meter is one series per tag combination and an account-tagged counter takes a backend out rather than slowing it; no gate enforces this and it says so; (2) **resource attributes** — `service.name`/`service.namespace`/`service.instance.id` from the environment, without which twenty replicas emit one indistinguishable stream; (3) **`ledger.audit.lag.seconds` aggregates `max`, never `sum`**, being a global value every replica reports, where the wrong aggregation is a plausible number that is false rather than a visibly broken chart; (4) **`server.shutdown=graceful` with readiness flipping before the listener stops**, which is a *correctness* property for a ledger — without it in-flight writes die mid-request on an ordinary rolling deploy, and it is a reason readiness matters that ADR 0004's reasoning never needed; (5) **the management port splits out**, ADR 0004 having deferred it behind the trigger "revisit at deployment to an orchestrator", which fired the moment Kubernetes became the target. §6.6 also gains the endpoint-exposure posture as a stated contract. **One item is added to the backlog and deliberately not concluded**, in *Open issues*: two facts are measured — resubmission-on-restart is enabled, and `audit_entries` carries a unique index a duplicate would meet — and the rest is named as unread rather than reasoned about, including what the consumer does when that index rejects a duplicate. It blocks nothing today; the ledger is a single process. ADR 0005 carries the use case and the method, and acceptance is evidence rather than argument |

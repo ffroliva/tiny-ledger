@@ -14,13 +14,14 @@ Quadrants are Diátaxis, per spec §8.1.
 |---|---|---|
 | **`../AGENTS.md`** | **Always, first.** The gates, the enforced rules, the traps already paid for | — |
 | `../README.md` | Running it for the first time | Tutorial |
-| `spec.md` (v3.33) | Any question about *contract* — API shape, errors (§6.5), security model (§6.4), idempotency (§6.3), observability and health (§6.6), the pipeline and what actually gates (§12.1), the two run modes (§1), module boundaries (§3/§4) | Explanation |
+| `spec.md` (v3.34) | Any question about *contract* — API shape, errors (§6.5), security model (§6.4), idempotency (§6.3), observability and health (§6.6), the pipeline and what actually gates (§12.1), the two run modes (§1), module boundaries (§3/§4) | Explanation |
 | `architecture.md` | You need the shape of the system before the detail | Explanation |
 | `api/openapi.yaml` | Changing a request/response, a status code, or a validation constraint. **The generated server interfaces come from here** — edit the contract, not the generated code | Reference |
 | `adr/0001-kafka-delivery-path.md` | Touching event publication, the outbox, Kafka, or the transaction boundary around publishing | Explanation |
 | `adr/0002-postgres-event-store.md` | Asking why Postgres is the system of record and Kafka only the bus, or why the topic and partition key are what they are | Explanation |
 | `adr/0003-test-topology-and-ci-parallelisation.md` | Adding a `@SpringBootTest`, changing CI, or wondering why there is one integration context | Explanation |
 | `adr/0004-readiness-does-not-gate-on-lag.md` | Touching the health probes, the readiness group, or the lag gauge — or asking why `E9` was rewritten rather than implemented as specified | Explanation |
+| `adr/0005-kubernetes-is-the-production-target.md` | Adding a meter tag, a resource attribute or anything an operator consumes — or asking where this deploys, why Compose is not it, and why there are no manifests | Explanation |
 | `agentic-workflow.md` | Understanding how this was built — including §5, where the agents were wrong, and §7, the per-phase gate record | Explanation |
 | `_archive/reviews/` | Checking that the review claims in `agentic-workflow.md` are real — the council reports and assessments as they were written | Reference |
 | `_archive/` (start at its `README.md`) | Tracing *why* a decision was taken, or auditing what an agent was actually instructed to do. **Working artifacts, not documentation** — the README states which paths inside them are stale | — |
