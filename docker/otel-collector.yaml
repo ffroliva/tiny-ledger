@@ -1,0 +1,73 @@
+# The opt-in Collector (spec §6.6, ADR 0005). ONE container, off unless the `observability` Compose
+# profile is started, forwarding to hosted Grafana Cloud.
+#
+# There is deliberately NO local Prometheus/Grafana/Tempo/Loki stack. Five containers most runs never
+# open is a cost paid on every `docker compose up` for a benefit taken occasionally — the same posture
+# the `load` profile already takes, and the reason the default `up` still starts exactly four.
+#
+# ── NO GATE COVERS THIS FILE ──────────────────────────────────────────────────────────────────────
+# Nothing in CI starts it, and OtlpExportIT uses its own config
+# (src/test/resources/otel-collector-test.yaml) so it can assert against a file rather than against a
+# hosted backend that no build can read. The two configs are NOT generated from one another and they
+# differ on purpose — see `tail_sampling` below. This one is proven by being run by hand, and §6.6
+# says so rather than implying a check that does not exist.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  # §6.6: "parent-based, 100% in standalone and CI, tail-sampled in full". The APPLICATION samples
+  # everything, because only this processor can see how a trace ENDED — a head sampler discards errors
+  # at exactly the same rate as successes, which is backwards for a ledger. And keeping 100% of a
+  # stream that is mostly successful twelve-millisecond deposits fills a quota with the least
+  # interesting traffic there is.
+  #
+  # decision_wait must exceed the longest trace you care about, or a slow trace is sampled before its
+  # slowness is known. 10s is comfortably past §9.7's 150ms p99 write budget.
+  tail_sampling:
+    decision_wait: 10s
+    policies:
+      - name: keep-errors
+        type: status_code
+        status_code: { status_codes: [ERROR] }
+      - name: keep-slow
+        type: latency
+        latency: { threshold_ms: 150 }
+      - name: sample-the-rest
+        type: probabilistic
+        probabilistic: { sampling_percentage: 5 }
+  batch:
+    timeout: 5s
+
+exporters:
+  # `otlp_http`, not `otlphttp`: the latter is a deprecated alias on 0.158.0 and warns on every boot.
+  # Measured by running it — the warning is the kind of thing that becomes a breakage on an upgrade
+  # nobody connects to this file.
+  otlp_http/grafana:
+    # Base form: the exporter appends /v1/traces and /v1/metrics itself.
+    #
+    # The endpoint is not secret; the headers value IS, because it embeds the access-policy token as
+    # Basic base64(instanceID:token). Both come from the environment — `.env.grafana`, gitignored,
+    # never a committed value. Per AGENTS.md's Configuration rule, a .env configures your SHELL and
+    # nothing loads it for you; Compose reads these from the environment it was started with.
+    endpoint: ${env:OTEL_EXPORTER_OTLP_ENDPOINT}
+    headers:
+      Authorization: ${env:OTEL_EXPORTER_OTLP_HEADERS_AUTHORIZATION}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [tail_sampling, batch]
+      exporters: [otlp_http/grafana]
+    metrics:
+      receivers: [otlp]
+      # NO tail sampling on metrics. Sampling a counter does not thin it, it corrupts it — the same
+      # class of defect as summing `ledger.outbox.pending.age.seconds` instead of maxing it: a
+      # plausible number that is false.
+      processors: [batch]
+      exporters: [otlp_http/grafana]
