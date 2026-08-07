@@ -63,7 +63,7 @@ class ObservabilityIT extends AbstractIntegrationTest {
                         .header("Authorization", bearer("alice"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"amount\":{\"currency\":\"GBP\",\"minorUnits\":4000}}"))
-                .andExpect(status().isOk());
+                .andExpect(status().isCreated());
 
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
             SpanData movement = spanNamed("ledger.record-movement");
@@ -140,7 +140,7 @@ class ObservabilityIT extends AbstractIntegrationTest {
                         .header("Authorization", bearer("alice"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"amount\":{\"currency\":\"GBP\",\"minorUnits\":%d}}".formatted(minorUnits)))
-                .andExpect(status().isOk());
+                .andExpect(status().isCreated());
     }
 
     /** Fails naming every span that WAS seen — "not found" with no list is the least useful red there is. */
