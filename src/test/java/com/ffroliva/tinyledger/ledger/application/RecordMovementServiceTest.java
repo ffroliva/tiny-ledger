@@ -180,14 +180,15 @@ class RecordMovementServiceTest {
     static class FakeStore implements EventStorePort {
         final Map<AccountId, List<LedgerEvent>> streams = new HashMap<>();
 
-        public void append(AccountId id, long expectedVersion, List<LedgerEvent> events) {
+        public void append(AccountId id, long expectedVersion, List<? extends LedgerEvent> events) {
             List<LedgerEvent> stream = streams.computeIfAbsent(id, k -> new ArrayList<>());
             long current = stream.isEmpty() ? 0 : stream.getLast().version();
             if (current != expectedVersion) throw new ConcurrencyConflictException(id, expectedVersion, current);
             for (LedgerEvent e : events) {
-                movementUid(e).ifPresent(uid -> {
-                    if (findByMovementUid(uid).isPresent()) throw new DuplicateMovementException(uid);
-                });
+                if (e instanceof MovementEvent m
+                        && findByMovementUid(m.movementUid()).isPresent()) {
+                    throw new DuplicateMovementException(m.movementUid());
+                }
             }
             stream.addAll(events);
         }
@@ -196,20 +197,15 @@ class RecordMovementServiceTest {
             return List.copyOf(streams.getOrDefault(id, List.of()));
         }
 
-        public Optional<LedgerEvent> findByMovementUid(UUID uid) {
+        public Optional<MovementEvent> findByMovementUid(UUID uid) {
+            // MovementEvent replaces the four-arm Optional<UUID> helper this fake used to carry:
+            // "does this event have a movement uid" is now a type question, not a switch.
             return streams.values().stream()
                     .flatMap(List::stream)
-                    .filter(e -> movementUid(e).map(uid::equals).orElse(false))
+                    .filter(MovementEvent.class::isInstance)
+                    .map(MovementEvent.class::cast)
+                    .filter(e -> e.movementUid().equals(uid))
                     .findFirst();
-        }
-
-        private static Optional<UUID> movementUid(LedgerEvent e) {
-            return switch (e) {
-                case MoneyDeposited d -> Optional.of(d.movementUid());
-                case MoneyWithdrawn w -> Optional.of(w.movementUid());
-                case MovementRejected r -> Optional.of(r.movementUid());
-                case AccountOpened a -> Optional.empty();
-            };
         }
     }
 }

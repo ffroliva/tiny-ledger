@@ -8,7 +8,7 @@ import java.util.UUID;
 public interface AuditTrailPort {
 
     /** Idempotent on {@code (accountId, streamVersion)} — Kafka delivery is at-least-once. */
-    void record(AuditEntry entry);
+    void recordEntry(AuditEntry entry);
 
     /** Spec §7 {@code getEvents}: one page of an account's own events, in stream order. */
     Page eventStream(UUID accountId, String cursor, int limit);

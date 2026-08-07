@@ -34,7 +34,7 @@ class AuditKafkaListenerTest {
     // lambda cannot implement it. This fake needs only `record`; the other two are unused here.
     private final AuditKafkaListener listener = new AuditKafkaListener(new AuditTrailPort() {
         @Override
-        public void record(AuditEntry entry) {
+        public void recordEntry(AuditEntry entry) {
             recorded = entry;
         }
 
@@ -51,21 +51,21 @@ class AuditKafkaListenerTest {
 
     @Test
     void aPresentActorHeaderIsStoredVerbatim() {
-        listener.on(record(Instant.parse("2026-08-10T00:00:00Z"), "trent", null));
+        listener.on(consumed(Instant.parse("2026-08-10T00:00:00Z"), "trent", null));
 
         assertThat(recorded.actor()).isEqualTo("trent");
     }
 
     @Test // §15.10: absence before the cutover reads as the owner — stored as literal absence, not guessed
     void aMissingActorHeaderBeforeTheCutoverIsStoredAsAbsent() {
-        listener.on(record(AuditKafkaListener.CUTOVER.minusSeconds(1), null, null));
+        listener.on(consumed(AuditKafkaListener.CUTOVER.minusSeconds(1), null, null));
 
         assertThat(recorded.actor()).isNull();
     }
 
     @Test // N18: on/after the cutover every publisher stamps actor unconditionally — absence is a defect
     void aMissingActorHeaderOnOrAfterTheCutoverIsReportedAsUnknown() {
-        listener.on(record(AuditKafkaListener.CUTOVER, null, null));
+        listener.on(consumed(AuditKafkaListener.CUTOVER, null, null));
 
         assertThat(recorded.actor()).isEqualTo("unknown");
     }
@@ -73,7 +73,7 @@ class AuditKafkaListenerTest {
     @Test // §15.11: a header dropped by a re-key/mirror/replay tool is not a contradiction — the payload
     // is the record, so its value is used rather than the entry being downgraded to null/"unknown"
     void aMissingActorHeaderWithAnActorInThePayloadUsesThePayloadValue() {
-        listener.on(record(Instant.parse("2026-08-10T00:00:00Z"), null, "{\"actor\":\"trent\"}"));
+        listener.on(consumed(Instant.parse("2026-08-10T00:00:00Z"), null, "{\"actor\":\"trent\"}"));
 
         assertThat(recorded.actor()).isEqualTo("trent");
     }
@@ -81,7 +81,7 @@ class AuditKafkaListenerTest {
     @Test // §15.11: the event payload is the record; a header that disagrees with it is a fault, not a guess
     void aHeaderThatDisagreesWithThePayloadsActorIsRejectedRatherThanStored() {
         ConsumerRecord<String, String> disagreeing =
-                record(Instant.parse("2026-08-10T00:00:00Z"), "trent", "{\"actor\":\"alice\"}");
+                consumed(Instant.parse("2026-08-10T00:00:00Z"), "trent", "{\"actor\":\"alice\"}");
 
         assertThatThrownBy(() -> listener.on(disagreeing))
                 .isInstanceOf(IllegalStateException.class)
@@ -90,7 +90,7 @@ class AuditKafkaListenerTest {
         assertThat(recorded).isNull();
     }
 
-    private static ConsumerRecord<String, String> record(Instant occurredAt, String actor, String payload) {
+    private static ConsumerRecord<String, String> consumed(Instant occurredAt, String actor, String payload) {
         RecordHeaders headers = new RecordHeaders();
         headers.add(new RecordHeader("event-type", "MoneyDeposited".getBytes(StandardCharsets.UTF_8)));
         headers.add(new RecordHeader("stream-version", "2".getBytes(StandardCharsets.UTF_8)));

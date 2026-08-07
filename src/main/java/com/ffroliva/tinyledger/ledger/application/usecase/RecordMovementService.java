@@ -25,7 +25,7 @@ public class RecordMovementService implements RecordMovementUseCase {
 
     @Override
     public MovementResult deposit(Deposit cmd) {
-        return record(
+        return recordMovement(
                 cmd.caller(),
                 cmd.callerIsAdmin(),
                 cmd.accountId(),
@@ -38,7 +38,7 @@ public class RecordMovementService implements RecordMovementUseCase {
 
     @Override
     public MovementResult withdraw(Withdraw cmd) {
-        return record(
+        return recordMovement(
                 cmd.caller(),
                 cmd.callerIsAdmin(),
                 cmd.accountId(),
@@ -49,12 +49,12 @@ public class RecordMovementService implements RecordMovementUseCase {
                 cmd.reference());
     }
 
-    private MovementResult record(
+    private MovementResult recordMovement(
             String caller,
             boolean callerIsAdmin,
             AccountId accountId,
             UUID movementUid,
-            java.util.function.Function<Account, List<LedgerEvent>> action,
+            java.util.function.Function<Account, List<MovementEvent>> action,
             MovementType type,
             com.ffroliva.tinyledger.shared.Money amount,
             String reference) {
@@ -65,9 +65,9 @@ public class RecordMovementService implements RecordMovementUseCase {
         // This is the ownership term alone — ledger:admin widens it, and only it. The role term is
         // untouched: an admin without ledger:writer never reaches this line at all (N15, Task 5).
         if (!account.owner().equals(caller) && !callerIsAdmin) throw new OwnershipException(caller, accountId); // ③
-        Optional<LedgerEvent> existing = store.findByMovementUid(movementUid); // ④ (after authz)
+        Optional<MovementEvent> existing = store.findByMovementUid(movementUid); // ④ (after authz)
         if (existing.isPresent()) return replayOf(existing.get(), accountId, type, amount, reference);
-        List<LedgerEvent> events = action.apply(account); // ⑤
+        List<MovementEvent> events = action.apply(account); // ⑤
         try {
             store.append(accountId, account.version(), events); // ⑥
         } catch (DuplicateMovementException raced) {
@@ -78,7 +78,7 @@ public class RecordMovementService implements RecordMovementUseCase {
     }
 
     private MovementResult replayOf(
-            LedgerEvent event,
+            MovementEvent event,
             AccountId requested,
             MovementType type,
             com.ffroliva.tinyledger.shared.Money amount,
@@ -99,13 +99,15 @@ public class RecordMovementService implements RecordMovementUseCase {
                         r.accountId().equals(requested)
                                 && r.type() == type
                                 && r.amount().equals(amount);
-                    case AccountOpened a -> false;
                 };
-        if (!samePayload) throw new IdempotencyConflictException(movementUidOf(event));
+        // No AccountOpened arm to write: MovementEvent is sealed over exactly the three events that
+        // carry a movementUid, so the compiler knows this switch is total. The uid comes straight off
+        // the interface — the four-arm helper that threw for a case it could not receive is gone.
+        if (!samePayload) throw new IdempotencyConflictException(event.movementUid());
         return resultOf(event, Outcome.REPLAYED, Outcome.REJECTED_REPLAYED);
     }
 
-    private MovementResult resultOf(LedgerEvent event, Outcome created, Outcome rejected) {
+    private MovementResult resultOf(MovementEvent event, Outcome created, Outcome rejected) {
         return switch (event) {
             case MoneyDeposited d ->
                 new MovementResult(
@@ -140,16 +142,6 @@ public class RecordMovementService implements RecordMovementUseCase {
                         r.occurredAt(),
                         rejected,
                         r.reason());
-            case AccountOpened a -> throw new IllegalStateException("not a movement");
-        };
-    }
-
-    private static UUID movementUidOf(LedgerEvent event) {
-        return switch (event) {
-            case MoneyDeposited d -> d.movementUid();
-            case MoneyWithdrawn w -> w.movementUid();
-            case MovementRejected r -> r.movementUid();
-            case AccountOpened a -> throw new IllegalStateException("not a movement");
         };
     }
 }

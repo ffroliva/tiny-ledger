@@ -376,9 +376,9 @@ public class LedgerSteps {
 
     @Then("a {string} notification carrying the movement UID is produced")
     public void aNotificationIsProduced(String kind) {
-        assertThat(notifications.forMovement(lastMovementUid)).singleElement().satisfies(record -> {
-            assertThat(record.kind()).isEqualTo(kind);
-            assertThat(record.accountId().value()).isEqualTo(uid(currentAccount));
+        assertThat(notifications.forMovement(lastMovementUid)).singleElement().satisfies(notification -> {
+            assertThat(notification.kind()).isEqualTo(kind);
+            assertThat(notification.accountId().value()).isEqualTo(uid(currentAccount));
         });
     }
 

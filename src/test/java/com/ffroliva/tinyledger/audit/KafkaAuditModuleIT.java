@@ -274,7 +274,7 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
 
             List<String> parked = new ArrayList<>();
             await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
-                dlt.poll(Duration.ofSeconds(1)).forEach(record -> parked.add(record.key()));
+                dlt.poll(Duration.ofSeconds(1)).forEach(consumed -> parked.add(consumed.key()));
                 assertThat(parked).contains("not-a-uuid");
             });
         }
@@ -310,7 +310,7 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
 
             List<String> parked = new ArrayList<>();
             await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
-                dlt.poll(Duration.ofSeconds(1)).forEach(record -> parked.add(record.key()));
+                dlt.poll(Duration.ofSeconds(1)).forEach(consumed -> parked.add(consumed.key()));
                 assertThat(parked).contains(key);
             });
         }
@@ -343,7 +343,8 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
 
             Map<String, Integer> placement = new HashMap<>();
             await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
-                dlt.poll(Duration.ofSeconds(1)).forEach(record -> placement.put(record.key(), record.partition()));
+                dlt.poll(Duration.ofSeconds(1))
+                        .forEach(consumed -> placement.put(consumed.key(), consumed.partition()));
                 assertThat(placement).containsEntry(key, placedByKey);
             });
         }
