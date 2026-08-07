@@ -8,8 +8,6 @@ import com.ffroliva.tinyledger.balance.adapter.out.redis.RedisBalanceCache;
 import com.ffroliva.tinyledger.balance.application.port.out.BalanceCachePort;
 import com.ffroliva.tinyledger.balance.application.port.out.BalanceProjectionPort;
 import com.ffroliva.tinyledger.ledger.adapter.out.postgres.PostgresEventStore;
-import com.ffroliva.tinyledger.ledger.application.port.in.OpenAccountUseCase;
-import com.ffroliva.tinyledger.ledger.application.port.in.RecordMovementUseCase;
 import com.ffroliva.tinyledger.ledger.application.port.out.ClockPort;
 import com.ffroliva.tinyledger.ledger.application.port.out.EventStorePort;
 import com.ffroliva.tinyledger.ledger.application.port.out.IdGeneratorPort;
@@ -28,7 +26,6 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -158,15 +155,25 @@ public class FullAdapterConfig {
                 new FixedBackOff(1_000L, 9));
     }
 
+    /**
+     * <strong>No {@code @Primary}, and a concrete return type — both deliberate, both required.</strong>
+     * Since §14 step 9 part 2, {@code UseCaseConfig}'s traced decorator is the {@code @Primary} bean
+     * for this interface, and two {@code @Primary} candidates of one type is a context-startup
+     * failure rather than a warning.
+     *
+     * <p>The concrete type is what lets that decorator select this bean through an
+     * {@code ObjectProvider} in {@code full} and fall back to the plain service in {@code standalone},
+     * from a single profile-independent bean method. Declaring {@code OpenAccountUseCase} here
+     * instead would make the provider ambiguous — it would match the traced bean too.
+     */
     @Bean
-    @Primary
-    public OpenAccountUseCase transactionalOpenAccount(OpenAccountService delegate) {
+    public TransactionalUseCases.Opening transactionalOpenAccount(OpenAccountService delegate) {
         return new TransactionalUseCases.Opening(delegate);
     }
 
+    /** See {@link #transactionalOpenAccount} — same two constraints, same reason. */
     @Bean
-    @Primary
-    public RecordMovementUseCase transactionalRecordMovement(RecordMovementService delegate) {
+    public TransactionalUseCases.Movements transactionalRecordMovement(RecordMovementService delegate) {
         return new TransactionalUseCases.Movements(delegate);
     }
 }

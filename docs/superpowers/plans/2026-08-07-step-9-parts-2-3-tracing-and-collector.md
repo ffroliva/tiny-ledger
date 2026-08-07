@@ -416,7 +416,7 @@ class TracedUseCasesTest {
         void aSettledMovementProducesOneSpanCarryingTheDomainAttributes() {
             traced(new StubMovements(result(Outcome.CREATED, null))).withdraw(withdraw());
 
-            var span = tracer.getOnlySpan();
+            var span = tracer.onlySpan();
             assertThat(span.getName()).isEqualTo("ledger.record-movement");
             assertThat(span.getTags())
                     .containsEntry("ledger.account_id", ACCOUNT.value().toString())
@@ -429,7 +429,7 @@ class TracedUseCasesTest {
         void aRejectionTagsTheReasonOnTheSpanAsWellAsTheCounter() {
             traced(new StubMovements(result(Outcome.REJECTED, "insufficient-funds"))).withdraw(withdraw());
 
-            assertThat(tracer.getOnlySpan().getTags())
+            assertThat(tracer.onlySpan().getTags())
                     .containsEntry("ledger.rejection_reason", "insufficient-funds");
         }
 
@@ -441,10 +441,10 @@ class TracedUseCasesTest {
             } catch (ConcurrencyConflictException expected) {
                 // rethrown, deliberately: a decorator that swallows is a decorator that lies
             }
-            assertThat(tracer.getOnlySpan().getEndTimestamp())
+            assertThat(tracer.onlySpan().getEndTimestamp())
                     .as("a span left unended leaks and never reaches a backend")
                     .isNotNull();
-            assertThat(tracer.getOnlySpan().getError()).isSameAs(boom);
+            assertThat(tracer.onlySpan().getError()).isSameAs(boom);
         }
     }
 
@@ -742,7 +742,11 @@ and add, after the `recordMovement` bean:
     @Primary
     OpenAccountUseCase tracedOpenAccount(
             ObjectProvider<TransactionalUseCases.Opening> transactional, OpenAccountService plain, Tracer tracer) {
-        return new TracedUseCases.Opening(transactional.getIfAvailable(() -> plain), tracer);
+        // NOT getIfAvailable(Supplier): CORRECTED during execution. That overload fixes the
+        // supplier's type to the provider's own generic, so `() -> plain` fails to compile with
+        // "OpenAccountService cannot be converted to TransactionalUseCases.Opening". Two lines.
+        TransactionalUseCases.Opening decorated = transactional.getIfAvailable();
+        return new TracedUseCases.Opening(decorated != null ? decorated : plain, tracer);
     }
 
     @Bean
@@ -752,9 +756,16 @@ and add, after the `recordMovement` bean:
             RecordMovementService plain,
             Tracer tracer,
             MeterRegistry meters) {
-        return new TracedUseCases.Movements(transactional.getIfAvailable(() -> plain), tracer, meters);
+        TransactionalUseCases.Movements decorated = transactional.getIfAvailable();
+        return new TracedUseCases.Movements(decorated != null ? decorated : plain, tracer, meters);
     }
 ```
+
+**Two corrections made during execution, recorded here rather than left for the next reader:**
+`SimpleTracer`'s accessor is `onlySpan()`, not `getOnlySpan()` (Micrometer Tracing 1.7.0), and the
+`ObjectProvider` overload above. Both were compile failures on the first run, which is the cheap
+kind. `@Primary`'s import in `FullAdapterConfig` turned out to be unused after the change — spotless
+removes it.
 
 - [ ] **Step 6: `FullAdapterConfig` gives up `@Primary`**
 
