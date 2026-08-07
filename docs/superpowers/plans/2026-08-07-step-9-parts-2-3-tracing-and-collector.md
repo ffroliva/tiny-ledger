@@ -1892,6 +1892,25 @@ class OtlpExportIT {
 }
 ```
 
+**CORRECTED DURING EXECUTION — the file exporter above is not what shipped.** It cost two CI rounds,
+neither of them about telemetry, and both are now recorded in `src/test/resources/otel-collector-test.yaml`:
+
+1. The contrib image is **distroless and has no `/tmp`**, so the file exporter exited at startup —
+   while `Wait.forListeningPort()` passed, because Docker had published the mapping against a process
+   that had already given up. That wait strategy is now `Wait.forLogMessage("Everything is ready")`,
+   which requires the config at log level `info`.
+2. With a tmpfs at `/tmp` the Collector started and received everything, and then **`docker cp` could
+   not read back through the tmpfs mount**.
+
+What shipped is the **debug exporter at `verbosity: detailed`**, asserted against `COLLECTOR.getLogs()`.
+No filesystem, no mount, no copy — and §14's gate asks only that a Collector receive OTLP. The image
+tag also changed: `0.158.0`, the current release, after checking that the plan's guessed `0.115.1` was
+a real but two-year-old tag.
+
+**The process lesson, which is the one worth carrying:** both rounds would have been caught by one
+`docker run` against the config file before pushing. A container config is code, and it was the only
+piece of this work not exercised locally first.
+
 - [ ] **Step 3: Two things to verify on the first CI run, before trusting a green**
 
 1. **The image tag.** `otel/opentelemetry-collector-contrib:0.115.1` is written as a pinned version,
