@@ -41,11 +41,16 @@ benchmarks/dependency-reduced-pom.xml
 # a committed token is a published token, and force-pushing does not unpublish what was already
 # fetched or indexed — it has to be revoked instead. These patterns exist so that never happens.
 #
-# `.env.example` is the deliberate exception below: it is committed, and it carries variable NAMES
-# with empty values, never secrets. A `.env*` blanket without that negation would hide the one file
-# whose whole job is to be read.
-.env
-.env.*
+# `.env*` is deliberately the broad form: it catches `.env`, `.env.sonar`, and anything else that
+# starts that way (`.envrc`, `.environment`), so a new tool's credential file is ignored before
+# anyone thinks to add a rule for it. That is the right default when the cost of missing one is a
+# published secret.
+#
+# `!.env.example` MUST stay below it — git applies the last matching pattern, so the negation only
+# works after the blanket. That file is committed on purpose and carries variable NAMES with empty
+# values, never secrets; without this line the blanket would hide the one file whose whole job is to
+# be read.
+.env*
 !.env.example
 
 # Written by scripts/e2e/run-e2e.sh on every run, at the repository root (its EXIT trap
