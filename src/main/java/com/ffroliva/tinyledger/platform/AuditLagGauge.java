@@ -59,8 +59,13 @@ public class AuditLagGauge {
         registry.gauge("ledger.outbox.pending.age.seconds", this, AuditLagGauge::lagSeconds);
     }
 
-    /** Package-private so the IT reads it directly rather than through the registry. */
-    double lagSeconds() {
+    /**
+     * The current reading, in seconds. Public rather than package-private: {@code AuditLagIT} lives in
+     * {@code ..observability} and reads it directly rather than through the registry, so a failure
+     * names a number instead of a missing meter. Nothing in {@code src/main} calls this — the
+     * {@code MeterRegistry} holds the reference and polls it.
+     */
+    public double lagSeconds() {
         Double seconds = jdbc.queryForObject(OLDEST_INCOMPLETE, Double.class);
         return seconds == null ? 0.0 : seconds;
     }

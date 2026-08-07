@@ -617,8 +617,9 @@ public class AuditLagGauge {
         registry.gauge("ledger.outbox.pending.age.seconds", this, AuditLagGauge::lagSeconds);
     }
 
-    /** Package-private for the IT to read directly without going through the registry. */
-    double lagSeconds() {
+    /** Public, not package-private: the IT lives in ..observability, not ..platform (measured — it
+     *  does not compile otherwise). Nothing in src/main calls it; the registry holds the reference. */
+    public double lagSeconds() {
         Double seconds = jdbc.queryForObject(OLDEST_INCOMPLETE, Double.class);
         return seconds == null ? 0.0 : seconds;
     }
@@ -704,7 +705,12 @@ private Status readiness() {
  */
 @Test
 void lagIsVisibleAndReadinessStaysUp() throws Exception {
-    // given: a healthy baseline
+    // given: a DRAINED outbox and a healthy baseline. The drain is not tidiness — the gauge reads
+    // MIN(publication_date) across every incomplete row, so one left behind by an earlier class in
+    // the shared context would already exceed the threshold and the assertion below would pass
+    // without the pause having done anything.
+    await().atMost(Duration.ofSeconds(30))
+           .untilAsserted(() -> assertThat(auditLagGauge.lagSeconds()).isZero());
     assertThat(readiness()).isEqualTo(Status.UP);
 
     pauseKafka();
