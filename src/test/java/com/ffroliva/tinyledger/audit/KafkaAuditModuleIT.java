@@ -66,6 +66,84 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private org.springframework.kafka.config.KafkaListenerEndpointRegistry listeners;
+
+    /** §12 E6 asks for 50. Written through the use case, not HTTP, so no rate-limit budget is spent. */
+    private static final int E6_MOVEMENTS = 50;
+
+    /**
+     * E6 — consumer outage and catch-up. Stop the audit consumer, write 50 movements, start it again:
+     * all 50 arrive, and the trail matches the event stream exactly — no gaps, no duplicates.
+     *
+     * <p>This is the durability half of ADR 0001. {@link #ledgerEventsReachTheAuditTrailThroughKafka}
+     * proves an event reaches the trail while everything is healthy; it says nothing about what happens to
+     * events produced while nobody is listening. Kafka's offset semantics are supposed to make that a
+     * non-event, and "supposed to" is the reason to run it.
+     *
+     * <p><strong>The mid-outage assertion is the control, not decoration.</strong> Without it a run where
+     * the container never actually stopped would pass identically, and this test would be asserting only
+     * that delivery works — which the test above already covers. Asserting the trail is still at one entry
+     * while 50 movements sit in the topic is what makes the rest of the test mean something.
+     *
+     * <p>Red run, and it validated the control rather than the catch-up: with the {@code stop()} removed,
+     * 8 tests run and exactly 1 fails — this one, on the {@code during} window, because the trail grows
+     * past one entry inside it. Worth recording that the <em>first</em> version of that control asserted
+     * the size once, immediately after the writes, and would very likely have passed without the outage
+     * ever happening: a healthy hop takes ~100 ms, so the trail still reads 1 at that instant. The bug the
+     * control exists to catch was a bug the control itself had.
+     *
+     * <p>The restart is in a {@code finally} for the same reason the container unpauses are elsewhere in
+     * this suite: a failure here must not leave the audit consumer stopped for whatever runs next in this
+     * shared context.
+     */
+    @Test
+    void aStoppedConsumerCatchesUpWithoutGapsOrDuplicates() {
+        var opened = openAccount.open(new OpenAccount("alice", "ACC-E6", Currency.getInstance("GBP")));
+        UUID accountId = opened.accountId().value();
+
+        // Settle the AccountOpened first, so the control below is about the outage rather than about a
+        // hop that simply had not finished yet.
+        await().atMost(Duration.ofSeconds(30))
+                .until(() -> trail.eventStream(accountId, null, 100).entries().size() == 1);
+
+        listeners.getListenerContainers().forEach(org.springframework.kafka.listener.MessageListenerContainer::stop);
+        try {
+            for (int i = 0; i < E6_MOVEMENTS; i++) {
+                movements.deposit(new Deposit(
+                        "alice", false, opened.accountId(), UUID.randomUUID(), Money.of("GBP", 100), "e6-" + i));
+            }
+            // `during`, not a bare assertion. Checking the size once immediately after the writes would
+            // have been racy in the direction that hides bugs: delivery normally takes ~100 ms, so the
+            // trail would still read 1 even with the consumer running, and the control would pass without
+            // the outage ever happening. Requiring the quiet to HOLD for two seconds — an order of
+            // magnitude longer than the healthy hop measured by the tests above — is what makes it
+            // evidence. Awaitility, never a sleep (§9.3 method).
+            await().during(Duration.ofSeconds(2))
+                    .atMost(Duration.ofSeconds(5))
+                    .until(() ->
+                            trail.eventStream(accountId, null, 100).entries().size() == 1);
+        } finally {
+            listeners
+                    .getListenerContainers()
+                    .forEach(org.springframework.kafka.listener.MessageListenerContainer::start);
+        }
+
+        await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
+            List<AuditTrailPort.AuditEntry> entries =
+                    trail.eventStream(accountId, null, E6_MOVEMENTS + 10).entries();
+            // Versions 1..51 exactly once each, in order. A gap, a duplicate and a reordering are three
+            // different delivery bugs and this one assertion refuses all of them.
+            assertThat(entries.stream()
+                            .map(AuditTrailPort.AuditEntry::streamVersion)
+                            .toList())
+                    .as("the trail must match the event stream exactly — no gaps, no duplicates")
+                    .containsExactlyElementsOf(java.util.stream.LongStream.rangeClosed(1, E6_MOVEMENTS + 1)
+                            .boxed()
+                            .toList());
+        });
+    }
+
     private static final String DLT_TOPIC = "ledger.events.DLT";
 
     /** More than one, so a key-derived placement is distinguishable from the source partition index. */
