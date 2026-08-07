@@ -1,6 +1,15 @@
 name: ci
 on:
+  # `push` is scoped to main, and `pull_request` covers everything else. Unscoped, the two overlap:
+  # a commit on a branch with an open PR triggered BOTH, so every PR ran the whole pipeline twice —
+  # two four-container integration stacks, two e2e runs, two Sonar analyses, for one change. Harmless
+  # while branches were pushed without PRs; pure waste now that main is protected and every change
+  # arrives as one.
+  #
+  # The trade-off, stated rather than discovered later: a branch pushed with NO open PR now gets no
+  # CI at all. Open the PR early — a draft is enough — and it is covered from the first push.
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
     inputs:
