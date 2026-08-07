@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.25
+**Version:** 3.26
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -1366,8 +1366,18 @@ comm -23 \
   <(grep -rhoE "\b(P|N|E)[0-9]{1,2}\b" src/test ledger-cli/tests scripts/e2e | sort -u)
 ```
 
-**Known-open as of v3.25: `E9` alone**, deferred by decision (§14 step 9). Every other case in this
-catalogue has a test.
+**Known-open as of v3.26: `E9` alone.** Every other case in this catalogue has a test.
+
+`E9`'s deferral was **checked rather than inherited**, on 2026-08-07, because it had been repeated as
+"deferred by decision (§14 step 9)" for a dozen revisions without anyone re-reading it. It holds, and for
+a stronger reason than "decision": the feature does not exist. There is no readiness probe, no health
+indicator and no projection-lag gauge in `src/main/java`, and no `management.*` or Actuator
+configuration anywhere — §8.1 already says the observability stack is unbuilt and "there is no live
+projection lag to respond to yet". A test for `E9` would assert against nothing.
+
+Verified differentially, per `AGENTS.md` trap 7, because the finding is an *absence*: the identical
+search returns 6 files for a term known to be present (`RateLimitFilter`) and 0 for the readiness terms.
+The zero is an absence, not a broken search.
 
 `E7` closed on 2026-08-07 by moving it to the layer that could hold it: `scripts/e2e/restart-replay.sh`,
 where the application is a real OS process and `kill -9` is available. The search path above now includes
@@ -1764,3 +1774,4 @@ Javadoc, because a reader checks the spec:
 | 3.24 | 2026-08-07 | E12 added and covered: pause Kafka, write a movement, and the `event_publication` row *stays on disk* — with `completion-mode=DELETE` a surviving row is an incomplete one — then completes with no manual intervention once the broker returns. Deliberately **not** tagged E7: E7 needs the process killed and restarted, which no harness can stage inside a shared context, so it stays open and its row now says exactly which half is missing. E12 is the half E7 depends on — without durable in-flight work there is nothing for any restart to replay. The test also states what it does not isolate: the producer's own in-flight send can complete the publication, so "without manual intervention" is not attributed to the restart hook. Its mid-outage check uses the same `during` window E6's red run showed to be necessary |
 | 3.24b | 2026-08-07 | **The traceability sweep itself was found unsound, by its own output.** It greps for a case id anywhere under `src/test`, so `KafkaAuditModuleIT`'s E12 javadoc — whose whole point is the sentence "E7 stays open" — removed `E7` from the command's output. A commit that added no coverage shrank the known-open list by one. §12 now states that the written list is the source of truth and the command is a regression check against it: an id *appearing* that should not is still a real finding, an id *disappearing* is only good news if a test was added. Same shape as `AGENTS.md` trap 7, one level up — a search that has been made to return nothing is not evidence of absence |
 | 3.25 | 2026-08-07 | **E7 closed — the last open case but `E9`.** It had been recorded as unreachable because no test may kill the shared Spring context (ADR 0003); the answer was to stop looking for a *test*. `scripts/e2e/restart-replay.sh` runs the application as a real OS process: Kafka paused, movement written, `kill -9`, and the `event_publication` row **survives the process** — then a restart drains it to zero and the entry reaches the trail with no intervention. E12 remains the unit-scale precondition, and this is the claim itself. Not wired into CI stage 9: killing and restarting a process is a different shape of job, and adding a stage is a decision, not a side effect. The traceability sweep now also reads `scripts/e2e`, because a case can be covered by a harness rather than a test method |
+| 3.26 | 2026-08-07 | `E9`'s deferral checked rather than inherited. It had been repeated as "deferred by decision (§14 step 9)" for a dozen revisions with nobody re-reading it — including twelve times in this pass. It holds, and for a stronger reason than a decision: the feature is absent. No readiness probe, no health indicator, no projection-lag gauge in `src/main/java`, and no `management.*` or Actuator configuration at all, which matches §8.1's "the observability stack is unbuilt". A test for `E9` would assert against nothing. Verified differentially per `AGENTS.md` trap 7 because the finding is an absence: the same search returns 6 files for `RateLimitFilter` and 0 for the readiness terms |
