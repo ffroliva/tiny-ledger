@@ -94,7 +94,9 @@ plausible number that is simply false, which is the hardest class of monitoring 
 
 ### Management endpoints move to their own port
 
-Probes bind to `management.server.port`, unpublished, reachable from inside the network only. Under an
+Probes bind to `management.server.port`, unpublished. **"Reachable from inside the network only" is a
+property of how the port is published — a Compose mapping, a Service, a NetworkPolicy — and none of those
+exist here, so nothing in this repository enforces it.** Under an
 orchestrator this is standard, and it changes the failure mode of a misconfiguration from *exposed but
 denied* to *not reachable at all*.
 

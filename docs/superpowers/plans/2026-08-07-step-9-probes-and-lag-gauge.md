@@ -10,7 +10,7 @@
 **Architecture:** Actuator is added to both run modes. Readiness contains `readinessState` + `db` and
 **deliberately excludes** `redis` and `kafka`, because E10 and E11 require the ledger to keep serving
 while either is down (ADR 0004). The gauge reads the age of the oldest incomplete `event_publication`
-row and gates nothing. `E9` is rewritten accordingly: pause the audit consumer, the gauge rises,
+row and gates nothing. `E9` is rewritten accordingly: pause the **broker**, the gauge rises,
 balances stay exact, readiness stays **UP**.
 
 **Tech stack:** Spring Boot 4.1 Actuator, Micrometer `MeterRegistry`, `JdbcTemplate`, Testcontainers,
@@ -160,6 +160,10 @@ management.endpoint.health.group.liveness.include=livenessState
 # misconfigured endpoint is unreachable rather than merely denied. 0 is NOT used here — a fixed port
 # is what a manifest references; the tests override it to 0 for a random free port.
 management.server.port=9090
+# ADR 0005 / spec §6.6: standalone ALSO pins the address (see application-standalone.properties).
+# ManagementWebServerFactoryCustomizer applies management.server.address unconditionally, so declaring
+# only the port overwrites the parent's bind and gives standalone a 0.0.0.0 listener. Do NOT pin it in
+# `full`: the kubelet dials the pod IP, so a loopback bind would fail every httpGet probe.
 
 # ADR 0005, and this is a CORRECTNESS property for a ledger rather than an operational nicety. On
 # SIGTERM the instance must leave the load balancer before the listener stops. Without graceful
@@ -372,7 +376,7 @@ SecurityFilterChain managementChain(HttpSecurity http) {
             .logout(AbstractHttpConfigurer::disable)
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                    .requestMatchers(EndpointRequest.to(HealthEndpoint.class)).permitAll()
+                    .requestMatchers("/actuator/health/liveness", "/actuator/health/readiness").permitAll()
                     .anyRequest().denyAll())
             .build();
 }
@@ -567,6 +571,7 @@ public class AuditLagGauge {
             SELECT COALESCE(EXTRACT(EPOCH FROM (now() - MIN(publication_date))), 0)
             FROM event_publication
             WHERE completion_date IS NULL
+              AND (status IS NULL OR status <> 'FAILED')
             """;
 
     private final JdbcTemplate jdbc;

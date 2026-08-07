@@ -14,7 +14,7 @@ Quadrants are Diátaxis, per spec §8.1.
 |---|---|---|
 | **`../AGENTS.md`** | **Always, first.** The gates, the enforced rules, the traps already paid for | — |
 | `../README.md` | Running it for the first time | Tutorial |
-| `spec.md` (v3.37) | Any question about *contract* — API shape, errors (§6.5), security model (§6.4), idempotency (§6.3), observability and health (§6.6), the pipeline and what actually gates (§12.1), the two run modes (§1), module boundaries (§3/§4) | Explanation |
+| `spec.md` (v3.38) | Any question about *contract* — API shape, errors (§6.5), security model (§6.4), idempotency (§6.3), observability and health (§6.6), the pipeline and what actually gates (§12.1), the two run modes (§1), module boundaries (§3/§4) | Explanation |
 | `architecture.md` | You need the shape of the system before the detail | Explanation |
 | `api/openapi.yaml` | Changing a request/response, a status code, or a validation constraint. **The generated server interfaces come from here** — edit the contract, not the generated code | Reference |
 | `adr/0001-kafka-delivery-path.md` | Touching event publication, the outbox, Kafka, or the transaction boundary around publishing | Explanation |
