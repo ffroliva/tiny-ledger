@@ -6,6 +6,7 @@ import static org.awaitility.Awaitility.await;
 import com.ffroliva.tinyledger.TinyLedgerApplication;
 import com.jayway.jsonpath.JsonPath;
 import java.time.Duration;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -55,7 +56,16 @@ class OtlpExportIT {
                     MountableFile.forClasspathResource("otel-collector-test.yaml"), "/etc/otelcol/config.yaml")
             .withCommand("--config=/etc/otelcol/config.yaml")
             .withExposedPorts(4318)
-            .waitingFor(Wait.forListeningPort());
+            // The image is DISTROLESS and has no /tmp, so the file exporter cannot create its output
+            // and the Collector exits during startup. Measured on CI (run 31218191269): without this
+            // the container reported started, every export was refused, and the test spent sixty
+            // seconds timing out on an assertion about spans.
+            .withTmpFs(Map.of("/tmp", "rw"))
+            // Wait on READINESS, not on a listening port. Wait.forListeningPort() is what let that dead
+            // Collector through — Docker had published the mapping, so the check passed against a
+            // process that had already given up. This line is why the test config keeps log level
+            // `info`: `warn` suppresses the message.
+            .waitingFor(Wait.forLogMessage(".*Everything is ready.*\\n", 1));
 
     static {
         COLLECTOR.start();
@@ -108,7 +118,10 @@ class OtlpExportIT {
         await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
             String received = collectorOutput();
             assertThat(received)
-                    .as("the use-case span must reach the Collector over OTLP")
+                    // The Collector's own log goes into the failure, because the first red here was a
+                    // sixty-second timeout that said only "no span" while the real cause — the exporter
+                    // refusing to start — was sitting unread in the container's stderr.
+                    .as("the use-case span must reach the Collector over OTLP. Collector log:%n%s", COLLECTOR.getLogs())
                     .contains("ledger.record-movement");
             assertThat(received)
                     .as("...carrying the domain attribute §6.6 mandates on every span")

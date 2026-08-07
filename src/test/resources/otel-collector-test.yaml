@@ -26,13 +26,21 @@ exporters:
   # Read back with Testcontainers' copyFileFromContainer, which goes through the Docker API. The
   # contrib image ships no shell and no `cat`, so execInContainer would fail with something that
   # looks like a Collector problem rather than a test one.
+  #
+  # /tmp DOES NOT EXIST in this image — it is distroless. OtlpExportIT mounts a tmpfs there, and
+  # without it the Collector exits at startup with "open /tmp/otel-out.json: no such file or
+  # directory". Measured on CI, which is the only reason this comment exists: Wait.forListeningPort()
+  # passed anyway, so the container looked healthy and every export was refused for sixty seconds.
   file:
     path: /tmp/otel-out.json
 
 service:
   telemetry:
     logs:
-      level: warn
+      # `info`, not `warn`, and it is load-bearing: OtlpExportIT waits on the "Everything is ready"
+      # line, which `warn` suppresses. A quieter log here would silently downgrade that wait back to
+      # a port check — the check that already let a dead Collector through once.
+      level: info
   pipelines:
     traces:
       receivers: [otlp]
