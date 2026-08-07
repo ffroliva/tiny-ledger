@@ -385,10 +385,23 @@ jobs:
         # Skips rather than fails when the secret is absent, so the pipeline stays green for anyone
         # who clones this repo without a SonarCloud project. The step says so loudly instead of
         # reporting a success it did not earn.
+        #
+        # `-Dsonar.qualitygate.wait=true` IS THE GATE. Without it `sonar:sonar` only SUBMITS the
+        # analysis and exits 0 whatever the verdict — which is exactly what happened: this job reported
+        # success on 2026-08-07 while the project's quality gate was ERROR on `new_security_rating`, and
+        # the README badge read `quality gate failed` at the same time. A green check that cannot fail
+        # is the same defect this pipeline deleted once already as stage 6 (§12.1), and it went
+        # unnoticed for the same reason: nothing ever made it go red.
+        #
+        # The flag makes the scanner poll SonarCloud until the gate is computed and exit non-zero on
+        # ERROR. The gate itself is `Tiny Ledger AAA and 85`: A on reliability, security and
+        # maintainability, and 85% coverage, asserted on **both new and overall** code — the overall
+        # half is deliberate, because that is what the README badges show and a gate that judges only
+        # new code lets a badge go red while every build passes.
         run: |
           if [ -z "$SONAR_TOKEN" ]; then
             echo "::warning::SONAR_TOKEN is not set — analysis skipped, NOT passed"
             echo "### Sonar: skipped (no SONAR_TOKEN)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          ./mvnw -q sonar:sonar
+          ./mvnw -q sonar:sonar -Dsonar.qualitygate.wait=true

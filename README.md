@@ -1,13 +1,13 @@
 # Tiny Ledger
 
-[![CI](https://github.com/ffroliva/tiny-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/ffroliva/tiny-ledger/actions/workflows/ci.yml)
-[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=alert_status)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=coverage)](https://sonarcloud.io/component_measures?id=ffroliva_tiny-ledger&metric=coverage)
+[![CI](https://github.com/ffroliva/tiny-ledger/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ffroliva/tiny-ledger/actions/workflows/ci.yml)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=alert_status&branch=main)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger&branch=main)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=coverage&branch=main)](https://sonarcloud.io/component_measures?id=ffroliva_tiny-ledger&metric=coverage&branch=main)
 
-[![Reliability](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=reliability_rating)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger)
-[![Security](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=security_rating)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger)
-[![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=sqale_rating)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger)
-[![Duplication](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=duplicated_lines_density)](https://sonarcloud.io/component_measures?id=ffroliva_tiny-ledger&metric=duplicated_lines_density)
+[![Reliability](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=reliability_rating&branch=main)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger&branch=main)
+[![Security](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=security_rating&branch=main)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger&branch=main)
+[![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=sqale_rating&branch=main)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger&branch=main)
+[![Duplication](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=duplicated_lines_density&branch=main)](https://sonarcloud.io/component_measures?id=ffroliva_tiny-ledger&metric=duplicated_lines_density&branch=main)
 [![Licence: MIT](https://img.shields.io/github/license/ffroliva/tiny-ledger)](LICENSE)
 
 <!-- Every badge above is LIVE: each is fetched from CI or SonarCloud at render time and cannot drift
@@ -18,7 +18,22 @@
      Prerequisites below, once.
 
      The coverage figure is unit AND integration coverage combined (.github/workflows/ci.yml merges
-     two JaCoCo reports), not the unit suite alone — see docs/spec.md §9. -->
+     two JaCoCo reports), not the unit suite alone — see docs/spec.md §9.
+
+     EVERY BADGE IS PINNED TO `main` (`?branch=main` / `&branch=main`), and that is a statement rather
+     than a default. Without it the Sonar badges fall back to the main branch implicitly and the CI
+     badge to the default branch — correct by accident, and silently wrong the day either default
+     changes. Pinned, these badges mean one thing on every branch and in every fork: *this is the state
+     of main*.
+
+     They deliberately do NOT follow the branch you are reading. A badge URL is static text in a file,
+     so per-branch badges would mean editing this block on every branch — a README conflict in every
+     pull request, and a stale claim the first time someone forgets. It would not work anyway:
+     SonarCloud analyses feature branches as PULL REQUESTS, and a pull request has no badge URL. The
+     honest answer to "is this branch healthy" is the pull request's own checks, which are already
+     required and already visible on the PR.
+
+     The licence badge is not pinned because a licence has no branch. -->
 
 An event-sourced banking ledger — accounts, deposits, withdrawals, balances — built as a Spring
 Modulith modular monolith. It runs as a single JDK process with nothing installed, or against
