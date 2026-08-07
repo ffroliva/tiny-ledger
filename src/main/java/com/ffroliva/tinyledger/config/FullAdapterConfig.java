@@ -8,8 +8,6 @@ import com.ffroliva.tinyledger.balance.adapter.out.redis.RedisBalanceCache;
 import com.ffroliva.tinyledger.balance.application.port.out.BalanceCachePort;
 import com.ffroliva.tinyledger.balance.application.port.out.BalanceProjectionPort;
 import com.ffroliva.tinyledger.ledger.adapter.out.postgres.PostgresEventStore;
-import com.ffroliva.tinyledger.ledger.application.port.in.OpenAccountUseCase;
-import com.ffroliva.tinyledger.ledger.application.port.in.RecordMovementUseCase;
 import com.ffroliva.tinyledger.ledger.application.port.out.ClockPort;
 import com.ffroliva.tinyledger.ledger.application.port.out.EventStorePort;
 import com.ffroliva.tinyledger.ledger.application.port.out.IdGeneratorPort;
@@ -19,7 +17,9 @@ import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
 import com.ffroliva.tinyledger.notification.adapter.out.log.LogNotificationAdapter;
 import com.ffroliva.tinyledger.notification.application.NotificationPort;
 import com.ffroliva.tinyledger.platform.AuditLagGauge;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Tracer;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -28,7 +28,6 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -114,8 +113,8 @@ public class FullAdapterConfig {
     }
 
     @Bean
-    public AuditKafkaListener auditKafkaListener(AuditTrailPort trail) {
-        return new AuditKafkaListener(trail);
+    public AuditKafkaListener auditKafkaListener(AuditTrailPort trail, Tracer tracer) {
+        return new AuditKafkaListener(trail, tracer);
     }
 
     /**
@@ -143,7 +142,8 @@ public class FullAdapterConfig {
      * audit consumer read.
      */
     @Bean
-    public DefaultErrorHandler auditListenerErrorHandler(ProducerFactory<?, ?> producerFactory) {
+    public DefaultErrorHandler auditListenerErrorHandler(
+            ProducerFactory<?, ?> producerFactory, MeterRegistry meterRegistry) {
         KafkaTemplate<String, String> deadLetters = new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(
                 producerFactory.getConfigurationProperties(), new StringSerializer(), new StringSerializer()));
         // The destination is named rather than left to the default, which is `<topic>-dlt` in Spring
@@ -152,21 +152,49 @@ public class FullAdapterConfig {
         // partition index: that keeps per-account order on the DLT too, and a DLT provisioned with
         // fewer partitions than `ledger.events` still accepts it. Pinning the index would fail the
         // publish exactly when the trail depends on it.
+        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
+                deadLetters, (consumed, exception) -> new TopicPartition(LEDGER_EVENTS_DLT, -1));
+
+        // §6.6 / §14 step 9 part 2. This handler's own javadoc above says it exists to prevent "a
+        // silent, permanent hole in the compliance trail" — and until now nothing counted what it
+        // parked, so it produced one: records left the live path and no signal said so. §6.6 records
+        // this as belonging to part 2, "where an exporter exists to carry them".
+        //
+        // UNTAGGED on purpose. The account id and the exception type are both unbounded, and this is a
+        // meter (§6.6's cardinality rule, which no gate enforces). Which record was parked and why stays
+        // answerable from the DLT itself, from the span, and from the log line the recoverer writes —
+        // this counter's whole job is to make someone go and look.
+        Counter deadLettered = Counter.builder("ledger.audit.dead_lettered")
+                .description("Records parked on " + LEDGER_EVENTS_DLT + " by the audit consumer (spec §6.6)")
+                .register(meterRegistry);
+
         return new DefaultErrorHandler(
-                new DeadLetterPublishingRecoverer(
-                        deadLetters, (consumed, exception) -> new TopicPartition(LEDGER_EVENTS_DLT, -1)),
+                (consumed, exception) -> {
+                    deadLettered.increment();
+                    recoverer.accept(consumed, exception);
+                },
                 new FixedBackOff(1_000L, 9));
     }
 
+    /**
+     * <strong>No {@code @Primary}, and a concrete return type — both deliberate, both required.</strong>
+     * Since §14 step 9 part 2, {@code UseCaseConfig}'s traced decorator is the {@code @Primary} bean
+     * for this interface, and two {@code @Primary} candidates of one type is a context-startup
+     * failure rather than a warning.
+     *
+     * <p>The concrete type is what lets that decorator select this bean through an
+     * {@code ObjectProvider} in {@code full} and fall back to the plain service in {@code standalone},
+     * from a single profile-independent bean method. Declaring {@code OpenAccountUseCase} here
+     * instead would make the provider ambiguous — it would match the traced bean too.
+     */
     @Bean
-    @Primary
-    public OpenAccountUseCase transactionalOpenAccount(OpenAccountService delegate) {
+    public TransactionalUseCases.Opening transactionalOpenAccount(OpenAccountService delegate) {
         return new TransactionalUseCases.Opening(delegate);
     }
 
+    /** See {@link #transactionalOpenAccount} — same two constraints, same reason. */
     @Bean
-    @Primary
-    public RecordMovementUseCase transactionalRecordMovement(RecordMovementService delegate) {
+    public TransactionalUseCases.Movements transactionalRecordMovement(RecordMovementService delegate) {
         return new TransactionalUseCases.Movements(delegate);
     }
 }

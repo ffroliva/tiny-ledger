@@ -2,12 +2,18 @@ package com.ffroliva.tinyledger.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.registry.otlp.ExemplarContextProvider;
+import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalManagementPort;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.core.env.Environment;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.client.RestClient;
 
@@ -59,6 +65,64 @@ class ActuatorProbeTest {
 
     private int statusOfManagement(String path) {
         return statusOf(managementPort, path);
+    }
+
+    /**
+     * §14 step 9 part 2. Two beans that must exist in EVERY context, because the use-case span
+     * decorator ({@code TracedUseCases}) and the projection span both inject them by type: a missing
+     * {@code Tracer} is a context-startup failure at the composition root, which is a far worse
+     * failure mode than a missing span. Asserted in {@code standalone} — the mode with no Kafka, no
+     * Postgres and no {@code MeterRegistry}-bearing adapter config — because that is the context
+     * most likely to lack them.
+     */
+    @Test
+    void tracingAndMeteringBeansExistInStandalone(
+            @Autowired ObjectProvider<Tracer> tracer, @Autowired ObjectProvider<MeterRegistry> meters) {
+        assertThat(tracer.getIfAvailable()).as("Tracer bean").isNotNull();
+        assertThat(meters.getIfAvailable()).as("MeterRegistry bean").isNotNull();
+    }
+
+    /**
+     * §6.6 / ADR 0005, and a regression pin for the part-1 defect corrected at v3.41: these must be
+     * OTel RESOURCE attributes, not observation key-values. Asserted through the {@code Environment}
+     * rather than through the SDK because the binding is the thing that was wrong — the value
+     * arrived, at the wrong address, and every property-name claim in these documents has to be
+     * checked against a running context rather than against a jar (part 1's own finding).
+     *
+     * <p>The third assertion is the one that matters most: {@code service.instance.id} is a
+     * per-process UUID, so as an observation key-value it is a meter tag, and a meter tag whose value
+     * set grows without bound is the one-way door §6.6 refuses. Nothing else in this repository would
+     * catch it being put back.
+     */
+    @Test
+    void serviceIdentityIsDeclaredAsResourceAttributesAndNotAsObservationKeyValues(@Autowired Environment env) {
+        assertThat(env.getProperty("management.opentelemetry.resource-attributes.service.namespace"))
+                .isNotBlank();
+        assertThat(env.getProperty("management.opentelemetry.resource-attributes.service.instance.id"))
+                .isNotBlank();
+        assertThat(env.getProperty("management.observations.key-values.service.instance.id"))
+                .as("a per-process UUID as a meter tag is an unbounded time series (§6.6)")
+                .isNull();
+    }
+
+    /**
+     * §6.6's exemplars row, <strong>corrected at v3.41</strong>. It said exemplars were "a feature of
+     * Micrometer's <em>Prometheus</em> registry" for which "there is no flag that turns them on along
+     * [the OTLP] path". That was true of earlier Boot versions and is <strong>false here</strong>:
+     * {@code micrometer-registry-otlp} 1.17.0 ships eleven exemplar classes, and Boot 4.1 registers
+     * {@code OtlpExemplarsAutoConfiguration}, which contributes an {@code ExemplarContextProvider}
+     * whenever a {@code Tracer} bean exists and {@code management.tracing.exemplars.include} is not
+     * {@code none} (it defaults to {@code sampled-traces}).
+     *
+     * <p>So exemplars are not "specified and not delivered" — they are delivered by the framework, for
+     * free, the moment OTLP metrics export is switched on. Nothing in this repository was written to
+     * achieve that, which is exactly why it needed checking rather than repeating.
+     */
+    @Test
+    void exemplarsAreReachableOnTheOtlpPath(@Autowired ObjectProvider<ExemplarContextProvider> exemplars) {
+        assertThat(exemplars.getIfAvailable())
+                .as("§6.6 v3.41: Boot 4.1 auto-configures this; the row saying otherwise was corrected")
+                .isNotNull();
     }
 
     @Test

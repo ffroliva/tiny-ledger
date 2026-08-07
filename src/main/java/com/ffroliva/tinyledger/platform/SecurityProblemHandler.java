@@ -54,8 +54,10 @@ public class SecurityProblemHandler implements AuthenticationEntryPoint, AccessD
         // §6.5/§6.6: the same correlating id ErrorHandlingAdvice attaches. It is only here because
         // FapiInteractionIdFilter outranks the security chain — measured: dropping its @Order leaves this
         // null on every 401 and every chain-level 403.
-        String traceId = MDC.get("traceId");
-        if (traceId != null) body.setProperty("traceId", traceId);
+        // Read from `interactionId`, published as `traceId`: Micrometer Tracing owns the MDC key
+        // `traceId` since step 9 part 2 and would overwrite this, while the JSON name is contract.
+        String interactionId = MDC.get(FapiInteractionIdFilter.MDC_KEY);
+        if (interactionId != null) body.setProperty("traceId", interactionId);
         response.setStatus(code.status());
         response.setContentType("application/problem+json");
         mapper.writeValue(response.getOutputStream(), body);

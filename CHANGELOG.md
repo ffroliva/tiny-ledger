@@ -65,6 +65,34 @@
 - Realm fixture user `trent` (`ledger:writer` + `ledger:reader` + `ledger:admin`) and the P9 /
   N13–N18 authorisation scenarios, exercised through the real chain against a Keycloak container
   — **Plan 4 (admin on-behalf-of) complete**, spec v3.12.
+- **Distributed tracing, OTLP export and an opt-in OTel Collector** (spec §14 step 9 parts 2 and 3,
+  §6.6, ADR 0005) — **step 9 complete**, spec v3.41. Micrometer Tracing over the OpenTelemetry
+  *bridge*, wired by a single `spring-boot-starter-opentelemetry`. Four spans: HTTP, the use-case
+  decorator, the projection apply, and the audit consumer — which is **linked** to the producing span
+  rather than parented by it, because a child would make the request appear to last until the slowest
+  consumer finished and would misreport latency to every dashboard. One bounded counter,
+  `ledger.movements`, tagged `type`/`outcome`/`reason`; account ids and movement UIDs stay on spans and
+  logs and reach no meter.
+- **Two blind spots in the audit path closed**: `ledger.audit.dead_lettered` counts records parked on
+  `ledger.events.DLT` — the mechanism written to prevent "a silent, permanent hole in the compliance
+  trail" had nobody counting what it caught — and Kafka consumer lag, which needed no code once a
+  `MeterRegistry` existed.
+- **One Collector behind a Compose `profiles: [observability]` key**, forwarding to hosted Grafana
+  Cloud and tail-sampling: the application records 100% because only the Collector can see how a trace
+  *ended*, so every error and every request over 150 ms is kept and the rest sampled at 5%. A plain
+  `docker compose up` still starts exactly four containers. **Nothing in CI runs it and CI holds no
+  Grafana credential** — the gate is a Collector receiving OTLP, which a debug exporter satisfies.
+- **Structured JSON logs in `full`**, via Boot's built-in structured logging rather than a
+  `logstash-logback-encoder` dependency. `standalone` keeps a human-readable console; both carry the
+  trace id, the span id and the FAPI interaction id on every line.
+- **Fixed:** the FAPI interaction id and the OTel trace id were both claiming the MDC key `traceId`, so
+  every 401 and 403 problem body carried a 32-hex trace id where the caller's own UUID belonged. Caught
+  by `SecurityConfigIT` on CI. The MDC key is now `interactionId`; the published field name is
+  unchanged and §6.5 records it as a misnomer rather than breaking a contract for tidiness.
+- **Fixed:** part 1 declared `service.namespace` and `service.instance.id` as observation key-values,
+  which makes them span *and meter* tags rather than OTel resource attributes. `service.instance.id` is
+  a per-process UUID, so as a meter tag it minted one permanent time series per restart and per
+  replica. No test would have caught it.
 - **Actuator liveness and readiness probes, on their own management port** (spec §14 step 9 part 1,
   §6.6, ADR 0004/0005). `9090`, pinned to loopback in `standalone` only — the kubelet dials the pod
   IP, so pinning it in `full` would fail every Kubernetes `httpGet` probe. The probes answer without a

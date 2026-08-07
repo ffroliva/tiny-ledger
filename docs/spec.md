@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.40
+**Version:** 3.41
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -844,8 +844,19 @@ RFC 7807 `ProblemDetail` throughout, via Spring's built-in support
 | Event store unreachable | 503 | `/errors/event-store-unavailable`, with `Retry-After` |
 | Auditor operation invoked in standalone | 501 | `/errors/not-available-in-standalone` |
 
-Problem responses carry a `traceId` correlating to the tracing backend. No stack traces, no internal
-identifiers, no SQL fragments cross the boundary.
+Problem responses carry a `traceId`. No stack traces, no internal identifiers, no SQL fragments cross
+the boundary.
+
+**That field name is a misnomer, and it is recorded rather than renamed (v3.41).** Its value is the
+FAPI `x-fapi-interaction-id` — the caller's own correlation handle, echoed back — and not the OTel
+trace id, which now also exists. The name was unambiguous while nothing else was called a trace;
+tracing changed that. It is left alone because it is a **published field on an error contract**, and
+renaming it is a breaking change made for tidiness. The mechanism behind it did have to move:
+`FapiInteractionIdFilter` stored the value in MDC under the key `traceId`, which Micrometer Tracing's
+`Slf4JEventListener` takes over the moment a span goes into scope — so the interaction id was
+overwritten before any problem handler could read it, and every 401 and 403 body carried a 32-hex
+trace id where the caller's UUID belonged. Caught by `SecurityConfigIT`, on CI, and the MDC key is now
+`interactionId`. **Both ids reach the log line**, under `logging.pattern.correlation`.
 
 Wrong-owner access returns `403`, not `404`. The account-existence oracle this admits is accepted
 because `accountUid`s are unguessable UUIDs — recorded here so the trade-off is a decision, not an
@@ -907,13 +918,33 @@ asynchronous fan-out, and it keeps `http.server.duration` honest.
 
 | Signal | Content |
 |---|---|
-| **Spans** | HTTP (auto), use-case execution, event append with `expectedVersion`, projection apply, Kafka produce/consume, Redis, Postgres. Domain attributes on every one: `ledger.account_id`, `ledger.stream_version`, `ledger.movement_type`, `ledger.rejection_reason` |
-| **Metrics** | RED per endpoint, USE per resource. Domain: movements/sec by type, **rejection rate by reason**, **concurrency-conflict rate**, **`ledger.outbox.pending.age.seconds`** (the outbox gauge, producer side only — *not* projection lag, which is structurally zero here; see Health below), cache hit ratio, rate-limit rejections, idempotent-replay count |
-| **Logs** | Structured JSON via `structlog`-equivalent (Logstash encoder), no PII, every line carrying `trace_id` and `span_id`. **The no-PII rule is stated for logs and not for spans, and that asymmetry is a gap, not a decision** — the Spans row above mandates `ledger.account_id` on every span, and spans leave the process to a third-party backend. A data-classification rule covering spans is owed (§14 step 9 part 2) and **no gate enforces either** |
-| **Exemplars** | **Specified, not delivered.** Prometheus exemplars link a latency histogram bucket directly to a sampled trace — click the p99 spike, land on the request that caused it. They are a feature of Micrometer's *Prometheus* registry; this application exports metrics over OTLP and publishes no scrape endpoint, and there is no flag that turns them on along that path. Recorded as absent rather than carried as a promise nothing is building |
+| **Spans** | **Delivered (v3.41): four.** HTTP (auto), `ledger.record-movement` (the use-case decorator), `ledger.projection.apply`, and `ledger.audit.record` (the Kafka consumer, **linked** — see below). Kafka produce is auto-instrumented by `spring.kafka.template.observation-enabled`. Domain attributes: `ledger.account_id`, `ledger.stream_version`, `ledger.movement_type`, `ledger.rejection_reason`. **A separate event-append span is NOT delivered, deliberately:** `MovementResult` already carries `version`, `type` and `rejectionReason`, so every attribute §9.4 asserts sits on the use-case span, and a second span inside the store adapters would have to be written twice — once per adapter — to add a row to a diagram and nothing to an assertion. Redis and Postgres client spans are likewise not delivered: they would need a JDBC/Lettuce instrumentation this application does not carry |
+| **Metrics** | RED per endpoint, USE per resource. Domain, **delivered at v3.41 as ONE meter**: `ledger.movements`, tagged `type` / `outcome` / `reason`, which covers movements-by-type, rejection-rate-by-reason and concurrency-conflict-rate together in about twenty permanently-bounded series (`reason` is `none` on a settled movement, so every series carries the same tag keys). Plus **`ledger.audit.dead_lettered`** (new, untagged) and **`ledger.outbox.pending.age.seconds`** (the outbox gauge, producer side only — *not* projection lag, which is structurally zero here; see Health below). Kafka client metrics including consumer lag arrive from Boot's `KafkaMetricsAutoConfiguration` on `@ConditionalOnBean(MeterRegistry)` — see the gap paragraph below. Cache hit ratio, rate-limit rejections and idempotent-replay count remain **specified and not delivered** |
+| **Logs** | Structured JSON in **`full` only** (v3.41) — Boot's built-in `logging.structured.format.console=logstash`, so the encoder the earlier wording named is a format here and not a dependency. `standalone` keeps a human-readable console: it is the mode a person runs and reads, and JSON there would be paid on every local `verify` and every CI failure log for a benefit taken in production. **Both modes carry `trace_id`, `span_id` and the FAPI interaction id on every line** (`logging.pattern.correlation`), so only the encoding differs. No PII. The span asymmetry this row used to name as an open gap **is closed below** |
+| **Exemplars** | **CORRECTED at v3.41 — the previous entry was FALSE.** It said exemplars are "a feature of Micrometer's *Prometheus* registry" and that "there is no flag that turns them on along [the OTLP] path". True of earlier Boot versions; not true here. `micrometer-registry-otlp` 1.17.0 ships eleven exemplar classes, and Boot 4.1 registers `OtlpExemplarsAutoConfiguration`, which contributes an `ExemplarContextProvider` whenever a `Tracer` bean exists and `management.tracing.exemplars.include` is not `none` — it defaults to `sampled-traces`. **So exemplars are delivered by the framework the moment OTLP metrics export is on, and nothing here was written to achieve it.** `ActuatorProbeTest#exemplarsAreReachableOnTheOtlpPath` pins the corrected claim, because a claim that changed once under an upgrade can change back |
 
 Semantic conventions are the OTel standard ones (`messaging.*`, `db.*`, `http.*`); domain attributes
 use a `ledger.*` prefix so they never collide with a future convention.
+
+#### Data classification for spans — the gap part 2 owed, now stated
+
+Through v3.40 the no-PII rule was written for logs and not for spans, while the Spans row mandated
+`ledger.account_id` on every span and spans leave the process to a third-party backend. That
+asymmetry was recorded as *a gap, not a decision*. This is the decision.
+
+1. **Span attributes are limited to the enumerated `ledger.*` set plus OTel semantic conventions.**
+   Anything else is a review failure. The set is four: `ledger.account_id`, `ledger.stream_version`,
+   `ledger.movement_type`, `ledger.rejection_reason`.
+2. **No name, no email, no `owner`, no bearer token, no amount and no balance goes on a span.** Note
+   what that excludes: the *money*. A trace answers "which request, how long, why refused" and never
+   "how much" — a telemetry backend is not a place to reconstruct a customer's finances.
+3. **The identifiers that are there are opaque, server-generated UUIDs**, present because correlation
+   is the entire reason spans are worth keeping. They are nonetheless **personal data when linkable**,
+   which is why the backend is Grafana Cloud's **UK region** (`prod-gb-south-1`): telemetry carrying
+   `ledger.account_id` stays in-country. That is a data-residency decision, not a latency one.
+4. **No gate enforces any of the three.** They are review rules. The one adjacent thing that *is*
+   checked is the meter side — `TracedUseCasesTest#noMeterTagCarriesAnAccountIdOrAMovementUid` — and
+   it covers exactly one meter.
 
 **Cardinality is a one-way door, and the rule is absolute: account identifiers, movement UIDs and
 interaction ids go on spans and logs, never on meters.** A span is a sampled individual record, and
@@ -927,7 +958,14 @@ and it is written down because it looks harmless in a diff and is discovered in 
 
 **Resource attributes are not optional, because replicas are the point.** Every signal carries
 `service.name`, `service.namespace` and `service.instance.id` from the environment, plus the `k8s.*`
-conventions where the platform supplies them. Without them, twenty replicas emit one indistinguishable
+conventions where the platform supplies them. **Corrected at v3.41, and the correction is not
+cosmetic:** part 1 declared the latter two under `management.observations.key-values.*`, which adds
+common key-values to every *observation* — they become span tags **and meter tags**, not resource
+attributes. Boot reads resource attributes from `management.opentelemetry.resource-attributes.*`.
+The meter half was the real defect: `service.instance.id` defaults to a per-process UUID, so as a
+meter tag it mints one permanent time series per restart and per replica — precisely the one-way door
+the cardinality rule above names, written in by the pass that quoted the rule. Found by reading Boot
+4.1's configuration metadata; no test failed, and none would have. Without them, twenty replicas emit one indistinguishable
 stream and *"which instance is slow"* has no answer. This is the retrofit that costs most: invisible in
 the application, visible in every dashboard and alert built before it.
 
@@ -936,9 +974,16 @@ replica reports the same global value; summed across twenty pods it reads twenty
 wrong aggregation here is not visibly wrong on a chart — it is a plausible number that is false, which
 is the hardest class of monitoring defect to catch.
 
-**Sampling:** parent-based, 100% in `standalone` and CI, tail-sampled in `full` — always keep traces
-containing an error, a `409`, a `422` or a duration over p99. Sampling that discards the interesting
-traces is the same as no tracing.
+**Sampling:** parent-based, and split between the two places that can decide. **The application always
+samples 100%** (`management.tracing.sampling.probability=1.0`) because a head sampler cannot know how a
+trace *ended* — it would discard errors at exactly the same rate as successes, which is backwards.
+**The Collector tail-samples** (`docker/otel-collector.yaml`): every trace with an `ERROR` status and
+every trace slower than 150 ms is kept, the rest is sampled at 5%. Metrics are never sampled — sampling
+a counter does not thin it, it corrupts it, the same class of defect as summing the outbox gauge. Note
+Boot's default probability is **0.1**, so leaving it unset would silently discard nine spans in ten,
+including every span §9.4 asserts on. **No gate covers the Collector config**: nothing in CI starts it,
+because §9.4's Collector test uses its own configuration so that it can assert against a file rather
+than a hosted backend.
 
 **Health:** liveness and readiness are separate, and what each group *contains* is a decision here
 rather than a default.
@@ -1048,11 +1093,21 @@ mark-failed path never sets `completion_date` and resubmission is restart-only, 
 pin `MIN(publication_date)` permanently, firing the alert forever and hiding every genuine excursion
 behind the stuck value.
 
-**Consumer lag and the dead-letter topic are unobserved, and that is a named gap rather than an
-oversight.** Nothing watches consumer offsets, and `FullAdapterConfig` parks unprocessable records on
-`ledger.events.DLT` with a javadoc saying it exists to prevent *"a silent, permanent hole in the
-compliance trail"* — with nothing observing that topic either, which is operationally the hole it was
-written to avoid. Both belong to step 9 part 2, where an exporter exists to carry them.
+**Consumer lag and the dead-letter topic were unobserved. Both are closed at v3.41,** which is where
+this section said they belonged.
+
+- **`ledger.audit.dead_lettered`** counts records `FullAdapterConfig` parks on `ledger.events.DLT`.
+  That handler's javadoc says it exists to prevent *"a silent, permanent hole in the compliance
+  trail"*, and with nothing counting what it parked it produced exactly that hole. Untagged on
+  purpose: the account id and the exception type are both unbounded, and this is a meter. Asserted by
+  `KafkaAuditModuleIT#aRecordWhoseActorHeaderDisagreesWithItsPayloadIsParkedOnTheDlt`.
+- **Consumer lag** needed no code. Boot's `KafkaMetricsAutoConfiguration` registers a
+  `MicrometerConsumerListener` on `@ConditionalOnBean(MeterRegistry)` — read out of
+  `spring-boot-kafka-4.1.0.jar` rather than assumed. So lag was never missing for want of a metric; it
+  was missing for want of a registry, and this application had none before part 2.
+  `KafkaAuditModuleIT#theKafkaConsumerReportsItsOwnClientMetricsIncludingLag` asserts the *condition*,
+  because that is the part that can silently regress; the lag value is an operational reading, not a
+  build assertion.
 
 **The numbers survive as alerting thresholds, relabelled to what they actually describe:**
 outbox pending-age SLO **p99 < 2 s** steady-state, **5 s** the level worth paging on. Both are
@@ -1602,11 +1657,23 @@ the build itself, so nobody can accidentally put a Testcontainers suite on the u
 - A `MovementRejected` increments the rejection counter tagged with the correct reason.
 - Audit-trail lag is reported as a gauge and **does not** drive the readiness probe: with the
   broker paused the gauge rises, balances stay exact, and readiness stays UP (E9, §6.6).
-- Telemetry leaves the process — an OTel Collector container with a file exporter receives real spans
-  and metrics over OTLP. This one **forks the Spring context deliberately**: it needs
-  `@DynamicPropertySource` to address the container's port, which is exactly what `AGENTS.md` trap 5
-  warns costs a whole new context. ADR 0003 carries the written reason that trap demands, and this is
-  the only fork in the suite.
+- Telemetry leaves the process — an OTel Collector container receives real spans **and metrics** over
+  OTLP (`OtlpExportIT`), asserted against its **debug exporter** at `verbosity: detailed`. **Corrected
+  at v3.41 in two places.** The first: this said *file* exporter, which was tried and abandoned for
+  reasons unrelated to telemetry — the contrib image is distroless and has no `/tmp`, and with a tmpfs
+  mounted there `docker cp` cannot read back through the mount. The debug exporter needs no
+  filesystem, and §14's gate asks only that a Collector receive OTLP. The second: this paragraph previously said
+  the test "forks the Spring context deliberately" and was "the only fork in the suite"; both were
+  written before it existed. It runs **`standalone` and starts one container** — nothing it asserts
+  needs Postgres, Redis, Kafka or Keycloak — so it is a separate *profile* context in the same
+  category as `CucumberSpringConfig` and `LedgerEventsListenerTest`, and ADR 0003's forking conditions
+  never arise. The other four assertions above run on the shared `full` context and reach it the way
+  ADR 0003 §1 prescribes: an `@Import` on `AbstractIntegrationTest` **itself** (which moves the cache
+  key uniformly rather than forking) plus two properties through the `@DynamicPropertySource` that was
+  already there. **`spring.test.tracing.export=true` is the non-obvious one** — Boot injects
+  `management.tracing.export.enabled=false` into every test, so without it the `InMemorySpanExporter`
+  is never wired to a processor and the assertions read an empty list, which looks exactly like "no
+  spans are produced".
 
 ### 9.5 Use-case / validation testing
 One test per use case — commands (§2.4) and queries (§4.0) — asserting the *complete* observable
@@ -1885,7 +1952,7 @@ Each step ends green and demonstrable.
 | 6 | Projections + Redis cache + event-driven eviction | Use-case tests assert projection and cache state |
 | 7 | Kafka relay + `audit` module | Audit trail rebuilt from the stream |
 | 8 | Keycloak + RBAC + rate limiting | Security and rate-limit integration tests green |
-| 9 | Observability stack — **part 1 DELIVERED (v3.40), parts 2 and 3 not started** | **Built:** Actuator liveness/readiness probes on a separate management port, exposure assessed per endpoint and locked to `health` behind two independent layers, `ledger.outbox.pending.age.seconds`, graceful shutdown, and the resource-attribute identity the exporters will carry — closing `E9`. **Not built:** OTLP traces and metrics, JSON logs carrying `trace_id`, and the opt-in Collector. So the done-when below is **not yet met**, and this row is partial rather than green. **Done when** the §9.4 assertions pass *and* a Collector container receives real spans and metrics over OTLP. Both halves of the original wording are withdrawn and neither is the gate: *"dashboards render live traffic"* cannot be asserted by any build against a hosted backend — the Collector-reachability test is the nearest thing that can, and the dashboard itself is a documented manual step — and *"readiness gates on projection lag"* is architecturally impossible here (§6.6, the E9 row, `adr/0004`) |
+| 9 | Observability stack — **DELIVERED in full (v3.41)** | **Done when** the §9.4 assertions pass *and* a Collector container receives real spans and metrics over OTLP. **Both halves are met, in one run: CI `31219738598`** — `ObservabilityIT` 3/3 and `OtlpExportIT` 1/1, inside 80 integration and 266 unit `<testcase>` elements across 49 suites, every one reporting `failures="0" errors="0"`, counted from the uploaded XML paired with the run's conclusion (`AGENTS.md` trap 3). *Part 1 (v3.40):* Actuator liveness/readiness probes on a separate management port, exposure assessed per endpoint and locked to `health` behind two independent layers, `ledger.outbox.pending.age.seconds`, graceful shutdown — closing `E9`. *Parts 2 and 3 (v3.41):* four spans, with the audit consumer **linked** rather than parented; one bounded `ledger.movements` counter; `ledger.audit.dead_lettered` and Kafka consumer lag, closing both gaps §6.6 named; JSON logs in `full`; and one opt-in tail-sampling Collector behind a Compose profile. Both halves of the *original* wording stay withdrawn and neither is the gate: *"dashboards render live traffic"* cannot be asserted by any build against a hosted backend — the Collector test is the nearest thing that can, and the dashboard is a documented manual step — and *"readiness gates on projection lag"* is architecturally impossible here (§6.6, the E9 row, `adr/0004`). **What is delivered but ungated:** `docker/otel-collector.yaml` is started by nothing in CI, and CI holds no Grafana credential by design |
 | 10 | Python CLI + e2e scenarios | `ledger-cli scenario run edge-cases` green against compose |
 | 11 | Gatling + JMH + thresholds | Planned pipeline gate fails on regression once stage 10 is built |
 | 12 | **JVM assessment with `jvm-pulse`** — once the system is stable under load | GC + JFR telemetry captured against the composed stack (`pulse attach --docker <container> --duration 30s`) during a Gatling run; `report.html` committed to `docs/profiling/`; a `compare` against the pre-tuning baseline; tuning conclusions recorded as an ADR. **Run last, deliberately** — profiling an unstable system measures the instability, not the system |
@@ -2062,4 +2129,5 @@ replica runs anywhere.
 | 3.37 | 2026-08-07 | **A six-lens council audited §6.6 and the step 9 plan adversarially, and the corrections are load-bearing.** (1) **The gauge measured something other than its name.** `completion-mode=DELETE` deletes the publication row *the moment Kafka acknowledges* — `application-full.properties:47-50` says so in its own comment — and `AuditKafkaListener` is a `@KafkaListener` on its own group, downstream of that ack. So **pausing the audit consumer leaves the gauge at `0.0`**, and `E9`'s stated method was an experiment that could not work. There are **two** lags separated by the broker, conflated since v3.32: producer-side (measured) and consumer-side (**unmeasured**). Renamed `ledger.audit.lag.seconds` → `ledger.outbox.pending.age.seconds`, and `E9` now pauses the **broker**. (2) **`FAILED` rows would pin the gauge forever** — Modulith's mark-failed path never sets `completion_date` and resubmission is restart-only, so one poison row fixes `MIN(publication_date)`, fires the alert permanently and hides every later excursion; the query excludes them. (3) **Kafka has no health contributor on this classpath** — `spring-boot-kafka-4.1.0.jar` ships none, so v3.34's "Boot auto-configures an indicator for each" was true of Redis and false of Kafka. The Redis exclusion is a guard; the Kafka one documents intent, and **E11 is protected by a framework absence that an upgrade could remove**. Naming a non-existent contributor is a *startup* failure, not a no-op. (4) **The management port needs an explicit bind address** — `ManagementWebServerFactoryCustomizer` applies `management.server.address` unconditionally, so declaring only the port would overwrite the parent's and give `standalone`, whose whole safety argument is the loopback bind, a listener on `0.0.0.0`. (5) **"Reachable from inside the network only" is enforced by nothing here** and now says so — a NetworkPolicy would enforce it and does not exist. (6) **The `health` root needs a literal matcher**: exposing `health` is what maps the root, and an `EndpointRequest.to(HealthEndpoint.class)` permit would grant the aggregate status this section refuses. (7) **The no-PII rule covers logs and not spans**, while the Spans row mandates `ledger.account_id` on every span and spans leave to a third-party backend — named as a gap, not a decision. (8) **Consumer lag and `ledger.events.DLT` are unobserved**, so the dead-letter mechanism written to prevent "a silent, permanent hole in the compliance trail" currently produces one. Also: `.env.sample` corrected to `.env.example` in 2 place(s) — the sampled name has never existed |
 | 3.38 | 2026-08-07 | **Council round 2 returned a unanimous 4/4 DO-NOT-SHIP, and every critical it found was created by v3.37 itself.** The diagnosis was exact: v3.37's corrections landed in §6.6 and stopped there, while the plan — the artefact an implementer actually executes — received only a seven-occurrence rename of the metric. The reasoning was verified sound (all five mechanism claims were re-checked against the shipped jars by two independent lenses and none was hand-waved); it simply did not propagate. Fixed here: the `FAILED` exclusion reached the gauge SQL, the management bind address reached the plan, the health-root literal matcher replaced `EndpointRequest.to(HealthEndpoint.class)`, and §9.4 and the plan stopped naming the retracted "pause the consumer" method. **One genuinely new logical error is also corrected:** v3.37 said the management address "defaults to loopback", which would break every Kubernetes `httpGet` probe — the kubelet dials the pod IP — contradicting ADR 0005 in the section citing it. `standalone` pins loopback; `full` does not. The round-2 verdict on convergence is recorded because it is the useful part: **converging on truth, not yet on consistency** — round 1's 15 criticals across reasoning, mechanism and evidence became 4, all one failure mode. The process lesson is narrower than a documentation one: a correction is not done when the spec is right, but when every artefact derived from it agrees. Diff the plan, not just the spec |
 | 3.39 | 2026-08-07 | **The application booted with Actuator on, and §6.6 stopped being bytecode reading.** Every Spring Boot 4.1 claim in §6.6 and in the step 9 plan had been derived by decompiling shipped jars; v3.38 closed with that stated as the outstanding risk. Task 1 started the process for the first time, and the results split cleanly. **§6.6 was right where it was checkable, including the two claims it cost a council round to get right:** the `health` root *is* mapped by `include=health` and needs a literal matcher (v3.37 finding 6 — measured, it answers on the management port rather than 404ing); `management.server.address` *is* applied unconditionally, and `application-standalone.properties` pinning it is what puts the probe listener on `127.0.0.1:9090` rather than `0.0.0.0` (v3.37 finding 4). The three resource-attribute properties bind — `configprops` shows `management.observations` populating `ObservationProperties.keyValues` with `service.namespace` and `service.instance.id` — so §6.6's "resource attributes are not optional" paragraph has a mechanism and not just an intention. **The step 9 plan was wrong on two points, both now fixed there rather than here**, which is v3.38's lesson applied in the other direction: it claimed layer 1 (`exposure.include=health`) closed the health root, contradicting §6.6 four documents away — the root is closed by `denyAll` **alone**, making Task 2 the only thing between this configuration and a §6.6 violation rather than a second line of defence; and its endpoint-surface table was missing `info`, one of the **12** endpoints this classpath actually maps (`beans`, `conditions`, `configprops`, `env`, `health`, `info`, `loggers`, `mappings`, `metrics`, `sbom`, `scheduledtasks`, `threaddump`) — now assessed and closed, because Boot's `info` contributors are inert here only until a release pipeline adds `build-info`. **One measurement makes an existing guard cheaply provable:** `spring-boot-starter-data-redis` is an unconditional dependency, so `RedisHealthIndicator` auto-configures under `standalone` too and reads DOWN there with no container running — the §6.6 `redis`-excluded row (a *guard*, unlike the `kafka` row) can therefore be proven by violation on the fast `verify` path, where `E10`'s own coverage needs a real outage under `-Pit`. Root health in `standalone` is consequently DOWN permanently, which is invisible: the root is denied, and the readiness group that answers `UP` contains `readinessState` alone, exactly as the §6.6 table specifies |
+| 3.41 | 2026-08-07 | **§14 step 9 parts 2 and 3 are delivered, and the step closes.** Tracing over the OTel bridge, OTLP export off by default, JSON logs in `full`, one opt-in tail-sampling Collector, and both audit blind spots — `ledger.audit.dead_lettered` and Kafka consumer lag — closed. The **span data-classification rule §6.6 recorded as owed by this part is now stated** as four numbered clauses; the one that does work is clause 2, *no amount and no balance goes on a span* — a trace answers which request, how long and why refused, never how much, because a telemetry backend is not a place to reconstruct a customer's finances. Clause 3 is why the backend is UK-region; clause 4 is that no gate enforces any of it. **Four claims this document made were FALSE and are corrected here, which is the substance of this revision rather than a footnote to it.** (1) The **exemplars** row said they are a Prometheus-registry feature with "no flag" on the OTLP path. `micrometer-registry-otlp` 1.17.0 ships **eleven** exemplar classes and Boot 4.1 registers `OtlpExemplarsAutoConfiguration`, defaulting to `sampled-traces` — they are delivered by the framework, for free, and nothing here was written to achieve it. The row went from *specified-and-not-delivered* to *delivered by the platform*, and is now pinned by `ActuatorProbeTest#exemplarsAreReachableOnTheOtlpPath`, because a claim that flipped once under an upgrade can flip back. (2) Part 1's **resource-attribute model was at the wrong address**: `management.observations.key-values.*` produces span *and meter* tags, not resource attributes, and `service.instance.id` is a per-process UUID — as a meter tag, one permanent series per restart and per replica, precisely the one-way door §6.6's cardinality rule names, written in by the pass that quoted the rule. **No test would have caught it**; it was found by reading Boot's configuration metadata. (3) **§9.4 described a fork that never existed** — the Collector test runs `standalone` with one container — and named a *file* exporter that was tried and abandoned. (4) **§6.5's `traceId` is a misnomer**: the field publishes the FAPI interaction id, and tracing quietly took the MDC key it rode on, so every 401 and 403 body carried a 32-hex trace id where the caller's UUID belonged. Caught by `SecurityConfigIT` on CI; the MDC key moved to `interactionId` and **the published field name did not**, because renaming an error-contract field for tidiness is a breaking change. **Two further findings are process rather than content.** The Collector's container config was the only piece of this work not exercised locally before pushing, and it cost two CI rounds — a distroless image with no `/tmp`, then a tmpfs that `docker cp` cannot read through — with `Wait.forListeningPort()` passing against a dead process both times. And a span assertion that selected "the only span since the last reset" was a flake wearing a green tick: the batch processor's 100 ms flush let a previous request's span arrive after the reset, so spans are now selected by attribute. **Sampling is split between the two places that can decide**: the application head-samples at 100% because it cannot know how a trace ended, and the Collector tail-samples; metrics are never sampled, since sampling a counter does not thin it but corrupts it. **No gate covers the Collector config** and the documents say so |
 | 3.40 | 2026-08-07 | **§14 step 9 part 1 is delivered, and `E9` closes — the §9.3 catalogue has no open cases for the first time.** Probes, the exposure posture, `ledger.outbox.pending.age.seconds` and graceful shutdown are built; tracing, OTLP export, JSON logs and the Collector are not, so step 9's row is marked *partial* and its done-when is explicitly **not** met rather than quietly satisfied. `AuditLagIT` ran on CI against real containers and the run is the evidence: the gauge reached **5.084912 s** with the broker paused while readiness read **UP**, 75 integration and 247 unit `<testcase>` elements, zero failures, counted from the uploaded XML paired with the run's conclusion (`AGENTS.md` trap 3) and with `<testsuite>` matching 31 as the control that the pattern discriminates. The traceability sweep's empty output was checked the same way — 46 catalogued cases against 48 referenced, and deleting `E9`'s one reference makes it reappear. **The interesting finding is a defect the red proofs found in a test, not in production code.** `ActuatorProbeTest` first asserted the health *root* as merely not-200, alongside the other rejected endpoints; replacing the two literal permits with `EndpointRequest.to(HealthEndpoint.class)` — the §6.6 grant v3.37 spent a council round identifying — left the suite **green at 28/28** with the aggregate status open to an unauthenticated caller, because the root answers `503` in `standalone` whether it is denied or rendered. It now asserts **403 exactly**: `404` would mean never mapped, `503` mapped and rendered, and only `denyAll` produces `403`. A not-200 assertion is right for the nineteen endpoints layer 1 never maps and vacuous for the one it does — a distinction that reads as pedantry until the proof runs. Four further red proofs are recorded in the commits: layer 2 proven non-vacuous by 12 failures with `denyAll` removed at `exposure=*` and 0 with it restored; the permits by 3; and the `redis` exclusion by exactly 2, now provable on the fast `verify` path. **A sixth proof was attempted and DISCARDED rather than reinterpreted:** `E9`'s readiness assertion was to be reddened by pausing Postgres instead of Kafka, since `db` is in the `full` readiness group. Run on a throwaway branch, it **hung** instead — a paused container blocks JDBC on the socket, so the write, the gauge read and `db`'s own validation query all stall and the assertion is never reached; the job was cancelled at 45 minutes. That is the same failure shape as the `kafka` variant one layer down, and reading it as red would be the trap the step exists to avoid. The claim it was meant to establish — that `healthForPath("readiness")` reads real component health rather than a constant — is carried by the `redis` proof instead, on the same endpoint, the same group machinery and the same `Status` comparison, with no containers. So **readiness turning DOWN on a real Postgres outage is unproven here**, and no configured timeout makes it observable from inside a test. **One further proof is recorded as not covering what it appeared to:** deleting `management.server.port` leaves `ActuatorProbeTest` green, because `@SpringBootTest(properties = ...)` supplies the split itself — no gate enforces the base property, and the javadoc says so rather than implying otherwise |

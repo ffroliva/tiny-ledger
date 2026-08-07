@@ -70,6 +70,9 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
     @Autowired
     private org.springframework.kafka.config.KafkaListenerEndpointRegistry listeners;
 
+    @Autowired
+    private io.micrometer.core.instrument.MeterRegistry meters;
+
     /** §9.3 E6 asks for 50. Written through the use case, not HTTP, so no rate-limit budget is spent. */
     private static final int E6_MOVEMENTS = 50;
 
@@ -294,6 +297,11 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
      */
     @Test
     void aRecordWhoseActorHeaderDisagreesWithItsPayloadIsParkedOnTheDlt() throws Exception {
+        // §6.6 / §14 step 9 part 2: the same event must also move `ledger.audit.dead_lettered`.
+        // Asserted here rather than in an IT of its own because the ten seconds of retry backoff this
+        // test already waits out is the entire cost of manufacturing a dead letter — a second class
+        // would pay it twice for one extra assertion.
+        double deadLetteredBefore = deadLetteredCount();
         String key = UUID.randomUUID().toString();
         List<Header> headers = List.of(
                 new RecordHeader("event-type", "MoneyDeposited".getBytes(StandardCharsets.UTF_8)),
@@ -316,6 +324,34 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
         }
 
         assertThat(trail.eventStream(UUID.fromString(key), null, 50).entries()).isEmpty();
+        assertThat(deadLetteredCount())
+                .as("§6.6: the dead-letter mechanism exists to prevent a silent hole in the compliance"
+                        + " trail, and until part 2 nothing counted what it parked")
+                .isGreaterThan(deadLetteredBefore);
+    }
+
+    /**
+     * Kafka client metrics come from Boot's {@code KafkaMetricsAutoConfiguration}, which registers a
+     * {@code MicrometerConsumerListener} on {@code @ConditionalOnBean(MeterRegistry)} — verified by
+     * reading {@code spring-boot-kafka-4.1.0.jar}, not assumed. Before §14 step 9 part 2 there was no
+     * {@code MeterRegistry} in this application at all, so consumer lag was unobservable for want of a
+     * registry rather than for want of a metric. This asserts the condition is now met, which is the
+     * part that can silently regress; the lag <em>value</em> is an operational reading, not a build
+     * assertion.
+     */
+    @Test
+    void theKafkaConsumerReportsItsOwnClientMetricsIncludingLag() {
+        assertThat(meters.getMeters().stream()
+                        .map(meter -> meter.getId().getName())
+                        .filter(name -> name.startsWith("kafka.consumer."))
+                        .toList())
+                .as("consumer lag was a named gap in §6.6; Boot binds these once a MeterRegistry exists")
+                .isNotEmpty();
+    }
+
+    private double deadLetteredCount() {
+        var counter = meters.find("ledger.audit.dead_lettered").counter();
+        return counter == null ? 0.0 : counter.count();
     }
 
     /**
