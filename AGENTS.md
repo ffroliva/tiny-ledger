@@ -110,6 +110,14 @@ until they bite.
 **refuses to boot** if full-shaped config appears while `standalone` is active — config crossing the
 profile boundary is a startup failure here by design, not a style issue.
 
+**`.env` files configure your shell, never the application.** Nothing here loads a dotenv file; the
+app reads the properties above plus real environment variables. So there is **one** kind of `.env` —
+local, gitignored, for running tools and scripts by hand — and deliberately **no production `.env`**:
+production values come from the platform's secret store (Compose/Kubernetes env, GitHub Actions
+secrets), never from a file in a **public** repository. `.env.example` is committed and carries names
+with empty values; `.env` and `.env.*` are ignored, with `!.env.example` as the single exception.
+Copy it, do not edit it.
+
 ## Working agreements
 
 - Commit per logical change, with explicit pathspecs. **Never `git add -A`** — another agent may have
