@@ -18,7 +18,7 @@ public record Money(Currency currency, long minorUnits) {
     public static Currency currencyOf(String currencyCode) {
         try {
             return Currency.getInstance(currencyCode);
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException _) {
             throw new InvalidAmountException("unknown currency code: " + currencyCode);
         }
     }
@@ -61,7 +61,7 @@ public record Money(Currency currency, long minorUnits) {
         requireSameCurrency(other);
         try {
             return new Money(currency, arithmetic.applyAsLong(minorUnits, other.minorUnits));
-        } catch (ArithmeticException overflow) {
+        } catch (ArithmeticException _) {
             throw new InvalidAmountException("amount is outside the range this ledger can represent in minor units");
         }
     }

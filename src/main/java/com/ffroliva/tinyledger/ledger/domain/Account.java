@@ -118,7 +118,7 @@ public final class Account {
             case AccountOpened e -> throw new IllegalStateException("a second AccountOpened at version " + e.version());
             case MoneyDeposited e -> balanceMinorUnits = e.balanceAfter().minorUnits();
             case MoneyWithdrawn e -> balanceMinorUnits = e.balanceAfter().minorUnits();
-            case MovementRejected e -> {
+            case MovementRejected _ -> {
                 /* recorded, no balance change */
             }
         }
