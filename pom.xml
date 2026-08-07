@@ -25,12 +25,17 @@
          are unaffected. Failsafe's equivalent is configured on the plugin in the `it` profile. -->
     <surefire.failIfNoSpecifiedTests>true</surefire.failIfNoSpecifiedTests>
 
-    <!-- SonarCloud. Keys are SonarCloud's own defaults for a GitHub import (organization = the GitHub
-         owner, projectKey = owner_repo); they live here rather than in the workflow so `sonar:sonar`
-         is reproducible locally with a token, which is this pipeline's stated rule for a gate
-         (§12.1's closing note). Only the token is a secret. -->
+    <!-- SonarCloud. These live here rather than in the workflow so `sonar:sonar` is reproducible
+         locally with a token, which is this pipeline's stated rule for a gate (§12.1's closing note).
+         Only the token is a secret.
+
+         The organization is `ffroliva-github`, NOT `ffroliva`. SonarCloud appends `-github` when an
+         organization is created from a GitHub account, while the PROJECT key keeps the plain
+         `owner_repo` form — so the two do not match, which is exactly the trap. Read from
+         `api/organizations/search?member=true` after the first attempt failed with
+         "Organization key 'ffroliva' does not exist", rather than guessed a second time. -->
     <sonar.host.url>https://sonarcloud.io</sonar.host.url>
-    <sonar.organization>ffroliva</sonar.organization>
+    <sonar.organization>ffroliva-github</sonar.organization>
     <sonar.projectKey>ffroliva_tiny-ledger</sonar.projectKey>
     <sonar-maven-plugin.version>5.1.0.4751</sonar-maven-plugin.version>
 
