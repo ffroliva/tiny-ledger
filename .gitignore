@@ -40,3 +40,7 @@ benchmarks/dependency-reduced-pom.xml
 # Written by scripts/e2e/run-e2e.sh on every run, at the repository root (its EXIT trap
 # resolves APP_LOG from here). Never a build artefact worth keeping.
 app.log
+# scripts/e2e/restart-replay.sh keeps the two halves apart on purpose: the log from before the
+# kill -9 and the log from after the restart answer different questions when it fails.
+app-before-kill.log
+app-after-restart.log
