@@ -2,9 +2,13 @@ package com.ffroliva.tinyledger.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalManagementPort;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -59,6 +63,21 @@ class ActuatorProbeTest {
 
     private int statusOfManagement(String path) {
         return statusOf(managementPort, path);
+    }
+
+    /**
+     * §14 step 9 part 2. Two beans that must exist in EVERY context, because the use-case span
+     * decorator ({@code TracedUseCases}) and the projection span both inject them by type: a missing
+     * {@code Tracer} is a context-startup failure at the composition root, which is a far worse
+     * failure mode than a missing span. Asserted in {@code standalone} — the mode with no Kafka, no
+     * Postgres and no {@code MeterRegistry}-bearing adapter config — because that is the context
+     * most likely to lack them.
+     */
+    @Test
+    void tracingAndMeteringBeansExistInStandalone(
+            @Autowired ObjectProvider<Tracer> tracer, @Autowired ObjectProvider<MeterRegistry> meters) {
+        assertThat(tracer.getIfAvailable()).as("Tracer bean").isNotNull();
+        assertThat(meters.getIfAvailable()).as("MeterRegistry bean").isNotNull();
     }
 
     @Test
