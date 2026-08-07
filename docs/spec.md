@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.21
+**Version:** 3.22
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -1280,6 +1280,8 @@ auth cannot assert a `403` or an admin, and a mode that loses state on restart c
 | P8 | `alice` deposits 15 000.00 (≥ the large-movement threshold, §3) | A notification record (structured log entry) carrying the movement UID is produced; a 20.00 deposit produces none |
 | P9 | `trent` (admin) deposits 100.00 into `alice`'s account and then withdraws 40.00 from it, each addressed by its `accountUid` — not the `ACC-001` name | `201` on both; balance 60.00, a figure neither movement produces alone. **Both verbs are asserted because they are wired separately** — `LedgerController` passes the admin flag into `Deposit` and `Withdraw` as two independent arguments, so proving one proves nothing about the other. `MoneyDeposited`/`MoneyWithdrawn` on the stream carry `actor=trent` while the stream's `owner` stays `alice`; the audit entry for that version reports the same `actor` — the movement is attributable to the person, not merely to "an admin". `trent`'s own read of that balance is refused: `403`, same as any non-owner's — admin widens change operations only, never reads |
 
+| P10 | **Transaction history paged one at a time with a cursor**, following `links.next` as a client would | The paged sequence equals the unpaged read exactly — every movement once, in the same order. §7's cursor was covered only for the audit trail and only against mocks for this endpoint, so a page-boundary off-by-one was invisible. Asserted against the unpaged read rather than a fixed list, because repeat, skip and reorder are all relational faults |
+
 **Negative**
 
 | # | Scenario | Asserts |
@@ -1363,7 +1365,7 @@ comm -23 \
   <(grep -rhoE "\b(P|N|E)[0-9]{1,2}\b" src/test ledger-cli/tests | sort -u)
 ```
 
-**Known-open as of v3.21 — the whole expected output of that command, as a set** (it prints them
+**Known-open as of v3.22 — the whole expected output of that command, as a set** (it prints them
 lexicographically): `E6 E7 E9`.
 Anything else appearing is a regression: a case that had a label and lost it. `E9` is deferred by decision
 (§14 step 9); the rest are the unplanned rows this pass added deliberately rather than quietly.
@@ -1739,3 +1741,4 @@ Javadoc, because a reader checks the spec:
 | 3.19 | 2026-08-07 | N20 covered at the BDD layer: a `movementUid` reused against a *different* account is a `409` idempotency conflict, the second stream is untouched, and the original movement stands. The difference between a global and a per-stream lookup is only observable across accounts, and a per-stream one satisfies P6 and N11 completely — so nothing tested §6.3's "lookups are global" claim until now. Its red run needed **two** mutations: breaking the service lookup alone leaves all 25 scenarios green because the store's global unique index and the catch at `RecordMovementService:73` answer identically. That is the one case where that catch is load-bearing rather than redundant, confirming `docs/performance-findings.md` §6.7. Known-open narrows to `E6 E7 E9 E11 N22` |
 | 3.20 | 2026-08-07 | N22 covered: opening the same name twice returns two distinct `accountUid`s, each at stream version 1 — two independent streams, not one written twice. Pins §6.3's asymmetry (movement UIDs are client-supplied, account UIDs are server-generated) as a decision with a known cost: a client that retries an open whose response it never saw gets a second account, which is why `ledger-cli`'s `client.py` excludes that one POST from its transport retries. No discriminating mutation is recorded, and the scenario says why: every other scenario reopens `ACC-001`, so any name-based dedup fails ~everything and discriminates nothing. Known-open narrows to `E6 E7 E9 E11` |
 | 3.21 | 2026-08-07 | E11 covered by `KafkaOutageIT`, the control for E10. A write with the broker paused took **164 ms** — indistinguishable from a healthy one — so ADR 0002's separation holds under a real outage: Modulith writes the publication row inside the append transaction and delivers afterwards, and `?consistency=strong` stays exact because it folds the stream rather than the projection. The contrast is the finding: the same question asked of Redis answered **64 seconds** (§3.5). Its bound was tightened 15 s → 2 s *because* of the measurement — a ceiling loose enough to pass either way is not a guard. Known-open is now `E6 E7 E9`, all three deferred by decision |
+| 3.22 | 2026-08-07 | P10 added: the transaction history's own cursor walked end to end at `limit=1`, following `links.next` as a client would, asserted equal to the unpaged read. §7's paging was covered only for the *audit* trail (`KafkaAuditModuleIT`) and only against mocks for this endpoint (`BalanceControllerTest` proves the next-URL is built, not that following it returns the right rows) — so a page-boundary off-by-one had nothing watching it. Red run: cursor encoded one row further on, 27 scenarios run and exactly 1 failure. This closes the last item on the battle-testing backlog; the sweep is `E6 E7 E9`, all deferred by decision |
