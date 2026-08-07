@@ -115,6 +115,17 @@ smoke flows §11 names directly:
 
 ## What I could not verify without a running app
 
+> **Superseded on 2026-08-06 for the first bullet only.** `test_e2e_scenarios.py` has now been run
+> against the real jar under the `full` profile on a docker-compose stack that does have Keycloak:
+> **7 passed, 52 deselected**. The section is kept rather than deleted because it is the record of
+> what was and was not known at the time, and because everything below the first bullet still holds.
+>
+> The run earned its keep immediately, finding a defect in the harness rather than the ledger:
+> `scripts/e2e/run-e2e.sh` changed directory before invoking pytest, so its EXIT trap resolved the
+> relative `APP_LOG` against `ledger-cli/` and printed "(no application log was produced)" while the
+> real 21 KB log sat unread at the repository root. That surfaced on a genuinely failing run — six
+> scenarios 401ing — which is precisely the case the trap exists for. Fixed with a subshell.
+
 **Nothing in this build was run against the Java app.** There is no running instance in this
 environment and no e2e CI job to borrow one from (§12.1 stage 9 is one of the specified-but-missing
 stages). Concretely:
@@ -124,7 +135,8 @@ stages). Concretely:
   `addopts = "-m 'not e2e and not live'"` and was never executed here. Running it requires
   `./mvnw spring-boot:run` (standalone) or a `full`-profile stack with Keycloak provisioned (not yet
   built — `docker/docker-compose.yml` has no Keycloak service; §12.1 confirms it as "specified, not
-  yet built"). Instructions are in that file's module docstring.
+  yet built"). Instructions are in that file's module docstring. **See the note above: this bullet
+  is now historical — the stack has Keycloak and the file has run.**
 - Everything else — money conversion, the hand-written models against the contract's own example
   payloads, `LedgerClient`'s retry/parsing/resolution logic, the CLI's argument wiring, and
   `scenarios.py`'s pass/fail *detection* — is tested against a scripted fake HTTP transport (respx),

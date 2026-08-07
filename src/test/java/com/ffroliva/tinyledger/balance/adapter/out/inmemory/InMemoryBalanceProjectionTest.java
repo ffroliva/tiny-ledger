@@ -21,7 +21,12 @@ import org.junit.jupiter.api.Test;
  * unsigned, so it is the reference — {@link UUID#compareTo} is signed on the two longs and puts
  * {@code 80…} below {@code 7f…}, which is the opposite answer on a same-millisecond tie.
  */
-class InMemoryBalanceProjectionTest {
+class InMemoryBalanceProjectionTest implements com.ffroliva.tinyledger.contract.BalanceProjectionContract {
+
+    @Override
+    public com.ffroliva.tinyledger.balance.application.port.out.BalanceProjectionPort projection() {
+        return projection;
+    }
 
     // Straddling the sign boundary of the most significant bits, then of the least significant bits.
     private static final UUID MSB_HIGH = UUID.fromString("80000000-0000-0000-0000-000000000000");

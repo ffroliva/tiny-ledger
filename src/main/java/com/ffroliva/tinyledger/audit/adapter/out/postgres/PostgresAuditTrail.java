@@ -24,7 +24,7 @@ public class PostgresAuditTrail implements AuditTrailPort {
     }
 
     @Override
-    public void record(AuditEntry entry) {
+    public void recordEntry(AuditEntry entry) {
         jdbcTemplate.update(
                 "INSERT INTO audit_entries (account_id, event_type, stream_version, payload, occurred_at, recorded_at, actor) "
                         + "VALUES (?, ?, ?, ?::jsonb, ?, ?, ?) "

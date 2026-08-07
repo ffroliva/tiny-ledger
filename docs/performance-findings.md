@@ -203,6 +203,65 @@ Resolved with an explicit `annotationProcessorPaths`. Filed here because it will
 annotation-processor dependency in this project — Lombok, MapStruct, immutables — in exactly the same
 silent way.
 
+### 3.5 Two Redis clients on one request path, and only one was bounded — *severity: high, availability*
+
+**Found 2026-08-07 by `RedisOutageIT` (E10), the first time a real Redis outage was ever exercised.**
+§3.2 above reasoned carefully about the rate limiter's 250 ms timeout. That reasoning was correct and
+it was applied to exactly one of the two Lettuce clients this application runs.
+
+Paused the Redis container, issued one deposit. It returned **`201` after 64 seconds**:
+
+```
+io.lettuce.core.RedisCommandTimeoutException: GET. Command timed out after 250 millisecond(s)
+  → rate limiter storage unavailable for key 'ip-backstop:127.0.0.1', allowing the request unmetered
+
+io.lettuce.core.RedisCommandTimeoutException: Connection initialization timed out after 1 minute(s)
+  → org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
+```
+
+| Client | Timeout | Behaviour during the outage |
+|---|---|---|
+| `RateLimitConfig.rateLimitRedisClient` | 250 ms, deliberate (§3.2) | failed open in 250 ms, exactly as designed |
+| Spring Data Redis `LettuceConnectionFactory` | **unset** → Boot default 60 s | held the request for **64 seconds** |
+
+Nothing was wrong with the *logic*. `RedisBalanceCache.evict` catches `DataAccessException` and never
+rethrows, precisely so a cache outage cannot roll back a movement — a good decision, and it held. But
+`BalanceProjector.on` evicts **inside the still-open append transaction**, so the correct failure
+arrives 60 seconds later while holding a Tomcat worker, on **every write**, for the duration of the
+outage.
+
+That is the worker-pool saturation `RateLimitConfig`'s own javadoc names as *strictly worse than the
+500 the fail-open replaces*. The protection was real and the second client walked straight past it.
+
+**Why nothing caught it.** `RateLimitFilterTest#aStorageFailureFailsOpenInsteadOfPropagating` proves
+the fail-open branch by throwing a `RedisException` from a stub store — it can verify the *branch* and
+is structurally incapable of observing *latency*, or of noticing a second client it never touches. A
+simulated outage cannot measure how long a real one costs.
+
+Resolved by bounding this client for the same reason and to the same value
+(`application-full.properties`: `spring.data.redis.timeout`, `spring.data.redis.connect-timeout`).
+Measured after: the same test takes **2.8 s** end to end, and `RedisBalanceCacheIT`'s six tests stay
+green, so 250 ms is not tight enough to disturb normal operation against a same-network Redis.
+
+**The general lesson, and the reason this sits at high severity:** a per-request availability budget is
+a property of the whole request path, not of the component whose javadoc discusses it. Any future
+client added to that path inherits the obligation, and only an outage test can tell you whether it did.
+
+**The control, run the same day.** `KafkaOutageIT` (E11) asks the identical question of the other piece
+of infrastructure on the write path, and answers it the other way:
+
+| Outage | Cost to a write | Why |
+|---|---|---|
+| Redis paused, before the fix | **64 000 ms** | cache eviction runs inside the append transaction, on an unbounded client |
+| Redis paused, after the fix | ~750 ms | three bounded 250 ms stalls |
+| **Kafka paused** | **164 ms cold, 48 ms warm** | delivery is genuinely off the request path — Modulith writes the publication row inside the append transaction and delivers afterwards (ADR 0002) |
+
+That contrast is the point. Both are "an external system this write touches is down"; one was catastrophic
+and one is a non-event, and no amount of reading the code distinguished them beforehand — §3.2's careful
+reasoning about the very same 250 ms sat two files away from the client that ignored it. The pair also
+disciplines the assertion: E11's bound started at a nominal 15 s and was tightened to 2 s *because* the
+measurement came back at 164 ms. A bound loose enough to pass either way is not a guard.
+
 ---
 
 ## 4. Optimisation candidates — carried forward, not closed
@@ -233,3 +292,190 @@ what measurement *ruled out* is a finding.
 - **Not asserted:** any JMH result. There is no baseline to regress against yet — see candidate 4.
   Reporting a JMH number as a gate before a baseline exists would be a gate that fails on machine
   variance.
+
+---
+
+## 6. What the tests do not notice — mutation coverage
+
+A green suite answers "did the code run." It does not answer "would a test have noticed if the
+logic were wrong." Mutation testing asks the second question directly: PIT edits the bytecode —
+`>=` to `>`, `+` to `-`, a conditional negated, a call deleted, a return value nulled — and re-runs
+the unit suite against each edit. A mutant that still passes ("survived") is a change in behaviour
+none of the ~2,000 assertions in this repo would catch.
+
+**Report-only, as planned.** No score threshold is wired in. This is a first measurement, not a
+gate — see §5's own reasoning for why a threshold with no baseline is either meaningless or noise.
+
+### 6.1 Method
+
+| | |
+|---|---|
+| Tool | `org.pitest:pitest-maven` **1.25.9** + `pitest-junit5-plugin` **1.2.3** |
+| Why these versions | Newest on Maven Central at time of writing (checked against `maven-metadata.xml` directly — Central's search UI lags several releases behind; it still listed 1.19.1 as latest). The plan's suggested `1.20.4`/`1.2.3` starting point is five `pitest-maven` releases behind current |
+| JDK-25 check, before any config was written | `./mvnw org.pitest:pitest-maven:help -Ddetail=false` — `BUILD SUCCESS`, resolves and loads 1.25.9 cleanly on Corretto 25.0.3. No downgrade of `<java.version>` was needed or considered |
+| Scope | `targetClasses`: `ledger.domain.*`, `ledger.application.*`, `shared.*`. `targetTests`: `com.ffroliva.tinyledger.*Test` — unit suite only |
+| Containers started | **Zero.** `./mvnw -q verify` (no profile) was re-run after adding the profile and behaves exactly as before — same standalone boot, same Cucumber pass count, exit 0. The `mutation` profile is additive and untouched by the default build, same as `it` |
+| Command | `./mvnw -Pmutation org.pitest:pitest-maven:mutationCoverage` |
+| Exclusions | None needed. The run completed clean on the first attempt — no test class or mutator had to be carved out |
+| Wall time | 6 min 44 s (coverage analysis 1m39s, mutation analysis 5m03s) |
+
+### 6.2 The number (first run: 77%; after §6.4 was closed on 2026-08-07: 86%)
+
+```
+>> Line Coverage (for mutated classes only): 223/245 (91%)
+>> 28 tests examined
+>> Generated 95 mutations Killed 73 (77%)
+>> Mutations with no coverage 15. Test strength 91%
+>> Ran 147 tests (1.55 tests per mutation)
+```
+
+**Mutation score: 77% (73/95 killed).** Of the 22 not killed, 15 were **never executed** by any
+unit test (`NO_COVERAGE`) and 7 **ran and survived** — a test touched that line and still passed
+with the behaviour changed. **Test strength — killed as a fraction of what was actually
+covered — is 91%** (73/80). Those are different claims: a `NO_COVERAGE` mutant says "no test goes
+here at all"; a `SURVIVED` mutant says "a test goes here and doesn't care what happens."
+
+### 6.3 The boundary case the plan named, checked directly
+
+The motivating example for this task was `>=` vs `>` in the insufficient-funds check — exactly
+P3, "alice withdraws her exact balance." That logic lives in `Money.isNegative`/`isPositive` and
+`OverdraftPolicy.permits` (`!balanceAfter.isNegative()`, i.e. the withdrawal is allowed iff the
+resulting balance is `>= 0`). Every mutant PIT generated on that boundary was killed:
+
+| Class.method | Line | Mutator | Status |
+|---|---|---|---|
+| `Money.isPositive` | 41 | changed conditional boundary (`>` → `>=`) | KILLED |
+| `Money.isPositive` | 41 | replaced boolean return with `true` | KILLED |
+| `Money.isNegative` | 45 | changed conditional boundary (`<` → `<=`) | KILLED |
+| `Money.isNegative` | 45 | replaced boolean return with `true` | KILLED |
+| `OverdraftPolicy.permits` | 10 | replaced boolean return with `true` | KILLED |
+
+P3 is not decorative. This is the one result this task existed to check, and it holds.
+
+### 6.4 Survivors that matter
+
+Seven mutants survived execution; three are genuine test gaps in the targeted packages, the rest
+are noise (§6.5). Ordered by how much a real bug here would cost:
+
+| Class.method | Line | Mutator | What escaped |
+|---|---|---|---|
+| `Money.minus` | 36 | removed call to `requireSameCurrency` | Deleting the cross-currency guard inside `Money.minus` itself passes the whole suite. `Account.withdraw` guards currency *before* calling `minus` (line 57, and that guard's own mutant **is** killed), so nothing in this codebase currently calls `minus` with mismatched currencies — but `Money` is a public value type with no test exercising its own invariant directly. A `MoneyTest` asserting `minus` throws on currency mismatch would kill this without touching `Account` at all. |
+| `Account.withdraw` | 56 | removed call to `requirePositive` | Deleting the non-positive-amount guard on withdrawal passes the whole suite. The identical guard on `deposit` (line 38) **is** killed by an existing test — so this is a one-sided gap: `withdraw` has no equivalent of "reject a zero/negative amount" case, `deposit` does. |
+| `RecordMovementService.replayOf` (`MoneyWithdrawn` branch) | 94, 96, 97 | negated conditional (`NO_COVERAGE`, not `SURVIVED` — no test reaches this code at all) | Idempotent-replay of a **withdrawal** (a duplicate `movementUid` for a withdrawal that already succeeded) has zero unit coverage. The identical `MoneyDeposited` branch three lines above (88–92) **is** covered and its mutants **are** killed. Same asymmetry as the row above: deposit's idempotency path is tested, withdrawal's is not. |
+
+Two more, lower priority but real:
+
+- `Account.withdraw`, line 58, `MathMutator` on the rejected event's `version + 1` (currency-mismatch
+  branch): SURVIVED. Nothing asserts the version number stamped on a `MovementRejected` event when
+  the rejection reason is a currency mismatch on withdrawal.
+- `RecordMovementService.movementUidOf`, line 148, `NullReturnValsMutator`: SURVIVED. The switch
+  that extracts a movement's UUID can return `null` for at least one call site with nothing
+  noticing.
+
+### 6.5 Survivors that are noise
+
+- `Account.apply`, line 86 (`MathMutator` on `version + 1`) — this value is used only inside the
+  *message string* of an `IllegalStateException` that is already being thrown because of a real
+  version-gap. The actual gap detection (`event.version() != version + 1`, line 85) has its own
+  mutant, and that one **is** killed. This survivor changes a diagnostic string's wording, not
+  behaviour — the "changes a `toString`" class of finding the task called out in advance.
+- `Account.id()` (line 109) and `ErrorCode.title()` (line 45) — plain getters returning `null`/`""`
+  instead of the real value. Classic accessor noise.
+- 12 of the 15 `NO_COVERAGE` mutants are accessor methods on exception classes
+  (`ConcurrencyConflictException.accountId/currentVersion/expectedVersion`,
+  `OwnershipException.accountId/caller`, `TinyLedgerException.args`,
+  `IdempotencyConflictException.movementUid`, `DuplicateMovementException.movementUid`,
+  `AccountNotFoundException.accountId`, `AccountId.of`). These exceptions are presumably
+  constructed and asserted against somewhere in the adapter/IT layer (HTTP problem-detail mapping),
+  which the unit suite by design does not run — this is scope, not a domain gap.
+
+### 6.6 What a surviving mutant does and does not prove
+
+**Does prove:** a specific behaviour change at a specific line would pass the current unit suite
+undetected. That is a fact about test coverage, stated precisely enough to act on — §6.4's three
+rows are each fixable by one focused test.
+
+**Does not prove:** that the behaviour is wrong today, that the missing test is worth writing
+immediately, or that 77% is a bad score in isolation. A mutation score is only as meaningful as
+what it's compared against, and this is the first measurement — there is no prior run to regress
+against, the same reasoning §5 gives for not gating on an unbaselined JMH number. What it does
+give, for the first time, is a *ranked* list: three findings that are asymmetric gaps in
+already-half-tested behaviour (withdraw vs. deposit, twice), rather than a raw "83 lines have no
+branch coverage" that JaCoCo already reports without saying which branches matter.
+
+**Not done as part of this task:** writing the three tests §6.4 names. That is deliberately
+separate work — this section is the finding, not the fix.
+
+**Done 2026-08-07, and the score moved 77% → 86%** (82 of 95 killed). All five rows of §6.4 are now
+killed, verified by re-running PIT rather than by the tests going green:
+
+| §6.4 row | Killed by |
+|---|---|
+| `Money.minus` cross-currency guard | `MoneyTest#refusesCrossCurrencySubtractionToo` |
+| `Account.withdraw` `requirePositive` | `AccountTest#nonPositiveAmountsAreRejectedOnWithdrawalToo` |
+| `replayOf`'s `MoneyWithdrawn` branch (`NO_COVERAGE`) | `RecordMovementServiceTest#replayingASettledWithdrawalReturnsTheOriginalWithoutDebitingTwice` and its different-amount twin |
+| `Account.withdraw:58` rejected-event version | `AccountTest#aCurrencyMismatchedWithdrawalIsRejectedAtTheNextStreamVersion` |
+| `movementUidOf` null return | the uid assertion added to `sameUidDifferentAmountIsAnIdempotencyConflict` |
+
+**The three that mattered were one finding, not three.** Every one was the same asymmetry: the deposit
+path had the test and the withdrawal path did not — a cross-currency guard, a non-positive-amount
+guard, and an idempotent replay. Mutation testing did not find three unrelated gaps; it found one
+habit, three times. That is the more useful output, and it is the kind of thing a coverage percentage
+cannot say.
+
+**One survivor was left deliberately and is not noise.** `RecordMovementService.record:74` — the
+`catch (DuplicateMovementException)` — reports `NO_COVERAGE`: no unit test reaches it at all. That is
+independent confirmation of §6.7, arrived at by a different route. It is unreachable for same-stream
+racers by construction, and the one case where it *is* load-bearing is a cross-stream race, which N20
+covers at the BDD layer against real stores rather than here. A unit test that forced the branch would
+be asserting the plumbing, not the guarantee.
+
+The remaining twelve are §6.5 noise: `NullReturnValsMutator` on exception accessors that only the
+problem-detail formatting calls, and two accessor mutants on `Account.id` / `ErrorCode.title`.
+
+### 6.7 A mutant PIT never generated: idempotency is enforced twice, and no test can tell
+
+Found by hand while writing N21, not by PIT — the mutation is "delete a whole `if` statement", which
+is not in PIT's default operator set, and the line lives in `application`, which §6.1 does scope in.
+
+`RecordMovementService:69` short-circuits a replay:
+
+```java
+Optional<LedgerEvent> existing = store.findByMovementUid(movementUid);   // ④
+if (existing.isPresent()) return replayOf(existing.get(), ...);
+```
+
+Disable that `if` and **the entire BDD suite still passes — 22 of 22**, P6 (deposit replay), N11
+(idempotency conflict) and the new N21 included. Measured, not reasoned about: `&& false` on the
+condition, `./mvnw test -Dtest=CucumberTest`, `Tests run: 22, Failures: 0`.
+
+The reason is that the guarantee has a second enforcement point. Without the early return the service
+builds a fresh event and appends it; the store rejects the duplicate UID
+(`InMemoryEventStore:24`, and the unique index in Postgres), and the `catch
+(DuplicateMovementException)` at `:73` re-reads by UID and returns exactly the same answer. Two
+mechanisms, byte-identical responses.
+
+**So what is line 69 actually for?** Not correctness of the answer — determinism of it under
+contention. With the early return a replay performs no append at all, so it cannot lose an optimistic
+version check; without it, a replay that races another writer can surface a **409** where §6.3
+promises the original answer. That is the behaviour a test should pin, and none does: N19 exercises
+racing *first* writes, not a racing *replay*.
+
+**The test that would kill it:** a replay driven through the `RacingEventStore` seam
+`CucumberSpringConfig` already provides — advance the stream between ① and ⑥ and assert the replay
+still answers 200/422 and never 409. The seam exists; the scenario does not.
+
+Recorded rather than fixed, for the same reason as §6.4: this section is the finding.
+
+**Prediction confirmed, hours later, by `N19`.** The paragraph above was reasoning about ordering.
+The next CI run measured it: five racing `PUT`s of one `movementUid` answered **one 201 and four
+`409` `/errors/version-conflict`**, because the version check at `PostgresEventStore:66` runs ahead
+of the UID check. §6.3 had claimed the losers would be resolved by a unique-constraint re-read; that
+path cannot fire for same-stream racers at all, and §6.3 is corrected in spec v3.16.
+
+Two things follow. First, the ordering above is not a theoretical concern — it is the observed
+behaviour on the *first-write* race, and the replay race differs from it only in which line the
+early return sits on. Second, this is the sharper form of the §6.7 point: line 69 is doing more work
+than "avoid a doomed append", because when it is *not* reached the caller gets a 409 rather than the
+answer §6.3 promises. The client-side obligation (retry a bare 409) is what closes the gap, and it is
+now written down in §6.3 rather than assumed.

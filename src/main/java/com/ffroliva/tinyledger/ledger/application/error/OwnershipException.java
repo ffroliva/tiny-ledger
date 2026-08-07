@@ -7,7 +7,7 @@ import com.ffroliva.tinyledger.shared.error.TinyLedgerException;
 /** §6.4: the caller is not the owner of the stream it addressed. */
 public class OwnershipException extends TinyLedgerException {
     private final String caller;
-    private final AccountId accountId;
+    private final transient AccountId accountId;
 
     public OwnershipException(String caller, AccountId accountId) {
         super(

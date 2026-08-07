@@ -61,6 +61,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with: { name: surefire-reports, path: target/surefire-reports/*.xml, if-no-files-found: warn }
 
+      # Handed to the `sonar` job. `if-no-files-found: error` on purpose: a missing report would
+      # otherwise reach Sonar as "0% covered" rather than as a broken build, and a coverage number
+      # that silently means "nothing was measured" is the failure mode this pipeline exists to refuse.
+      - name: "Publish unit coverage"
+        uses: actions/upload-artifact@v4
+        with: { name: jacoco-unit, path: target/site/jacoco/jacoco.xml, if-no-files-found: error }
+
   integration:
     needs: gate
     runs-on: ubuntu-latest
@@ -87,6 +94,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with: { name: failsafe-reports, path: target/failsafe-reports/*.xml, if-no-files-found: warn }
+
+      # The integration suite produced NO coverage data at all until 2026-08-07: `-Pit` set
+      # jacoco.skip=true, which disabled the agent along with the gate it was aimed at. The gate is
+      # still off here (it measures the unit suite, which this job skips); only collection is on.
+      - name: "Publish integration coverage"
+        uses: actions/upload-artifact@v4
+        with: { name: jacoco-it, path: target/site/jacoco-it/jacoco.xml, if-no-files-found: error }
       - name: "resolve-drift placeholder"
         run: echo "python CLI drift job lands in Plan 4 (spec §12.1)"
 
@@ -307,3 +321,65 @@ jobs:
       - name: Stop the stack
         if: always()
         run: docker compose -f docker/docker-compose.yml down -v
+
+  # SonarCloud. Deliberately LAST and dependent on both test jobs, because its whole value is the
+  # coverage those jobs produce — running it early would publish a number measured from nothing.
+  #
+  # Not a gate. It reports; it does not fail the build on quality-gate status. That is the same
+  # posture §6 of docs/performance-findings.md took for mutation coverage: measure first, decide the
+  # threshold against a real baseline, and never gate on a number nobody has seen yet. Turn it into a
+  # gate later by adding `-Dsonar.qualitygate.wait=true`, once the baseline is known to be sane.
+  sonar:
+    needs: [unit, integration]
+    runs-on: ubuntu-latest
+    # Skips cleanly on forks, where secrets are not available: a PR from a fork would otherwise fail
+    # this job for a reason the contributor cannot fix.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Sonar needs full history for blame — new-code detection and issue authorship are wrong
+          # on a shallow clone, and it degrades silently rather than failing.
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with: { distribution: corretto, java-version: '25', cache: maven }
+      - name: Cache SonarCloud packages
+        uses: actions/cache@v4
+        with: { path: ~/.sonar/cache, key: "${{ runner.os }}-sonar", restore-keys: "${{ runner.os }}-sonar" }
+
+      - uses: actions/download-artifact@v4
+        with: { name: jacoco-unit, path: target/site/jacoco }
+      - uses: actions/download-artifact@v4
+        with: { name: jacoco-it, path: target/site/jacoco-it }
+
+      - name: "Both coverage reports must be present"
+        # The artifacts are uploaded with if-no-files-found: error, so this is belt and braces — but
+        # sonar.coverage.jacoco.xmlReportPaths IGNORES missing files, so without this check a lost
+        # artifact would be reported as reduced coverage rather than as a broken pipeline.
+        run: |
+          for f in target/site/jacoco/jacoco.xml target/site/jacoco-it/jacoco.xml; do
+            [ -s "$f" ] || { echo "::error::$f missing or empty — coverage would be understated"; exit 1; }
+            echo "$f: $(wc -c < "$f") bytes"
+          done
+
+      - name: "Compile without re-running tests"
+        # Sonar analyses bytecode as well as source, so the classes must exist. -DskipTests keeps the
+        # suites from running a third time; the coverage comes from the artifacts above, not from here.
+        run: ./mvnw -q -DskipTests package
+
+      - name: "Stage 13 — SonarCloud analysis"
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        # Keys AND the scanner version live in pom.xml, not here, so `./mvnw sonar:sonar` resolves the
+        # same thing locally with a token — this pipeline's rule that a gate be reproducible by hand.
+        #
+        # Skips rather than fails when the secret is absent, so the pipeline stays green for anyone
+        # who clones this repo without a SonarCloud project. The step says so loudly instead of
+        # reporting a success it did not earn.
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "::warning::SONAR_TOKEN is not set — analysis skipped, NOT passed"
+            echo "### Sonar: skipped (no SONAR_TOKEN)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          ./mvnw -q sonar:sonar

@@ -3,7 +3,7 @@ package com.ffroliva.tinyledger.ledger.domain;
 import com.ffroliva.tinyledger.shared.AccountId;
 import java.time.Instant;
 
-public sealed interface LedgerEvent permits AccountOpened, MoneyDeposited, MoneyWithdrawn, MovementRejected {
+public sealed interface LedgerEvent permits AccountOpened, MovementEvent {
     AccountId accountId();
 
     long version();

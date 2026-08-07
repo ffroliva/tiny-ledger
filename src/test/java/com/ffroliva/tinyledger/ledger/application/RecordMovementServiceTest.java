@@ -16,10 +16,10 @@ class RecordMovementServiceTest {
     private static final Currency GBP = Currency.getInstance("GBP");
     private final FakeStore store = new FakeStore();
     private final List<LedgerEvent> published = new ArrayList<>();
-    private final RecordMovementService service = new RecordMovementService(
-            store, published::add, () -> Instant.parse("2026-08-03T12:00:00Z"), UUID::randomUUID);
+    private final RecordMovementService service =
+            new RecordMovementService(store, published::add, () -> Instant.parse("2026-08-03T12:00:00Z"));
     private final OpenAccountService openService = new OpenAccountService(
-            store, published::add, () -> Instant.parse("2026-08-03T12:00:00Z"), () -> UUID.randomUUID());
+            store, published::add, () -> Instant.parse("2026-08-03T12:00:00Z"), UUID::randomUUID);
 
     private AccountId opened;
 
@@ -51,16 +51,22 @@ class RecordMovementServiceTest {
     void sameUidDifferentAmountIsAnIdempotencyConflict() {
         UUID uid = UUID.randomUUID();
         service.deposit(new Deposit("alice", false, opened, uid, new Money(GBP, 10_000), null));
-        assertThatThrownBy(() -> service.deposit(new Deposit("alice", false, opened, uid, new Money(GBP, 999), null)))
-                .isInstanceOf(IdempotencyConflictException.class);
+        Deposit differentAmount = new Deposit("alice", false, opened, uid, new Money(GBP, 999), null);
+        assertThatThrownBy(() -> service.deposit(differentAmount))
+                .isInstanceOf(IdempotencyConflictException.class)
+                // §6.4's fifth mutant: movementUidOf could return null for a call site with nothing
+                // noticing, because the exception's type was asserted and its payload never was. The uid is
+                // the whole content of this error — it tells the client *which* movement it collided with.
+                .extracting("movementUid")
+                .isEqualTo(uid);
     }
 
     @Test
     void foreignCallerIsRefusedBeforeAnyIdempotencyAnswer() {
         UUID uid = UUID.randomUUID();
         service.deposit(new Deposit("alice", false, opened, uid, new Money(GBP, 10_000), null));
-        assertThatThrownBy(
-                        () -> service.deposit(new Deposit("mallory", false, opened, uid, new Money(GBP, 10_000), null)))
+        Deposit byAStranger = new Deposit("mallory", false, opened, uid, new Money(GBP, 10_000), null);
+        assertThatThrownBy(() -> service.deposit(byAStranger))
                 .isInstanceOf(OwnershipException.class); // NOT IdempotencyConflict — §4.1 ordering
     }
 
@@ -84,9 +90,8 @@ class RecordMovementServiceTest {
 
     @Test // the control: same caller, same account, callerIsAdmin=false — proves the flag gates the widening
     void nonAdminCallerStillCannotDepositOnAnAccountTheyDoNotOwn() {
-        assertThatThrownBy(() -> service.deposit(
-                        new Deposit("mallory", false, opened, UUID.randomUUID(), new Money(GBP, 10_000), null)))
-                .isInstanceOf(OwnershipException.class);
+        Deposit byAStranger = new Deposit("mallory", false, opened, UUID.randomUUID(), new Money(GBP, 10_000), null);
+        assertThatThrownBy(() -> service.deposit(byAStranger)).isInstanceOf(OwnershipException.class);
     }
 
     @Test // a movement is recorded as an event only the FIRST time it succeeds (§4.1/§4.5): the log
@@ -123,25 +128,67 @@ class RecordMovementServiceTest {
         assertThat(replay.outcome()).isEqualTo(Outcome.REJECTED_REPLAYED);
     }
 
+    /**
+     * `performance-findings` §6.4 row 3: {@code replayOf}'s {@code MoneyWithdrawn} branch had
+     * <b>NO_COVERAGE</b> — not a surviving mutant but an unreached one — while the {@code MoneyDeposited}
+     * branch three lines above was covered and its mutants killed. The same deposit/withdrawal asymmetry as
+     * the other two rows.
+     *
+     * <p>The balance assertion is the one that matters: a replay that re-applied the command instead of
+     * answering from the stored event would debit twice and leave 2 000 here, and the caller would be
+     * charged twice for one instruction they retried once.
+     */
+    @Test
+    void replayingASettledWithdrawalReturnsTheOriginalWithoutDebitingTwice() {
+        service.deposit(new Deposit("alice", false, opened, UUID.randomUUID(), new Money(GBP, 10_000), null));
+        UUID uid = UUID.randomUUID();
+        Withdraw cmd = new Withdraw("alice", false, opened, uid, new Money(GBP, 4_000), "rent");
+
+        MovementResult first = service.withdraw(cmd);
+        assertThat(first.outcome()).isEqualTo(Outcome.CREATED);
+        assertThat(first.balanceAfter()).isEqualTo(new Money(GBP, 6_000));
+
+        MovementResult replay = service.withdraw(cmd);
+        assertThat(replay.outcome()).isEqualTo(Outcome.REPLAYED);
+        assertThat(replay.balanceAfter()).isEqualTo(new Money(GBP, 6_000));
+        assertThat(store.read(opened)).hasSize(3); // opened + deposit + one withdrawal, no fourth event
+    }
+
+    /**
+     * The other half of that branch: {@code samePayload}'s comparison for a withdrawal. Without this the
+     * negated-conditional mutants on lines 94–97 have nothing to fail — the deposit twin of this case is
+     * {@link #sameUidDifferentAmountIsAnIdempotencyConflict}, which existed; the withdrawal one did not.
+     */
+    @Test
+    void replayingASettledWithdrawalUidWithADifferentAmountIsAConflict() {
+        service.deposit(new Deposit("alice", false, opened, UUID.randomUUID(), new Money(GBP, 10_000), null));
+        UUID uid = UUID.randomUUID();
+        service.withdraw(new Withdraw("alice", false, opened, uid, new Money(GBP, 4_000), null));
+
+        Withdraw differentAmount = new Withdraw("alice", false, opened, uid, new Money(GBP, 999), null);
+        assertThatThrownBy(() -> service.withdraw(differentAmount)).isInstanceOf(IdempotencyConflictException.class);
+    }
+
     @Test
     void unknownAccountIs404Shaped() {
-        assertThatThrownBy(() -> service.deposit(
-                        new Deposit("alice", false, AccountId.random(), UUID.randomUUID(), new Money(GBP, 1), null)))
-                .isInstanceOf(AccountNotFoundException.class);
+        Deposit intoNothing =
+                new Deposit("alice", false, AccountId.random(), UUID.randomUUID(), new Money(GBP, 1), null);
+        assertThatThrownBy(() -> service.deposit(intoNothing)).isInstanceOf(AccountNotFoundException.class);
     }
 
     /** Minimal fake honouring the port contract; the real contract suite is Task 6. */
     static class FakeStore implements EventStorePort {
         final Map<AccountId, List<LedgerEvent>> streams = new HashMap<>();
 
-        public void append(AccountId id, long expectedVersion, List<LedgerEvent> events) {
+        public void append(AccountId id, long expectedVersion, List<? extends LedgerEvent> events) {
             List<LedgerEvent> stream = streams.computeIfAbsent(id, k -> new ArrayList<>());
             long current = stream.isEmpty() ? 0 : stream.getLast().version();
             if (current != expectedVersion) throw new ConcurrencyConflictException(id, expectedVersion, current);
             for (LedgerEvent e : events) {
-                movementUid(e).ifPresent(uid -> {
-                    if (findByMovementUid(uid).isPresent()) throw new DuplicateMovementException(uid);
-                });
+                if (e instanceof MovementEvent m
+                        && findByMovementUid(m.movementUid()).isPresent()) {
+                    throw new DuplicateMovementException(m.movementUid());
+                }
             }
             stream.addAll(events);
         }
@@ -150,20 +197,15 @@ class RecordMovementServiceTest {
             return List.copyOf(streams.getOrDefault(id, List.of()));
         }
 
-        public Optional<LedgerEvent> findByMovementUid(UUID uid) {
+        public Optional<MovementEvent> findByMovementUid(UUID uid) {
+            // MovementEvent replaces the four-arm Optional<UUID> helper this fake used to carry:
+            // "does this event have a movement uid" is now a type question, not a switch.
             return streams.values().stream()
                     .flatMap(List::stream)
-                    .filter(e -> movementUid(e).map(uid::equals).orElse(false))
+                    .filter(MovementEvent.class::isInstance)
+                    .map(MovementEvent.class::cast)
+                    .filter(e -> e.movementUid().equals(uid))
                     .findFirst();
-        }
-
-        private static Optional<UUID> movementUid(LedgerEvent e) {
-            return switch (e) {
-                case MoneyDeposited d -> Optional.of(d.movementUid());
-                case MoneyWithdrawn w -> Optional.of(w.movementUid());
-                case MovementRejected r -> Optional.of(r.movementUid());
-                case AccountOpened a -> Optional.empty();
-            };
         }
     }
 }

@@ -45,6 +45,8 @@ class SecurityConfigIT extends AbstractIntegrationTest {
     @Autowired
     private MockMvc mvc;
 
+    // N10: 401 to an unauthenticated request, and no information about whether the account exists — the path
+    // here carries no account id at all, which is the strongest form of that: there is nothing to leak.
     @Test // the context starting at all is half the assertion — .jwt(...) needs a decoder to exist
     void anUnauthenticatedRequestIsRefused() throws Exception {
         mvc.perform(get("/api/v1/accounts")).andExpect(status().isUnauthorized());
@@ -93,7 +95,8 @@ class SecurityConfigIT extends AbstractIntegrationTest {
                 .andExpect(status().isUnauthorized());
     }
 
-    @Test // §6.4: the decorator is wired, not merely written — mallory holds a valid token and is
+    @Test // N7: valid token, correct role, wrong owner.
+    // §6.4: the decorator is wired, not merely written — mallory holds a valid token and is
     // still refused, which no unit test on AuthorizedUseCases could establish
     void aValidTokenForTheWrongOwnerIsForbidden() throws Exception {
         UUID alicesAccount = openAnAccountAs("alice");

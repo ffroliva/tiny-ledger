@@ -40,8 +40,8 @@ public interface EventStoreContract {
     default void rejectsStaleExpectedVersion() {
         EventStorePort store = store();
         AccountId id = newStream(store);
-        assertThatThrownBy(() -> store.append(id, 0, List.of(deposit(id, 2, UUID.randomUUID()))))
-                .isInstanceOf(ConcurrencyConflictException.class);
+        List<LedgerEvent> atAStaleVersion = List.of(deposit(id, 2, UUID.randomUUID()));
+        assertThatThrownBy(() -> store.append(id, 0, atAStaleVersion)).isInstanceOf(ConcurrencyConflictException.class);
     }
 
     @Test
@@ -51,8 +51,8 @@ public interface EventStoreContract {
         AccountId b = newStream(store);
         UUID uid = UUID.randomUUID();
         store.append(a, 1, List.of(deposit(a, 2, uid)));
-        assertThatThrownBy(() -> store.append(b, 1, List.of(deposit(b, 2, uid))))
-                .isInstanceOf(DuplicateMovementException.class);
+        List<LedgerEvent> sameUidOtherStream = List.of(deposit(b, 2, uid));
+        assertThatThrownBy(() -> store.append(b, 1, sameUidOtherStream)).isInstanceOf(DuplicateMovementException.class);
         assertThat(store.findByMovementUid(uid)).isPresent();
     }
 
@@ -69,7 +69,7 @@ public interface EventStoreContract {
                 try {
                     store.append(id, 1, List.of(deposit(id, 2, UUID.randomUUID())));
                     return true;
-                } catch (ConcurrencyConflictException e) {
+                } catch (ConcurrencyConflictException _) {
                     return false;
                 }
             });

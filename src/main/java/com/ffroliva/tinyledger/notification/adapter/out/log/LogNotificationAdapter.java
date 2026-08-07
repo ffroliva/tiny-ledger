@@ -10,7 +10,7 @@ public class LogNotificationAdapter implements NotificationPort {
     private static final Logger log = LoggerFactory.getLogger(LogNotificationAdapter.class);
 
     @Override
-    public void record(Notification notification) {
+    public void recordNotification(Notification notification) {
         log.info(
                 "notification kind={} movementUid={} accountUid={} minorUnits={}",
                 notification.kind(),

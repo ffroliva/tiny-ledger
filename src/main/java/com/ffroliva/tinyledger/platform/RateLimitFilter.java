@@ -105,7 +105,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private String currentPrincipalOrNull() {
         try {
             return callerPrincipal.current();
-        } catch (IllegalStateException noAuthenticatedPrincipal) {
+        } catch (IllegalStateException _) {
             return null;
         }
     }

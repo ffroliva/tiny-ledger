@@ -65,6 +65,9 @@ until they bite.
    references here are *string literals* an IDE rename does not touch: `@AnalyzeClasses`, the
    `slices().matching(...)` cycle rule, two `api.generated..` fence strings, and `CucumberTest`'s glue
    package. Run `git grep -nE '\bOldName\b' -- ':!target'` and require empty output.
+   **Measured 2026-08-07:** all five now fail loudly if left stale — the four ArchUnit literals via
+   trap 1's setting (9 rules fail "failed to check any classes"), the glue package via Cucumber
+   itself (27 scenarios error). The grep is still the right habit; it is no longer the only net.
 3. **Count tests from surefire XML, not the `.txt` reports** — and only ever **paired with that run's
    exit code**. `.txt` reports `Tests run: 0` for `@Nested` classes and undercounts. But a build that
    fails early leaves the *previous* run's XML on disk, where it reports passing: a count without its
@@ -107,13 +110,25 @@ until they bite.
 **refuses to boot** if full-shaped config appears while `standalone` is active — config crossing the
 profile boundary is a startup failure here by design, not a style issue.
 
+**`.env` files configure your shell, never the application.** Nothing here loads a dotenv file; the
+app reads the properties above plus real environment variables. So there is **one** kind of `.env` —
+local, gitignored, for running tools and scripts by hand — and deliberately **no production `.env`**:
+production values come from the platform's secret store (Compose/Kubernetes env, GitHub Actions
+secrets), never from a file in a **public** repository. `.env.example` is committed and carries names
+with empty values; `.env` and `.env.*` are ignored, with `!.env.example` as the single exception.
+Copy it, do not edit it.
+
 ## Working agreements
 
 - Commit per logical change, with explicit pathspecs. **Never `git add -A`** — another agent may have
   uncommitted work in the tree.
 - **Push freely to `origin`; that is how the heavy suite runs.** The remote is
-  `github.com/ffroliva/tiny-ledger`, **private**. Pushing a working branch is the normal workflow, not
-  a publication event. **Never merge without being asked** — integration is still the user's decision.
+  `github.com/ffroliva/tiny-ledger` and it is **PUBLIC** — corrected 2026-08-07, having said "private"
+  since the first revision. Pushing a working branch is still the normal workflow, but it *is* a
+  publication event: every commit message, comment and log excerpt is world-readable the moment it
+  lands, and force-pushing does not unpublish what was fetched or indexed. Treat anything you write
+  into a commit as public. **Never merge without being asked** — integration is still the user's
+  decision.
 - Business refusals are **return values** (`MovementResult`), not exceptions. Exceptions are for
   catalogued errors (§6.5) and for bugs.
 - Errors are RFC 7807 problem details. `type` is the machine-readable contract; keep it stable.

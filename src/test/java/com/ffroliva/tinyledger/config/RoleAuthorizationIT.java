@@ -86,9 +86,13 @@ class RoleAuthorizationIT extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
-    // Review #2: the deposit rule had two negative tests through the chain and its withdrawal twin had
+    // N6. Review #2: the deposit rule had two negative tests through the chain and its withdrawal twin had
     // none — a typo in the withdrawal pattern would fail open into anyRequest().authenticated() and all
     // 43 tests would have stayed green.
+    //
+    // §9.3 N6 says "403; no event". Only the 403 is asserted, and deliberately: the refusal happens at the
+    // filter chain, so no handler — and therefore no event store call — is reached at all. Asserting the
+    // absence of an event here would be asserting that a code path that never ran did not run.
     @Test
     void aReaderMayNotWithdraw() throws Exception {
         mockMvc.perform(put("/api/v1/accounts/" + ANY_UID + "/withdrawals/" + UUID.randomUUID())
@@ -98,7 +102,7 @@ class RoleAuthorizationIT extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
-    @Test
+    @Test // N8: auditors observe, never mutate
     void anAuditorMayNotMoveMoney() throws Exception {
         mockMvc.perform(put("/api/v1/accounts/" + ANY_UID + "/deposits/" + UUID.randomUUID())
                         .header(HttpHeaders.AUTHORIZATION, bearer("dave"))
@@ -191,5 +195,37 @@ class RoleAuthorizationIT extends AbstractIntegrationTest {
         mockMvc.perform(head("/api/v1/accounts/" + ANY_UID + "/transactions")
                         .header(HttpHeaders.AUTHORIZATION, bearer("nobody")))
                 .andExpect(status().isForbidden());
+    }
+
+    /**
+     * The positive twin of the test above, and it was missing: that one was the suite's <em>only</em>
+     * {@code head(} call site, so a chain rule that denied {@code HEAD} to everyone satisfied it completely
+     * — and HEAD would have silently stopped working for legitimate clients while the test that named it
+     * stayed green. The fix it guards made HEAD subject to the reader rule; this proves it is subject to it
+     * rather than excluded by it.
+     *
+     * <p>carol is the principal for the same reason she is the GET test's: {@code ledger:reader} and nothing
+     * else, so this cannot pass on some other role. {@code ANY_UID} is never opened, so no fixture write is
+     * spent and no ownership term is reached — the only thing standing between the request and the handler
+     * is the chain rule under test.
+     */
+    @Test
+    void headIsPermittedToAReaderRatherThanDeniedToEveryone() throws Exception {
+        int status = mockMvc.perform(head("/api/v1/accounts/" + ANY_UID + "/transactions")
+                        .header(HttpHeaders.AUTHORIZATION, bearer("carol")))
+                .andReturn()
+                .getResponse()
+                .getStatus();
+
+        assertThat(status)
+                .as("403 would mean the chain denied HEAD to a reader — the regression this pair guards")
+                .isNotEqualTo(403);
+
+        // 200 and not 404, measured: /transactions answers an unknown account with an empty page, a
+        // divergence from docs/spec.md:720 that AuthorizedUseCases:48-54 records as pre-existing and
+        // deliberately out of its scope. Pinned rather than left as "not 403" so that if that divergence is
+        // ever closed this line fails loudly and is corrected to 404 — a weaker assertion here would let
+        // the pair quietly stop noticing anything. A failure on this line is not a HEAD regression.
+        assertThat(status).isEqualTo(200);
     }
 }

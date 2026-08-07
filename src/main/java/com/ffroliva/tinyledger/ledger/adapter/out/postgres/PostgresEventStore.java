@@ -7,6 +7,7 @@ import com.ffroliva.tinyledger.ledger.domain.AccountOpened;
 import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
 import com.ffroliva.tinyledger.ledger.domain.MoneyDeposited;
 import com.ffroliva.tinyledger.ledger.domain.MoneyWithdrawn;
+import com.ffroliva.tinyledger.ledger.domain.MovementEvent;
 import com.ffroliva.tinyledger.ledger.domain.MovementRejected;
 import com.ffroliva.tinyledger.shared.AccountId;
 import java.sql.Timestamp;
@@ -58,7 +59,7 @@ public class PostgresEventStore implements EventStorePort {
      */
     @Override
     @Transactional(propagation = Propagation.NESTED)
-    public void append(AccountId streamId, long expectedVersion, List<LedgerEvent> events) {
+    public void append(AccountId streamId, long expectedVersion, List<? extends LedgerEvent> events) {
         long current = jdbcTemplate.queryForObject(
                 "SELECT COALESCE(MAX(sequence_number), 0) FROM events WHERE aggregate_id = ?",
                 Long.class,
@@ -110,8 +111,29 @@ public class PostgresEventStore implements EventStorePort {
     }
 
     @Override
-    public Optional<LedgerEvent> findByMovementUid(UUID movementUid) {
+    public Optional<MovementEvent> findByMovementUid(UUID movementUid) {
         String sql = "SELECT event_type, payload FROM events WHERE client_movement_uid = ?";
-        return jdbcTemplate.query(sql, eventRowMapper(), movementUid).stream().findFirst();
+        return jdbcTemplate.query(sql, eventRowMapper(), movementUid).stream()
+                .findFirst()
+                .map(PostgresEventStore::asMovement);
+    }
+
+    /**
+     * The one place this narrowing is a real check rather than a formality. {@code client_movement_uid}
+     * is NULL for {@code AccountOpened} by construction ({@code append} writes it from the event), so a
+     * row matching a movement UID that is not a movement means the table was written by something other
+     * than this adapter — a fact about the data, not a case the type system can rule out. Failing loudly
+     * beats returning {@code empty()}, which would look like "no such movement" and let the caller write
+     * a duplicate.
+     *
+     * <p>Contrast the domain side: {@code MovementEvent} removed four switch arms that threw for cases
+     * that could not occur. This one can.
+     */
+    private static MovementEvent asMovement(LedgerEvent event) {
+        if (event instanceof MovementEvent movement) {
+            return movement;
+        }
+        throw new IllegalStateException(
+                "client_movement_uid is set on a " + event.getClass().getSimpleName());
     }
 }

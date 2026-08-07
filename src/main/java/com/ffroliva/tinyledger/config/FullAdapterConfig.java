@@ -139,7 +139,7 @@ public class FullAdapterConfig {
         // publish exactly when the trail depends on it.
         return new DefaultErrorHandler(
                 new DeadLetterPublishingRecoverer(
-                        deadLetters, (record, exception) -> new TopicPartition(LEDGER_EVENTS_DLT, -1)),
+                        deadLetters, (consumed, exception) -> new TopicPartition(LEDGER_EVENTS_DLT, -1)),
                 new FixedBackOff(1_000L, 9));
     }
 

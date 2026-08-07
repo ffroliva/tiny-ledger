@@ -26,6 +26,6 @@ public class NotificationEventsListener {
 
     @EventListener
     void on(LedgerEvent event) {
-        rules.evaluate(event).ifPresent(port::record);
+        rules.evaluate(event).ifPresent(port::recordNotification);
     }
 }

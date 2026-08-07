@@ -20,10 +20,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
+class PostgresBalanceProjectionIT extends AbstractIntegrationTest
+        implements com.ffroliva.tinyledger.contract.BalanceProjectionContract {
 
     @Autowired
     private BalanceProjectionPort projection;
+
+    @Override
+    public BalanceProjectionPort projection() {
+        return projection;
+    }
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -44,7 +50,7 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest {
 
         Optional<BalanceView> balance = projection.balance(id);
         assertThat(balance).isPresent();
-        assertThat(balance.get().amount().minorUnits()).isEqualTo(0);
+        assertThat(balance.get().amount().minorUnits()).isZero();
         assertThat(balance.get().streamVersion()).isEqualTo(1);
 
         Optional<AccountView> account = projection.account(id);

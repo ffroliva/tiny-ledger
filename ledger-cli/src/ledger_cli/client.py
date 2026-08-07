@@ -32,6 +32,13 @@ log = structlog.get_logger(__name__)
 _MAX_RATE_LIMIT_RETRIES = 3
 _DEFAULT_RETRY_AFTER = 1.0
 
+# Retry only what HTTP defines as idempotent. A transport error is not evidence the server did
+# nothing — `ReadTimeout` in particular fires *after* the request was sent, so the write may
+# already have been applied. That is safe for the movement `PUT`s, whose caller-supplied
+# `movementUid` makes a replay a `200` rather than a second movement (§6.3), and unsafe for
+# `POST /api/v1/accounts`, which §6.3 keeps server-uid'd and therefore has no dedup key at all.
+_IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
+
 
 class LedgerClient:
     """One instance per run. `honor_rate_limit=False` is for the `rate-limit` scenario, which
@@ -55,14 +62,22 @@ class LedgerClient:
         token = get_access_token(self.settings)
         return {"Authorization": f"Bearer {token}"} if token else {}
 
+    def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        if method.upper() in _IDEMPOTENT_METHODS:
+            return self._send_retrying(method, path, **kwargs)
+        return self._send_once(method, path, **kwargs)
+
+    def _send_once(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        return self._http.request(method, path, headers=self._headers(), **kwargs)
+
     @retry(
         retry=retry_if_exception_type(httpx.TransportError),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=0.5, max=4),
         reraise=True,
     )
-    def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        return self._http.request(method, path, headers=self._headers(), **kwargs)
+    def _send_retrying(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        return self._send_once(method, path, **kwargs)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         attempts = 0

@@ -55,6 +55,7 @@ public class LedgerSteps {
     private String lastMovementPath;
     private String lastMovementBody;
     private UUID lastMovementUid;
+    private UUID firstOpenUid; // N22 only — the accounts map is keyed by name and the second open overwrites it
     private long versionBefore;
     private long amountBefore;
 
@@ -158,6 +159,28 @@ public class LedgerSteps {
         aDepositInCurrencyIsRequestedInto(minorUnits, currencyOf(name), name);
     }
 
+    /**
+     * N22. Opens the same *name* a second time, remembering the first UID first — {@code open} keys the
+     * {@code accounts} map by name, so the second open overwrites the first entry and the original UID
+     * would otherwise be unrecoverable. Two accounts, not one, is the whole point of the case.
+     */
+    @When("an account named {string} in {word} is opened again")
+    public void anAccountIsOpenedAgain(String name, String currency) {
+        firstOpenUid = accounts.get(name);
+        open(name, currency);
+    }
+
+    @Then("the two opens returned different account UIDs, each at stream version 1")
+    public void theTwoOpensAreIndependentAccounts() {
+        UUID secondOpenUid = UUID.fromString(text(lastResponse, "$.accountUid"));
+        assertThat(secondOpenUid).isNotNull().isNotEqualTo(firstOpenUid);
+        // Independent streams, not one stream written twice: both sit at the version a fresh account has.
+        for (UUID accountUid : List.of(firstOpenUid, secondOpenUid)) {
+            assertThat(number(get("/api/v1/accounts/" + accountUid + "/balance?consistency=strong"), "$.streamVersion"))
+                    .isEqualTo(1);
+        }
+    }
+
     @When("a deposit of {money} in {word} is requested into {string}")
     public void aDepositInCurrencyIsRequestedInto(long minorUnits, String currency, String name) {
         captureBefore(name);
@@ -209,6 +232,39 @@ public class LedgerSteps {
     public void theSameDepositPutIsRetriedWith(long minorUnits) {
         originalResponse = lastResponse;
         lastResponse = put(lastMovementPath, amountBody(currencyOf(currentAccount), minorUnits));
+    }
+
+    /**
+     * N20. Deliberately leaves {@code currentAccount} and every {@code lastMovement*} field alone: the
+     * scenario has to assert afterwards that the <em>original</em> account's movement still stands, and
+     * repointing them at the second account would quietly turn those assertions into claims about the
+     * wrong stream.
+     */
+    @When("the same deposit UID is reused against {string}")
+    public void theSameDepositUidIsReusedAgainst(String name) {
+        originalResponse = lastResponse;
+        lastResponse = put(depositPath(name, lastMovementUid), lastMovementBody);
+    }
+
+    /**
+     * N21. Same mechanics as the deposit retry — the remembered path and body are verb-agnostic — but the
+     * feature file has to name the verb it is retrying, or the scenario reads as being about deposits.
+     */
+    @When("the same withdrawal PUT is retried")
+    public void theSameWithdrawalPutIsRetried() {
+        theSameDepositPutIsRetried();
+    }
+
+    /**
+     * N21's top-up. Deliberately <em>not</em> routed through the ordinary deposit step: that one records the
+     * deposit as "the last movement", and the next step has to retry the <em>withdrawal</em> refused before
+     * it. Leaving {@code lastMovement*} alone is the entire reason this step exists.
+     */
+    @When("{string} is topped up by {money}")
+    public void theAccountIsToppedUp(String name, long minorUnits) {
+        ResponseEntity<String> response =
+                put(depositPath(name, UUID.randomUUID()), amountBody(currencyOf(name), minorUnits));
+        assertThat(response.getStatusCode().value()).isEqualTo(201);
     }
 
     @When("a withdrawal of {money} is requested")
@@ -320,9 +376,9 @@ public class LedgerSteps {
 
     @Then("a {string} notification carrying the movement UID is produced")
     public void aNotificationIsProduced(String kind) {
-        assertThat(notifications.forMovement(lastMovementUid)).singleElement().satisfies(record -> {
-            assertThat(record.kind()).isEqualTo(kind);
-            assertThat(record.accountId().value()).isEqualTo(uid(currentAccount));
+        assertThat(notifications.forMovement(lastMovementUid)).singleElement().satisfies(notification -> {
+            assertThat(notification.kind()).isEqualTo(kind);
+            assertThat(notification.accountId().value()).isEqualTo(uid(currentAccount));
         });
     }
 
@@ -348,6 +404,39 @@ public class LedgerSteps {
         assertThat(recorded).hasSize(1);
         assertThat(((Number) ((Map<?, ?>) recorded.getFirst().get("amount")).get("minorUnits")).longValue())
                 .isEqualTo(minorUnits);
+    }
+
+    /**
+     * P10. Paging is asserted against the unpaged read rather than against hand-counted expectations,
+     * because the defects worth catching here are all *relational*: a cursor that repeats the row it
+     * resumed from, one that skips it, or one that quietly reorders across a boundary. Comparing the two
+     * sequences catches all three with one assertion, and a hand-written expected list would have to be
+     * re-derived every time a scenario adds a movement.
+     *
+     * <p>{@code limit=1} on purpose: it maximises the number of boundaries crossed, which is where the
+     * off-by-one lives. Every page is followed through {@code links.next} exactly as a client would, so the
+     * cursor's own round trip through the URL is under test and not just the query behind it.
+     */
+    @Then("paging the history of {string} one at a time yields exactly the unpaged history")
+    public void pagingYieldsTheUnpagedHistory(String name) {
+        List<String> unpaged = transactionUids(name);
+
+        List<String> paged = new ArrayList<>();
+        String next = "/api/v1/accounts/" + uid(name) + "/transactions?limit=1";
+        // Bounded so a cursor that never advances fails as an assertion rather than hanging the suite.
+        for (int page = 0; next != null && page <= unpaged.size(); page++) {
+            ResponseEntity<String> response = get(next);
+            assertThat(response.getStatusCode().value()).isEqualTo(200);
+            List<Map<String, Object>> rows = JsonPath.read(response.getBody(), "$.transactions");
+            rows.forEach(row -> paged.add((String) row.get("transactionUid")));
+            next = JsonPath.<List<String>>read(response.getBody(), "$..links.next").stream()
+                    .findFirst()
+                    .orElse(null);
+        }
+
+        assertThat(paged)
+                .as("paging one at a time must return the same movements, once each, in the same order")
+                .containsExactlyElementsOf(unpaged);
     }
 
     @Then("the history of {string} contains {int} transactions")

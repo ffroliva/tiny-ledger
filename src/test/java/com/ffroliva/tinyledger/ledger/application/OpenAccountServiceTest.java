@@ -8,6 +8,7 @@ import com.ffroliva.tinyledger.ledger.application.port.out.EventStorePort;
 import com.ffroliva.tinyledger.ledger.application.usecase.OpenAccountService;
 import com.ffroliva.tinyledger.ledger.domain.AccountOpened;
 import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
+import com.ffroliva.tinyledger.ledger.domain.MovementEvent;
 import com.ffroliva.tinyledger.shared.AccountId;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -42,7 +43,10 @@ class OpenAccountServiceTest {
     /** Opening reads nothing and cannot conflict; only the returned value and the published event matter here. */
     private static final class NoStore implements EventStorePort {
         @Override
-        public void append(AccountId streamId, long expectedVersion, List<LedgerEvent> events) {}
+        public void append(AccountId streamId, long expectedVersion, List<? extends LedgerEvent> events) {
+            // Intentionally inert: this fake exists to prove OpenAccountService's behaviour when the
+            // store accepts everything, so recording the append would only add state nothing asserts.
+        }
 
         @Override
         public List<LedgerEvent> read(AccountId streamId) {
@@ -50,7 +54,7 @@ class OpenAccountServiceTest {
         }
 
         @Override
-        public Optional<LedgerEvent> findByMovementUid(UUID movementUid) {
+        public Optional<MovementEvent> findByMovementUid(UUID movementUid) {
             return Optional.empty();
         }
     }

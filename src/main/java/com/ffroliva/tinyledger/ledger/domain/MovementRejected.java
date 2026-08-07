@@ -14,4 +14,4 @@ public record MovementRejected(
         Money amount,
         String reason,
         String actor)
-        implements LedgerEvent {}
+        implements MovementEvent {}

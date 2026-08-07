@@ -1,7 +1,11 @@
 """Real sequence tests against a running app — no mock, no fake, the actual `LedgerClient` over
-real HTTP. Excluded from the default run (`pyproject.toml`'s `addopts`); this file could not be
-executed in this environment (no running app, no e2e CI job — see NOTES.md), so it is written and
-reviewable but unverified.
+real HTTP. Excluded from the default run (`pyproject.toml`'s `addopts`).
+
+**Executed for the first time on 2026-08-06**, against the real jar under the `full` profile on a
+docker-compose stack: 7 passed, 52 deselected. Until then this file carried a note saying it was
+"written and reviewable but unverified" — that note is now false and is gone. The run found one
+real defect, in the harness rather than the ledger: `scripts/e2e/run-e2e.sh` changed directory
+before invoking pytest, so its EXIT trap could not find the application log it exists to dump.
 
 Run against a `standalone` instance::
 
@@ -40,6 +44,18 @@ def test_movement_chain(client: LedgerClient) -> None:
 def test_zero_boundary(client: LedgerClient) -> None:
     """Withdraw to exactly zero, then attempt one more (task brief's second axis)."""
     result = scenarios.zero_boundary(client, Console())
+    assert result.ok, result.detail
+
+
+def test_concurrent_withdrawals(client: LedgerClient) -> None:
+    """N2. Ten parallel withdrawals, individually affordable, collectively over balance."""
+    result = scenarios.concurrent_withdrawals(client, Console())
+    assert result.ok, result.detail
+
+
+def test_racing_replays(client: LedgerClient) -> None:
+    """N19. Five concurrent PUTs of the same movementUid — credited once."""
+    result = scenarios.racing_replays(client, Console())
     assert result.ok, result.detail
 
 

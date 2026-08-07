@@ -1,5 +1,25 @@
 # Tiny Ledger
 
+[![CI](https://github.com/ffroliva/tiny-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/ffroliva/tiny-ledger/actions/workflows/ci.yml)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=alert_status)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=coverage)](https://sonarcloud.io/component_measures?id=ffroliva_tiny-ledger&metric=coverage)
+
+[![Reliability](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=reliability_rating)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger)
+[![Security](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=security_rating)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger)
+[![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=sqale_rating)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger)
+[![Duplication](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=duplicated_lines_density)](https://sonarcloud.io/component_measures?id=ffroliva_tiny-ledger&metric=duplicated_lines_density)
+[![Licence: MIT](https://img.shields.io/github/license/ffroliva/tiny-ledger)](LICENSE)
+
+<!-- Every badge above is LIVE: each is fetched from CI or SonarCloud at render time and cannot drift
+     from the thing it claims. That is deliberate, and it is why there is no hand-written "Java 25" or
+     "Spring Boot 4.1" badge here — a version badge is a copy of pom.xml with nothing keeping the two
+     in step, and this repository has already spent a documentation pass deleting exactly that kind of
+     claim (spec v3.8, finding CR14). The toolchain versions live in `pom.xml` and are listed under
+     Prerequisites below, once.
+
+     The coverage figure is unit AND integration coverage combined (.github/workflows/ci.yml merges
+     two JaCoCo reports), not the unit suite alone — see docs/spec.md §9. -->
+
 An event-sourced banking ledger — accounts, deposits, withdrawals, balances — built as a Spring
 Modulith modular monolith. It runs as a single JDK process with nothing installed, or against
 Postgres, Redis and Kafka, from one codebase.

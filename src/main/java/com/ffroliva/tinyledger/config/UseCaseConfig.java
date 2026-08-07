@@ -32,9 +32,8 @@ public class UseCaseConfig { // profile-independent — the whole trick of spec 
     }
 
     @Bean
-    RecordMovementService recordMovement(
-            EventStorePort store, EventPublisherPort publisher, ClockPort clock, IdGeneratorPort ids) {
-        return new RecordMovementService(store, publisher, clock, ids);
+    RecordMovementService recordMovement(EventStorePort store, EventPublisherPort publisher, ClockPort clock) {
+        return new RecordMovementService(store, publisher, clock);
     }
 
     @Bean

@@ -115,7 +115,8 @@ class BalanceProjectorTest {
 
     @Test
     void historyRejectsInvalidCursor() {
-        assertThatThrownBy(() -> projection.history(account, new HistoryQuery("not valid base64!!", 10, null, null)))
+        HistoryQuery corruptCursor = new HistoryQuery("not valid base64!!", 10, null, null);
+        assertThatThrownBy(() -> projection.history(account, corruptCursor))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("invalid history cursor");
     }

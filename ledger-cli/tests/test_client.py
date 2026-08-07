@@ -149,6 +149,22 @@ def test_transport_error_is_retried_by_tenacity(monkeypatch: pytest.MonkeyPatch)
 
 
 @respx.mock
+def test_transport_error_is_not_retried_for_a_non_idempotent_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A `ReadTimeout` on a POST does not mean the server did not apply it. §6.3 keeps account
+    opening server-uid'd deliberately, so there is no dedup key to make a replay safe — retrying
+    opens a SECOND account and the caller never learns it. The timeout must surface instead."""
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    route = respx.post(f"{BASE}/api/v1/accounts").mock(
+        side_effect=[httpx.ReadTimeout("boom"), httpx.Response(201, json=_account_json())]
+    )
+    with LedgerClient(_settings()) as client, pytest.raises(httpx.ReadTimeout):
+        client.open_account("ACC-001", "GBP")
+    assert route.call_count == 1
+
+
+@respx.mock
 def test_resolve_account_uid_skips_lookup_for_a_real_uuid() -> None:
     route = respx.get(f"{BASE}/api/v1/accounts")
     with LedgerClient(_settings()) as client:

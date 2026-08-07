@@ -40,7 +40,8 @@ class CallerPrincipalTest {
 
     @Test // the fail-closed half: outside standalone, a missing principal is a refusal, not a default
     void withNoAuthenticationOutsideStandaloneItRefuses() {
-        assertThatThrownBy(() -> under("full").current()).isInstanceOf(IllegalStateException.class);
+        CallerPrincipal full = under("full");
+        assertThatThrownBy(full::current).isInstanceOf(IllegalStateException.class);
     }
 
     @Test // JwtValidators validates iss and the timestamps, never sub — a subject-less token is authenticated
@@ -53,7 +54,8 @@ class CallerPrincipalTest {
 
         // null must not become the owner stamped on an account: every subject-less token would then
         // share one principal. It takes the same path as no authentication at all.
-        assertThatThrownBy(() -> under("full").current()).isInstanceOf(IllegalStateException.class);
+        CallerPrincipal full = under("full");
+        assertThatThrownBy(full::current).isInstanceOf(IllegalStateException.class);
         assertThat(under("standalone").current()).isEqualTo("local");
     }
 
