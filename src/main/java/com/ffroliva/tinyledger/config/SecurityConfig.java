@@ -80,7 +80,36 @@ public class SecurityConfig {
      * chains below rather than registered as beans, so probe traffic is unmetered by construction. A
      * {@code shouldNotFilter} override on the filters themselves would have been the wrong fix: it would
      * also exempt {@code /actuator/} on the API port, where §6.1's IP backstop must still apply.
+     *
+     * <h4>Why CSRF is disabled here, and why that is not a finding</h4>
+     *
+     * <p>{@code java:S4502} is <em>"make sure disabling CSRF is safe here"</em> — a review prompt, not a
+     * defect claim. It is reviewed and it is safe, so the answer is recorded in the code rather than as
+     * a resolution on a dashboard nobody clones. Three reasons, narrowest first:
+     *
+     * <ol>
+     *   <li><strong>Nothing on this chain can be forged.</strong> The only permitted paths are the two
+     *       {@code GET} probes; everything else is {@code denyAll}. There is no state-changing request
+     *       to protect.
+     *   <li><strong>There are no ambient credentials.</strong> CSRF defends against the browser
+     *       attaching a cookie or Basic auth by itself. This chain is {@code STATELESS} and this system
+     *       has no cookie, no session and no browser surface — see the CSRF paragraph in this class's
+     *       javadoc, which is the full argument and applies to all three chains.
+     *   <li>The management port is unpublished, and in {@code standalone} it is loopback-bound.
+     * </ol>
+     *
+     * <p><strong>Enabling CSRF here would be the worse choice, not the safer one.</strong> Under
+     * {@code STATELESS} the default token repository creates an {@code HttpSession} when it stores a
+     * token — so turning it on would introduce session state on a liveness probe, to defend a pair of
+     * read-only GETs.
+     *
+     * <p><strong>What invalidates this suppression.</strong> A suppression outlives its reasoning, so
+     * the condition is written next to it: this holds only while the chain permits nothing but safe
+     * methods and stays {@code STATELESS}. If a state-changing endpoint is added here, or cookie
+     * authentication appears anywhere, <em>delete this annotation</em> and answer the rule again. The
+     * {@code sessionManagement} line below is the tripwire the class javadoc already names.
      */
+    @SuppressWarnings("java:S4502")
     @Bean
     @Order(0)
     SecurityFilterChain managementChain(HttpSecurity http) {
