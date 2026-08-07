@@ -22,6 +22,19 @@ class MoneyTest {
                 .isInstanceOf(CurrencyMismatchException.class);
     }
 
+    /**
+     * Kills the mutant recorded as `performance-findings` §6.4 row 1: deleting {@code requireSameCurrency}
+     * from {@code Money.minus} passed the whole suite. Nothing in this codebase currently calls
+     * {@code minus} with mismatched currencies — {@code Account.withdraw} guards first, and *that* guard's
+     * mutant is killed — so the survivor was real but latent. {@code Money} is a public value type and owes
+     * its own invariant a test that does not depend on who happens to call it today.
+     */
+    @Test
+    void refusesCrossCurrencySubtractionToo() {
+        assertThatThrownBy(() -> new Money(GBP, 1).minus(Money.of("EUR", 1)))
+                .isInstanceOf(CurrencyMismatchException.class);
+    }
+
     @Test
     void signHelpers() {
         assertThat(new Money(GBP, 1).isPositive()).isTrue();

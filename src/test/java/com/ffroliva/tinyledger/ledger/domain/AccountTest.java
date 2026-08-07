@@ -157,7 +157,13 @@ class AccountTest {
         AccountId id = gapped.getFirst().accountId();
         gapped.add(
                 new MoneyDeposited(id, 3, T, UUID.randomUUID(), new Money(GBP, 100), null, new Money(GBP, 100), null));
-        assertThatThrownBy(() -> Account.rehydrate(gapped)).isInstanceOf(IllegalStateException.class);
+        // The message, not just the type. A `MathMutator` on the "expected %d" arithmetic survived the
+        // whole suite because only the exception class was asserted — and this message is the entire
+        // diagnostic an operator gets for a corrupted stream. A wrong "expected" number sends them
+        // hunting for the wrong event.
+        assertThatThrownBy(() -> Account.rehydrate(gapped))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("gap in stream: expected 2 got 3");
     }
 
     @Test
@@ -166,6 +172,39 @@ class AccountTest {
         assertThatThrownBy(() -> account.deposit(
                         new Deposit("alice", false, account.id(), UUID.randomUUID(), new Money(GBP, 0), null), T))
                 .isInstanceOf(InvalidAmountException.class); // defence in depth; the boundary 400s first (§4.6)
+    }
+
+    /**
+     * Kills the mutant recorded as `performance-findings` §6.4 row 2: deleting {@code requirePositive} from
+     * {@code Account.withdraw} passed the entire suite, while the identical guard on {@code deposit} was
+     * killed by the test above. A one-sided gap — deposit had this case, withdrawal did not.
+     */
+    @Test
+    void nonPositiveAmountsAreRejectedOnWithdrawalToo() {
+        Account account = openedWith(5_000);
+        assertThatThrownBy(() -> account.withdraw(
+                        new Withdraw("alice", false, account.id(), UUID.randomUUID(), new Money(GBP, 0), null), T))
+                .isInstanceOf(InvalidAmountException.class);
+        assertThatThrownBy(() -> account.withdraw(
+                        new Withdraw("alice", false, account.id(), UUID.randomUUID(), new Money(GBP, -1), null), T))
+                .isInstanceOf(InvalidAmountException.class);
+    }
+
+    /**
+     * Kills §6.4's fourth mutant: nothing asserted the version stamped on a {@code MovementRejected} when a
+     * *withdrawal* is refused for currency mismatch, so a {@code MathMutator} on {@code version + 1}
+     * survived. The version matters — it is the optimistic-concurrency token the append is checked against,
+     * so a rejection stamped at the wrong version corrupts the next writer's expectations, not just a field.
+     */
+    @Test
+    void aCurrencyMismatchedWithdrawalIsRejectedAtTheNextStreamVersion() {
+        Account account = openedWith(5_000); // AccountOpened v1 + MoneyDeposited v2
+        MovementRejected rejected = (MovementRejected) account.withdraw(
+                        new Withdraw("alice", false, account.id(), UUID.randomUUID(), Money.of("EUR", 100), null), T)
+                .getFirst();
+        assertThat(rejected.reason()).isEqualTo("currency-mismatch");
+        assertThat(rejected.version()).isEqualTo(account.version() + 1);
+        assertThat(rejected.version()).isEqualTo(3);
     }
 
     @Test

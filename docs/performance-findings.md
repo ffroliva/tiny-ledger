@@ -319,7 +319,7 @@ gate — see §5's own reasoning for why a threshold with no baseline is either 
 | Exclusions | None needed. The run completed clean on the first attempt — no test class or mutator had to be carved out |
 | Wall time | 6 min 44 s (coverage analysis 1m39s, mutation analysis 5m03s) |
 
-### 6.2 The number
+### 6.2 The number (first run: 77%; after §6.4 was closed on 2026-08-07: 86%)
 
 ```
 >> Line Coverage (for mutated classes only): 223/245 (91%)
@@ -405,6 +405,33 @@ branch coverage" that JaCoCo already reports without saying which branches matte
 
 **Not done as part of this task:** writing the three tests §6.4 names. That is deliberately
 separate work — this section is the finding, not the fix.
+
+**Done 2026-08-07, and the score moved 77% → 86%** (82 of 95 killed). All five rows of §6.4 are now
+killed, verified by re-running PIT rather than by the tests going green:
+
+| §6.4 row | Killed by |
+|---|---|
+| `Money.minus` cross-currency guard | `MoneyTest#refusesCrossCurrencySubtractionToo` |
+| `Account.withdraw` `requirePositive` | `AccountTest#nonPositiveAmountsAreRejectedOnWithdrawalToo` |
+| `replayOf`'s `MoneyWithdrawn` branch (`NO_COVERAGE`) | `RecordMovementServiceTest#replayingASettledWithdrawalReturnsTheOriginalWithoutDebitingTwice` and its different-amount twin |
+| `Account.withdraw:58` rejected-event version | `AccountTest#aCurrencyMismatchedWithdrawalIsRejectedAtTheNextStreamVersion` |
+| `movementUidOf` null return | the uid assertion added to `sameUidDifferentAmountIsAnIdempotencyConflict` |
+
+**The three that mattered were one finding, not three.** Every one was the same asymmetry: the deposit
+path had the test and the withdrawal path did not — a cross-currency guard, a non-positive-amount
+guard, and an idempotent replay. Mutation testing did not find three unrelated gaps; it found one
+habit, three times. That is the more useful output, and it is the kind of thing a coverage percentage
+cannot say.
+
+**One survivor was left deliberately and is not noise.** `RecordMovementService.record:74` — the
+`catch (DuplicateMovementException)` — reports `NO_COVERAGE`: no unit test reaches it at all. That is
+independent confirmation of §6.7, arrived at by a different route. It is unreachable for same-stream
+racers by construction, and the one case where it *is* load-bearing is a cross-stream race, which N20
+covers at the BDD layer against real stores rather than here. A unit test that forced the branch would
+be asserting the plumbing, not the guarantee.
+
+The remaining twelve are §6.5 noise: `NullReturnValsMutator` on exception accessors that only the
+problem-detail formatting calls, and two accessor mutants on `Account.id` / `ErrorCode.title`.
 
 ### 6.7 A mutant PIT never generated: idempotency is enforced twice, and no test can tell
 
