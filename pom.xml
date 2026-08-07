@@ -177,6 +177,27 @@
           -->
           <image>
             <name>tiny-ledger:${project.version}</name>
+            <env>
+              <!--
+                Spec v3.36 / #11. The CURRENT names — BP_JVM_CDS_ENABLED and
+                CDS_TRAINING_JAVA_TOOL_OPTIONS are both DEPRECATED aliases (Paketo spring-boot
+                buildpack README, read 2026-08-08). Same trap as step 9's
+                management.otlp.tracing.*: the spelling in common circulation is the dead one, and a
+                deprecated or misspelled name is SILENTLY IGNORED — indistinguishable from not
+                setting it at all.
+              -->
+              <BP_JVM_AOTCACHE_ENABLED>true</BP_JVM_AOTCACHE_ENABLED>
+              <!--
+                THE TRAINING RUN STARTS THE APPLICATION. Under `full` it would block on Postgres,
+                Redis, Kafka and Liquibase and hang the build — predicted in spec v3.36 before this
+                was ever run, and the buildpack's own documentation for this variable says it exists
+                "to configure your app not to reach external services during" the run.
+
+                `standalone` is the whole answer, and it is available precisely because §1 keeps two
+                run modes in one codebase. The duality earns its keep here in a way nobody planned.
+              -->
+              <TRAINING_RUN_JAVA_TOOL_OPTIONS>-Dspring.profiles.active=standalone</TRAINING_RUN_JAVA_TOOL_OPTIONS>
+            </env>
           </image>
         </configuration></plugin>
       <plugin>

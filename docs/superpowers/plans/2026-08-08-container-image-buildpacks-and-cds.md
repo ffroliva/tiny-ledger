@@ -248,6 +248,30 @@ Record both numbers — with the cache and, by temporarily setting
 performance feature with no measurement is the kind of claim this repository has already retracted
 once (§12's container bullet, v3.36).
 
+**Measured 2026-08-08, three runs each, same host, minutes apart. The "without" figure is Task 1's
+image, which carried no `<env>` block at all — a stronger control than flipping the flag to `false`,
+because it also excludes the possibility that the flag name is read and ignored.**
+
+```
+without AOT cache   7.161 / 6.318 / 6.285 s   mean 6.588 s
+with    AOT cache   3.013 / 2.942 / 3.078 s   mean 3.011 s     -54%
+```
+
+**And the runtime side had to be checked separately, because it is a second flag.** The buildpack's
+own configuration table prints `$BPL_JVM_AOTCACHE_ENABLED false` — that is the *launch*-time toggle,
+distinct from the `BP_` build-time one, and a cache that is built but never loaded would show up as
+"the feature does nothing" with every build-time log line still looking correct. It is fine here, but
+only because it was read out of the running container rather than assumed:
+
+```
+[libjvm] JVM AOT Cache Enabled, contributing -XX:AOTCache=application.aot to JAVA_TOOL_OPTIONS
+Picked up JAVA_TOOL_OPTIONS: ... -XX:AOTCache=application.aot ...
+```
+
+**Do not use `docker exec … cat` to inspect the container.** The run image is
+`paketobuildpacks/ubuntu-noble-run-tiny`, which ships no coreutils —
+`exec: "cat": executable file not found in $PATH`. Read the application's own stdout instead.
+
 - [ ] **Step 4: Gate and commit**
 
 ```bash
