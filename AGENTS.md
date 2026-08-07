@@ -118,6 +118,31 @@ secrets), never from a file in a **public** repository. `.env.example` is commit
 with empty values; `.env` and `.env.*` are ignored, with `!.env.example` as the single exception.
 Copy it, do not edit it.
 
+## Agent tooling that is committed, and the one rule that governs it
+
+**`.mcp.json` is tracked and vendor-neutral in the same way this file is.** It defines one MCP
+server, `grafana`, used to verify §14 step 9's telemetry by *querying* Grafana Cloud rather than by
+looking at a dashboard — a build cannot assert a hosted backend, so the check has to be made by a
+reader. `.claude/settings.json` approves it; both are committed deliberately, which is the decision
+`.gitignore:10` exists to keep visible.
+
+**The definition is committed; the credential never is.** `.mcp.json` carries `${GRAFANA_URL}` and
+`${GRAFANA_SERVICE_ACCOUNT_TOKEN}`, not values. **Expansion reads the environment Claude Code was
+launched with** — consistent with the rule below that a `.env` configures your shell and nothing
+else — so source the file *before* starting the agent, or the server fails to start:
+
+```bash
+set -a; . ./.env.grafana; set +a && claude      # .env.grafana is gitignored by `.env*`
+```
+
+The token is a **Viewer** service-account token. Read-only is enforced by the role server-side,
+which no client flag could guarantee. The image is pinned (`grafana/mcp-grafana:1.0.0`) rather than
+floating on `latest`, for the reason every other version here is pinned.
+
+**No gate enforces any of this.** Nothing in CI touches the MCP server, and CI holds no Grafana
+credential at all — step 9's gate is a Collector receiving OTLP, which a debug exporter satisfies
+with no secret, so a fork's build still passes.
+
 ## Working agreements
 
 - Commit per logical change, with explicit pathspecs. **Never `git add -A`** — another agent may have
