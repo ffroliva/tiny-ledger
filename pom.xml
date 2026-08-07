@@ -24,6 +24,30 @@
          this repository has already shipped once. Only applies when `-Dtest` is given, so full runs
          are unaffected. Failsafe's equivalent is configured on the plugin in the `it` profile. -->
     <surefire.failIfNoSpecifiedTests>true</surefire.failIfNoSpecifiedTests>
+
+    <!-- SonarCloud. These live here rather than in the workflow so `sonar:sonar` is reproducible
+         locally with a token, which is this pipeline's stated rule for a gate (§12.1's closing note).
+         Only the token is a secret.
+
+         The organization is `ffroliva-github`, NOT `ffroliva`. SonarCloud appends `-github` when an
+         organization is created from a GitHub account, while the PROJECT key keeps the plain
+         `owner_repo` form — so the two do not match, which is exactly the trap. Read from
+         `api/organizations/search?member=true` after the first attempt failed with
+         "Organization key 'ffroliva' does not exist", rather than guessed a second time. -->
+    <sonar.host.url>https://sonarcloud.io</sonar.host.url>
+    <sonar.organization>ffroliva-github</sonar.organization>
+    <sonar.projectKey>ffroliva_tiny-ledger</sonar.projectKey>
+    <sonar-maven-plugin.version>5.1.0.4751</sonar-maven-plugin.version>
+
+    <!-- TWO paths, comma-separated, and that is the whole reason the `it` profile writes its JaCoCo
+         data to a separate file. CI runs unit and integration on different runners, so neither ever
+         sees the other's coverage; Sonar accepts several reports and unions them. A single path here
+         would report the unit suite's coverage as if it were the project's, which is exactly the kind
+         of number this repository refuses to publish. Missing files are ignored, so a local
+         `verify` (no ITs) still analyses cleanly with unit coverage alone. -->
+    <sonar.coverage.jacoco.xmlReportPaths>
+      ${project.build.directory}/site/jacoco/jacoco.xml,${project.build.directory}/site/jacoco-it/jacoco.xml
+    </sonar.coverage.jacoco.xmlReportPaths>
   </properties>
   <dependencyManagement>
     <dependencies>
@@ -134,10 +158,22 @@
         <configuration><java><palantirJavaFormat/></java></configuration>
         <executions><execution><goals><goal>check</goal></goals></execution></executions>
       </plugin>
+      <!-- Version pinned here and nowhere else, so `./mvnw sonar:sonar` resolves the same scanner in
+           CI and on a laptop. No <executions>: nothing binds it to a phase, because analysis is a
+           deliberate invocation and must never ride along with `verify`. -->
+      <plugin>
+        <groupId>org.sonarsource.scanner.maven</groupId>
+        <artifactId>sonar-maven-plugin</artifactId>
+        <version>${sonar-maven-plugin.version}</version>
+      </plugin>
       <plugin>
         <groupId>org.jacoco</groupId><artifactId>jacoco-maven-plugin</artifactId><version>0.8.15</version>
         <executions>
           <execution><goals><goal>prepare-agent</goal></goals></execution>
+          <!-- Declared BEFORE `check` on purpose: both default to the `verify` phase, and within one
+               phase Maven runs executions in declaration order. Sonar consumes this XML; nothing did
+               before, so no report goal was bound at all. -->
+          <execution><id>report</id><goals><goal>report</goal></goals></execution>
           <execution><id>check</id><goals><goal>check</goal></goals>
             <configuration><rules><rule>
               <element>PACKAGE</element>
@@ -159,15 +195,39 @@
            `./mvnw verify -Pit` adds failsafe to run them. -->
       <id>it</id>
       <properties>
-        <!-- JaCoCo's gates measure the UNIT suite, which this profile now skips - so with no
+        <!-- JaCoCo's COVERAGE GATE measures the UNIT suite, which this profile skips - so with no
              surefire coverage data the check fails on ~0% and the integration job dies before
              failsafe reports anything. Measured: CI run 31078... failed exactly there.
              The `unit` job still enforces the gates on every push; running them a second time
-             against the same code was the duplication this profile change exists to remove. -->
-        <jacoco.skip>true</jacoco.skip>
+             against the same code was the duplication this profile change exists to remove.
+             That reasoning is about the `check` GOAL, and `jacoco.skip=true` used to switch off the
+             whole plugin - including the agent, so `-Pit` produced no coverage data at all and the
+             integration suite was invisible to any coverage report. The `check` execution is now
+             disabled on its own (phase `none`, below) and collection is left on, which keeps the
+             original decision exactly and stops it costing more than it was meant to. -->
+        <jacoco.destFile>${project.build.directory}/jacoco-it.exec</jacoco.destFile>
       </properties>
       <build>
         <plugins>
+          <plugin>
+            <groupId>org.jacoco</groupId>
+            <artifactId>jacoco-maven-plugin</artifactId>
+            <configuration>
+              <!-- The agent writes here (jacoco.destFile above) and the report reads the same file
+                   into its own directory, so the unit run's target/jacoco.exec and
+                   target/site/jacoco are never overwritten. That matters beyond CI, where the two
+                   run on separate runners: locally, `verify` then `verify -Pit` in the same tree
+                   would otherwise clobber the first result with the second - the collision AGENTS.md
+                   already warns about for two concurrent Maven builds. -->
+              <dataFile>${project.build.directory}/jacoco-it.exec</dataFile>
+              <outputDirectory>${project.build.directory}/site/jacoco-it</outputDirectory>
+            </configuration>
+            <executions>
+              <!-- The gate, and only the gate. See the property comment above for why it cannot run
+                   here: it would measure a suite this profile deliberately skipped. -->
+              <execution><id>check</id><phase>none</phase></execution>
+            </executions>
+          </plugin>
           <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-surefire-plugin</artifactId>
@@ -202,6 +262,49 @@
                 </goals>
               </execution>
             </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+    <profile>
+      <!-- Report-only mutation coverage on the domain and use cases. Not wired into `verify` and
+           carries no threshold on purpose - see docs/performance-findings.md §4. Run explicitly:
+           `./mvnw -Pmutation org.pitest:pitest-maven:mutationCoverage`. -->
+      <id>mutation</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.pitest</groupId>
+            <artifactId>pitest-maven</artifactId>
+            <!-- Newest available on Maven Central as of this task (checked via maven-metadata.xml;
+                 the plan's suggested 1.20.4 is several releases behind). Confirmed it loads on
+                 JDK 25: `./mvnw org.pitest:pitest-maven:help` succeeds. -->
+            <version>1.25.9</version>
+            <dependencies>
+              <dependency>
+                <groupId>org.pitest</groupId>
+                <artifactId>pitest-junit5-plugin</artifactId>
+                <version>1.2.3</version>
+              </dependency>
+            </dependencies>
+            <configuration>
+              <!-- The domain and the use cases only. A surviving mutant in Account or Money is a
+                   missing test; a surviving mutant in a Spring adapter is usually just wiring. -->
+              <targetClasses>
+                <param>com.ffroliva.tinyledger.ledger.domain.*</param>
+                <param>com.ffroliva.tinyledger.ledger.application.*</param>
+                <param>com.ffroliva.tinyledger.shared.*</param>
+              </targetClasses>
+              <targetTests>
+                <param>com.ffroliva.tinyledger.*Test</param>
+              </targetTests>
+              <outputFormats>
+                <param>HTML</param>
+                <param>XML</param>
+              </outputFormats>
+              <!-- No threshold yet, on purpose: measure before gating. -->
+              <timestampedReports>false</timestampedReports>
+            </configuration>
           </plugin>
         </plugins>
       </build>

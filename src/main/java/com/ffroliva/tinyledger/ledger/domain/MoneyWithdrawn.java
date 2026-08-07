@@ -14,4 +14,4 @@ public record MoneyWithdrawn(
         String reference,
         Money balanceAfter,
         String actor)
-        implements LedgerEvent {}
+        implements MovementEvent {}

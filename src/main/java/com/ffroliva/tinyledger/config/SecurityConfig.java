@@ -56,8 +56,7 @@ public class SecurityConfig {
             RateLimiterStore rateLimiterStore,
             RateLimitProperties rateLimitProperties,
             CallerPrincipal callerPrincipal,
-            ObjectMapper mapper)
-            throws Exception {
+            ObjectMapper mapper) {
         return http.csrf(csrf -> csrf.disable())
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -102,8 +101,7 @@ public class SecurityConfig {
             RateLimiterStore rateLimiterStore,
             RateLimitProperties rateLimitProperties,
             CallerPrincipal callerPrincipal,
-            ObjectMapper mapper)
-            throws Exception {
+            ObjectMapper mapper) {
         return http.csrf(csrf -> csrf.disable())
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

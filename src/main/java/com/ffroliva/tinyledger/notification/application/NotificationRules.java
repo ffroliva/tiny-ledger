@@ -30,7 +30,7 @@ public class NotificationRules {
             case MoneyWithdrawn w
             when isLarge(w.amount().minorUnits()) ->
                 Optional.of(notify(w.movementUid(), w, "LARGE_MOVEMENT", w.amount()));
-            case AccountOpened a -> Optional.empty();
+            case AccountOpened _ -> Optional.empty();
             default -> Optional.empty();
         };
     }

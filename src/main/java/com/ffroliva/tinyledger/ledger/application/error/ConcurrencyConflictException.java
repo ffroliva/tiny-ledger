@@ -5,7 +5,7 @@ import com.ffroliva.tinyledger.shared.error.ErrorCode;
 import com.ffroliva.tinyledger.shared.error.TinyLedgerException;
 
 public class ConcurrencyConflictException extends TinyLedgerException {
-    private final AccountId accountId;
+    private final transient AccountId accountId;
     private final long expectedVersion;
     private final long currentVersion;
 

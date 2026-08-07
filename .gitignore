@@ -36,3 +36,27 @@ __pycache__/
 benchmarks/jmh-result.json
 # maven-shade-plugin writes this beside benchmarks/pom.xml on every package
 benchmarks/dependency-reduced-pom.xml
+
+# Local credentials for DEVELOPER TOOLING (Sonar, and anything like it). This repository is PUBLIC:
+# a committed token is a published token, and force-pushing does not unpublish what was already
+# fetched or indexed — it has to be revoked instead. These patterns exist so that never happens.
+#
+# `.env*` is deliberately the broad form: it catches `.env`, `.env.sonar`, and anything else that
+# starts that way (`.envrc`, `.environment`), so a new tool's credential file is ignored before
+# anyone thinks to add a rule for it. That is the right default when the cost of missing one is a
+# published secret.
+#
+# `!.env.example` MUST stay below it — git applies the last matching pattern, so the negation only
+# works after the blanket. That file is committed on purpose and carries variable NAMES with empty
+# values, never secrets; without this line the blanket would hide the one file whose whole job is to
+# be read.
+.env*
+!.env.example
+
+# Written by scripts/e2e/run-e2e.sh on every run, at the repository root (its EXIT trap
+# resolves APP_LOG from here). Never a build artefact worth keeping.
+app.log
+# scripts/e2e/restart-replay.sh keeps the two halves apart on purpose: the log from before the
+# kill -9 and the log from after the restart answer different questions when it fails.
+app-before-kill.log
+app-after-restart.log

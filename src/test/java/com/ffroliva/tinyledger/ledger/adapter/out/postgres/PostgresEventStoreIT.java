@@ -7,7 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-public class PostgresEventStoreIT extends AbstractIntegrationTest implements EventStoreContract {
+class PostgresEventStoreIT extends AbstractIntegrationTest implements EventStoreContract {
 
     @Autowired
     private EventStorePort store;
