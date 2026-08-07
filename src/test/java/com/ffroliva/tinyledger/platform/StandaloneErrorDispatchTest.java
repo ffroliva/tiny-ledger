@@ -10,9 +10,10 @@ import jakarta.servlet.RequestDispatcher;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
 
 /**
  * The {@code standalone} twin of {@code SecurityConfigIT#anErrorDispatchDoesNotEchoTheRequestPath}, and
@@ -34,20 +35,37 @@ import org.springframework.test.web.servlet.MockMvc;
  *
  * <p>Boots {@code standalone}, so it starts no containers and belongs in the unit suite — the split
  * {@code AGENTS.md} calls load-bearing is preserved.
+ *
+ * <p><strong>No {@code @AutoConfigureMockMvc}, deliberately — trap 5.</strong> The first version of this
+ * class had it, which changes the merged configuration and would have forked a <em>third</em> standalone
+ * context in the unit suite. {@code SecurityConfigTest} and {@code LedgerEventsListenerTest} both run as
+ * a plain {@code @SpringBootTest} + {@code @ActiveProfiles("standalone")} and therefore share one; this
+ * hand-builds {@code MockMvc} from the {@code WebApplicationContext} exactly as {@code SecurityConfigTest}
+ * does, so it joins them instead of paying for its own.
+ *
+ * <p>Safe here for a reason that does <em>not</em> hold in {@code AbstractIntegrationTest}, whose javadoc
+ * explains why it needs the annotation: a hand-built {@code MockMvc} registers only the security filter,
+ * so filter <em>ordering</em> is unobservable. This test asserts which controller serves {@code /error},
+ * which is autoconfiguration rather than filter behaviour, so nothing it checks depends on the filter
+ * chain being assembled from registrations.
  */
 @SpringBootTest(classes = TinyLedgerApplication.class)
 @ActiveProfiles("standalone")
-@AutoConfigureMockMvc
 class StandaloneErrorDispatchTest {
 
     @Autowired
-    private MockMvc mockMvc;
+    private WebApplicationContext context;
+
+    private MockMvc mockMvc() {
+        return MockMvcBuilders.webAppContextSetup(context).build();
+    }
 
     @Test
     void anErrorDispatchDoesNotEchoTheRequestPathInStandaloneEither() throws Exception {
         String leakedPath = "/api/v1/accounts/91b1d1c2-aaaa-4f2b-9c3d-abcdefabcdef";
 
-        mockMvc.perform(get("/error")
+        mockMvc()
+                .perform(get("/error")
                         .requestAttr(RequestDispatcher.ERROR_STATUS_CODE, 500)
                         .requestAttr(RequestDispatcher.ERROR_REQUEST_URI, leakedPath))
                 .andExpect(content().string(not(containsString(leakedPath))));
@@ -61,7 +79,8 @@ class StandaloneErrorDispatchTest {
      */
     @Test
     void anErrorDispatchIsNotServedByBasicErrorController() throws Exception {
-        mockMvc.perform(get("/error")
+        mockMvc()
+                .perform(get("/error")
                         .requestAttr(RequestDispatcher.ERROR_STATUS_CODE, 500)
                         .requestAttr(RequestDispatcher.ERROR_REQUEST_URI, "/api/v1/accounts"))
                 .andExpect(content().string(not(containsString("\"error\":\"None\""))))
