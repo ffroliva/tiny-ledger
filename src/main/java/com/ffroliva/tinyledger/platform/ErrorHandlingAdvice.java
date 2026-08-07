@@ -93,10 +93,17 @@ public class ErrorHandlingAdvice {
         return ResponseEntity.status(status).body(body);
     }
 
-    /** §6.5/§6.6: the correlating id. {@link FapiInteractionIdFilter} is the tracer that puts it there. */
+    /**
+     * §6.5/§6.6: the correlating id. {@link FapiInteractionIdFilter} is what puts it there.
+     *
+     * <p>Read from {@code interactionId} and published as {@code traceId}, and the asymmetry is
+     * deliberate: since §14 step 9 part 2, Micrometer Tracing owns the MDC key {@code traceId} and would
+     * overwrite this value, while the JSON property name is a published part of the error contract and is
+     * left alone. §6.5 records that the name is now a misnomer.
+     */
     private static ProblemDetail traced(ProblemDetail body) {
-        String traceId = MDC.get("traceId");
-        if (traceId != null) body.setProperty("traceId", traceId);
+        String interactionId = MDC.get(FapiInteractionIdFilter.MDC_KEY);
+        if (interactionId != null) body.setProperty("traceId", interactionId);
         return body;
     }
 }

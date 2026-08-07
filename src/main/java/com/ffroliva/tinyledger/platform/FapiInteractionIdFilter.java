@@ -23,9 +23,25 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * full match against the UUID shape rather than by stripping characters such as {@code \n}: an allowlist
  * cannot be defeated by an encoding the stripper did not anticipate, and FAPI requires a UUID anyway, so the
  * stricter rule is also the correct one. The rejected value is deliberately never logged - doing so would
- * reintroduce the very injection this filter exists to prevent. Also placed in the MDC as {@code traceId},
- * which is the key {@link ErrorHandlingAdvice} and {@link SecurityProblemHandler} already read when decorating
- * a problem response.
+ * reintroduce the very injection this filter exists to prevent. Also placed in the MDC as
+ * {@link #MDC_KEY}, which is the key {@link ErrorHandlingAdvice} and {@link SecurityProblemHandler} read when
+ * decorating a problem response.
+ *
+ * <p><strong>The MDC key is {@code interactionId} and NOT {@code traceId}, since §14 step 9 part 2.</strong>
+ * It was {@code traceId} until tracing arrived, and then two different identifiers claimed one MDC key:
+ * Micrometer Tracing's {@code Slf4JEventListener} writes the real OTel trace id under {@code traceId} the
+ * moment a span goes into scope, which is inside this filter's {@code chain.doFilter}. The interaction id was
+ * therefore overwritten before any problem handler could read it, and every 401 and 403 body carried a
+ * 32-hex trace id where the client's own UUID belonged. Measured on CI, not reasoned about:
+ * {@code SecurityConfigIT#anUnauthenticatedRefusalStillCarriesTheInteractionId} and
+ * {@code #theAuditTrailIsRefusedToAnOrdinaryToken} both failed with
+ * {@code expected:<c3f1a9e2-…> but was:<569e577ccb5eda177020b2d332aa3f3a>}.
+ *
+ * <p>Micrometer's keys had to win — §6.6 requires {@code trace_id} and {@code span_id} on every log line, and
+ * {@code Slf4JEventListener} hardcodes those names. <strong>The wire contract is unchanged:</strong> the
+ * problem body still publishes this value under the JSON property {@code traceId}. That name is now a
+ * misnomer and is recorded as one in §6.5 rather than quietly renamed, because it is a published field.
+ *
  *
  * <p>{@code @Order(HIGHEST_PRECEDENCE)} is load-bearing, not tidiness. A {@code @Component Filter} registers at
  * {@code Ordered.LOWEST_PRECEDENCE}, while {@code springSecurityFilterChain} registers at
@@ -43,6 +59,13 @@ public class FapiInteractionIdFilter extends OncePerRequestFilter {
 
     static final String HEADER = "x-fapi-interaction-id";
 
+    /**
+     * The MDC key this filter owns. Deliberately not {@code traceId} — see the class javadoc; that key
+     * belongs to Micrometer Tracing and collides. Public so the three problem writers read one constant
+     * rather than three string literals that can drift apart silently.
+     */
+    public static final String MDC_KEY = "interactionId";
+
     private static final Pattern RFC_4122 =
             Pattern.compile("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
 
@@ -57,12 +80,12 @@ public class FapiInteractionIdFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String interactionId = sanitise(request.getHeader(HEADER));
         response.setHeader(HEADER, interactionId);
-        MDC.put("traceId", interactionId);
+        MDC.put(MDC_KEY, interactionId);
         try {
             chain.doFilter(request, response);
         } finally {
             // Container threads are pooled: leaving this set would attribute the next request's logs to this one.
-            MDC.remove("traceId");
+            MDC.remove(MDC_KEY);
         }
     }
 }
