@@ -785,12 +785,29 @@ String containerId = POSTGRES.getContainerId();
 Push. Expected: `lagIsVisibleAndReadinessStaysUp` **fails**, `readiness()` reading `DOWN` (`503` over
 HTTP) because `db` is in the `full` readiness group and Postgres is unreachable. **Revert the change.**
 
-What this proves and what it does not, stated exactly, because the difference matters: it proves the
-readiness assertion reads real component health rather than a constant — the group resolves, `db`
-is in it, and a genuinely unready instance turns it `DOWN`. It does **not** prove the `kafka`
-exclusion is load-bearing; nothing can, because there is no contributor to exclude. The exclusion of
-`redis` is the one that would be provable the other way, and it is not exercised by E9. Record the run
-URL in the commit message and claim only the first of these.
+**RUN 2026-08-07 — and it does not work either. This is the second proof design this step has had to
+discard.** Pushed as throwaway branch `proof-e9-postgres` with a draft PR, run `31180401360`. It did
+not redden: it **hung**. With the container paused the JDBC write blocks on the socket rather than
+failing, so the run never reaches the readiness assertion — `integration` was still executing after 45
+minutes and was cancelled. Every path in this test that could observe the outage goes through that same
+paused connection: the deposit, `lagSeconds()`, and `db`'s own validation query. No JDBC socket timeout
+is configured, and adding one so a test proof can work would be a production change made for a test.
+
+A hang, not an assertion — the identical failure the `kafka` variant has, one layer down. Reading
+either as a red proof would be exactly the trap this step exists to avoid.
+
+**The claim is proven anyway, in Task 2, and that is where to look.** What needs establishing is that
+`healthForPath("readiness").getStatus()` reads real component health rather than a constant or an
+`UNKNOWN` from a misspelled group. `redisBeingDownDoesNotMakeTheInstanceUnready` establishes exactly
+that: adding `redis` to the readiness group reddens precisely two assertions, on the same
+`HealthEndpoint`, the same group machinery and the same `Status` comparison this test uses — **and it
+runs on the fast `verify` path with no containers at all.** Duplicating it at the integration layer
+would cost forty minutes and prove nothing further.
+
+Two things therefore remain **unproven, and one of them unprovable**, named rather than implied: the
+`kafka` exclusion (no contributor exists to exclude — E11 is protected by a framework absence an
+upgrade could remove), and readiness turning DOWN on a real Postgres outage (no configured timeout
+makes that observable from inside a test).
 
 - [ ] **Step 4: Confirm green, counted from XML**
 

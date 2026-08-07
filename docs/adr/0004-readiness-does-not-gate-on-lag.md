@@ -261,3 +261,17 @@ the `redis`-excluded readiness decision above **provable by violation on the fas
 The `kafka` exclusion has no equivalent and cannot get one: there is no Kafka health contributor to
 exclude, and naming a non-existent one is a startup failure rather than a no-op. **E11 is protected by a
 framework absence that an upgrade could remove silently.**
+
+### And one thing readiness is NOT proven to do
+
+**No test observes readiness going DOWN on a real Postgres outage**, and `db` is the one component the
+`full` group actually gates on. It was attempted — pausing the Postgres container inside `AuditLagIT`
+— and the run **hung** rather than reddening: a paused container blocks JDBC at the socket, so the
+write, the gauge read and `db`'s own validation query all stall and the assertion is never reached.
+There is no JDBC socket timeout configured, and adding one so that a test proof can work would be a
+production change made for a test.
+
+What *is* proven is the part that could be vacuous: that `healthForPath("readiness").getStatus()`
+reads real component health rather than a constant, via the `redis` violation above. The gap is
+narrow and named rather than papered over — per `AGENTS.md`, **no gate enforces that a Postgres
+outage removes an instance from service.**
