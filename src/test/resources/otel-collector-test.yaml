@@ -1,0 +1,44 @@
+# The CI-side Collector: OTLP in, a file out, nothing else.
+#
+# No credential and no third party — which is exactly why §14 step 9's gate is "a Collector receives
+# OTLP" and not "Grafana Cloud receives OTLP". A fork's build passes with no secret at all, and CI
+# gains no dependency on an account it cannot have.
+#
+# Deliberately NOT docker/otel-collector.yaml, and the two are not generated from one another. That
+# one tail-samples and forwards to Grafana Cloud; tail sampling here would make this test wait out a
+# sampling decision and could drop the very traces it asserts on. The difference is the point, and
+# §6.6 records that no gate covers the Compose config as a result.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  # Short, because the test's whole job is to observe arrival. The default 200ms send batch timeout
+  # would be fine; it is written out so nobody has to look it up when the test goes slow.
+  batch:
+    timeout: 200ms
+
+exporters:
+  # Read back with Testcontainers' copyFileFromContainer, which goes through the Docker API. The
+  # contrib image ships no shell and no `cat`, so execInContainer would fail with something that
+  # looks like a Collector problem rather than a test one.
+  file:
+    path: /tmp/otel-out.json
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [file]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [file]
