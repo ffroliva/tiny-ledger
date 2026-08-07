@@ -3,6 +3,7 @@ package com.ffroliva.tinyledger.platform;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.registry.otlp.ExemplarContextProvider;
 import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -102,6 +103,26 @@ class ActuatorProbeTest {
         assertThat(env.getProperty("management.observations.key-values.service.instance.id"))
                 .as("a per-process UUID as a meter tag is an unbounded time series (§6.6)")
                 .isNull();
+    }
+
+    /**
+     * §6.6's exemplars row, <strong>corrected at v3.41</strong>. It said exemplars were "a feature of
+     * Micrometer's <em>Prometheus</em> registry" for which "there is no flag that turns them on along
+     * [the OTLP] path". That was true of earlier Boot versions and is <strong>false here</strong>:
+     * {@code micrometer-registry-otlp} 1.17.0 ships eleven exemplar classes, and Boot 4.1 registers
+     * {@code OtlpExemplarsAutoConfiguration}, which contributes an {@code ExemplarContextProvider}
+     * whenever a {@code Tracer} bean exists and {@code management.tracing.exemplars.include} is not
+     * {@code none} (it defaults to {@code sampled-traces}).
+     *
+     * <p>So exemplars are not "specified and not delivered" — they are delivered by the framework, for
+     * free, the moment OTLP metrics export is switched on. Nothing in this repository was written to
+     * achieve that, which is exactly why it needed checking rather than repeating.
+     */
+    @Test
+    void exemplarsAreReachableOnTheOtlpPath(@Autowired ObjectProvider<ExemplarContextProvider> exemplars) {
+        assertThat(exemplars.getIfAvailable())
+                .as("§6.6 v3.41: Boot 4.1 auto-configures this; the row saying otherwise was corrected")
+                .isNotNull();
     }
 
     @Test

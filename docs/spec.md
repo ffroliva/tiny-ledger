@@ -844,8 +844,19 @@ RFC 7807 `ProblemDetail` throughout, via Spring's built-in support
 | Event store unreachable | 503 | `/errors/event-store-unavailable`, with `Retry-After` |
 | Auditor operation invoked in standalone | 501 | `/errors/not-available-in-standalone` |
 
-Problem responses carry a `traceId` correlating to the tracing backend. No stack traces, no internal
-identifiers, no SQL fragments cross the boundary.
+Problem responses carry a `traceId`. No stack traces, no internal identifiers, no SQL fragments cross
+the boundary.
+
+**That field name is a misnomer, and it is recorded rather than renamed (v3.41).** Its value is the
+FAPI `x-fapi-interaction-id` — the caller's own correlation handle, echoed back — and not the OTel
+trace id, which now also exists. The name was unambiguous while nothing else was called a trace;
+tracing changed that. It is left alone because it is a **published field on an error contract**, and
+renaming it is a breaking change made for tidiness. The mechanism behind it did have to move:
+`FapiInteractionIdFilter` stored the value in MDC under the key `traceId`, which Micrometer Tracing's
+`Slf4JEventListener` takes over the moment a span goes into scope — so the interaction id was
+overwritten before any problem handler could read it, and every 401 and 403 body carried a 32-hex
+trace id where the caller's UUID belonged. Caught by `SecurityConfigIT`, on CI, and the MDC key is now
+`interactionId`. **Both ids reach the log line**, under `logging.pattern.correlation`.
 
 Wrong-owner access returns `403`, not `404`. The account-existence oracle this admits is accepted
 because `accountUid`s are unguessable UUIDs — recorded here so the trade-off is a decision, not an
@@ -907,13 +918,33 @@ asynchronous fan-out, and it keeps `http.server.duration` honest.
 
 | Signal | Content |
 |---|---|
-| **Spans** | HTTP (auto), use-case execution, event append with `expectedVersion`, projection apply, Kafka produce/consume, Redis, Postgres. Domain attributes on every one: `ledger.account_id`, `ledger.stream_version`, `ledger.movement_type`, `ledger.rejection_reason` |
-| **Metrics** | RED per endpoint, USE per resource. Domain: movements/sec by type, **rejection rate by reason**, **concurrency-conflict rate**, **`ledger.outbox.pending.age.seconds`** (the outbox gauge, producer side only — *not* projection lag, which is structurally zero here; see Health below), cache hit ratio, rate-limit rejections, idempotent-replay count |
-| **Logs** | Structured JSON via `structlog`-equivalent (Logstash encoder), no PII, every line carrying `trace_id` and `span_id`. **The no-PII rule is stated for logs and not for spans, and that asymmetry is a gap, not a decision** — the Spans row above mandates `ledger.account_id` on every span, and spans leave the process to a third-party backend. A data-classification rule covering spans is owed (§14 step 9 part 2) and **no gate enforces either** |
-| **Exemplars** | **Specified, not delivered.** Prometheus exemplars link a latency histogram bucket directly to a sampled trace — click the p99 spike, land on the request that caused it. They are a feature of Micrometer's *Prometheus* registry; this application exports metrics over OTLP and publishes no scrape endpoint, and there is no flag that turns them on along that path. Recorded as absent rather than carried as a promise nothing is building |
+| **Spans** | **Delivered (v3.41): four.** HTTP (auto), `ledger.record-movement` (the use-case decorator), `ledger.projection.apply`, and `ledger.audit.record` (the Kafka consumer, **linked** — see below). Kafka produce is auto-instrumented by `spring.kafka.template.observation-enabled`. Domain attributes: `ledger.account_id`, `ledger.stream_version`, `ledger.movement_type`, `ledger.rejection_reason`. **A separate event-append span is NOT delivered, deliberately:** `MovementResult` already carries `version`, `type` and `rejectionReason`, so every attribute §9.4 asserts sits on the use-case span, and a second span inside the store adapters would have to be written twice — once per adapter — to add a row to a diagram and nothing to an assertion. Redis and Postgres client spans are likewise not delivered: they would need a JDBC/Lettuce instrumentation this application does not carry |
+| **Metrics** | RED per endpoint, USE per resource. Domain, **delivered at v3.41 as ONE meter**: `ledger.movements`, tagged `type` / `outcome` / `reason`, which covers movements-by-type, rejection-rate-by-reason and concurrency-conflict-rate together in about twenty permanently-bounded series (`reason` is `none` on a settled movement, so every series carries the same tag keys). Plus **`ledger.audit.dead_lettered`** (new, untagged) and **`ledger.outbox.pending.age.seconds`** (the outbox gauge, producer side only — *not* projection lag, which is structurally zero here; see Health below). Kafka client metrics including consumer lag arrive from Boot's `KafkaMetricsAutoConfiguration` on `@ConditionalOnBean(MeterRegistry)` — see the gap paragraph below. Cache hit ratio, rate-limit rejections and idempotent-replay count remain **specified and not delivered** |
+| **Logs** | Structured JSON in **`full` only** (v3.41) — Boot's built-in `logging.structured.format.console=logstash`, so the encoder the earlier wording named is a format here and not a dependency. `standalone` keeps a human-readable console: it is the mode a person runs and reads, and JSON there would be paid on every local `verify` and every CI failure log for a benefit taken in production. **Both modes carry `trace_id`, `span_id` and the FAPI interaction id on every line** (`logging.pattern.correlation`), so only the encoding differs. No PII. The span asymmetry this row used to name as an open gap **is closed below** |
+| **Exemplars** | **CORRECTED at v3.41 — the previous entry was FALSE.** It said exemplars are "a feature of Micrometer's *Prometheus* registry" and that "there is no flag that turns them on along [the OTLP] path". True of earlier Boot versions; not true here. `micrometer-registry-otlp` 1.17.0 ships eleven exemplar classes, and Boot 4.1 registers `OtlpExemplarsAutoConfiguration`, which contributes an `ExemplarContextProvider` whenever a `Tracer` bean exists and `management.tracing.exemplars.include` is not `none` — it defaults to `sampled-traces`. **So exemplars are delivered by the framework the moment OTLP metrics export is on, and nothing here was written to achieve it.** `ActuatorProbeTest#exemplarsAreReachableOnTheOtlpPath` pins the corrected claim, because a claim that changed once under an upgrade can change back |
 
 Semantic conventions are the OTel standard ones (`messaging.*`, `db.*`, `http.*`); domain attributes
 use a `ledger.*` prefix so they never collide with a future convention.
+
+#### Data classification for spans — the gap part 2 owed, now stated
+
+Through v3.40 the no-PII rule was written for logs and not for spans, while the Spans row mandated
+`ledger.account_id` on every span and spans leave the process to a third-party backend. That
+asymmetry was recorded as *a gap, not a decision*. This is the decision.
+
+1. **Span attributes are limited to the enumerated `ledger.*` set plus OTel semantic conventions.**
+   Anything else is a review failure. The set is four: `ledger.account_id`, `ledger.stream_version`,
+   `ledger.movement_type`, `ledger.rejection_reason`.
+2. **No name, no email, no `owner`, no bearer token, no amount and no balance goes on a span.** Note
+   what that excludes: the *money*. A trace answers "which request, how long, why refused" and never
+   "how much" — a telemetry backend is not a place to reconstruct a customer's finances.
+3. **The identifiers that are there are opaque, server-generated UUIDs**, present because correlation
+   is the entire reason spans are worth keeping. They are nonetheless **personal data when linkable**,
+   which is why the backend is Grafana Cloud's **UK region** (`prod-gb-south-1`): telemetry carrying
+   `ledger.account_id` stays in-country. That is a data-residency decision, not a latency one.
+4. **No gate enforces any of the three.** They are review rules. The one adjacent thing that *is*
+   checked is the meter side — `TracedUseCasesTest#noMeterTagCarriesAnAccountIdOrAMovementUid` — and
+   it covers exactly one meter.
 
 **Cardinality is a one-way door, and the rule is absolute: account identifiers, movement UIDs and
 interaction ids go on spans and logs, never on meters.** A span is a sampled individual record, and
@@ -927,7 +958,14 @@ and it is written down because it looks harmless in a diff and is discovered in 
 
 **Resource attributes are not optional, because replicas are the point.** Every signal carries
 `service.name`, `service.namespace` and `service.instance.id` from the environment, plus the `k8s.*`
-conventions where the platform supplies them. Without them, twenty replicas emit one indistinguishable
+conventions where the platform supplies them. **Corrected at v3.41, and the correction is not
+cosmetic:** part 1 declared the latter two under `management.observations.key-values.*`, which adds
+common key-values to every *observation* — they become span tags **and meter tags**, not resource
+attributes. Boot reads resource attributes from `management.opentelemetry.resource-attributes.*`.
+The meter half was the real defect: `service.instance.id` defaults to a per-process UUID, so as a
+meter tag it mints one permanent time series per restart and per replica — precisely the one-way door
+the cardinality rule above names, written in by the pass that quoted the rule. Found by reading Boot
+4.1's configuration metadata; no test failed, and none would have. Without them, twenty replicas emit one indistinguishable
 stream and *"which instance is slow"* has no answer. This is the retrofit that costs most: invisible in
 the application, visible in every dashboard and alert built before it.
 
@@ -936,9 +974,16 @@ replica reports the same global value; summed across twenty pods it reads twenty
 wrong aggregation here is not visibly wrong on a chart — it is a plausible number that is false, which
 is the hardest class of monitoring defect to catch.
 
-**Sampling:** parent-based, 100% in `standalone` and CI, tail-sampled in `full` — always keep traces
-containing an error, a `409`, a `422` or a duration over p99. Sampling that discards the interesting
-traces is the same as no tracing.
+**Sampling:** parent-based, and split between the two places that can decide. **The application always
+samples 100%** (`management.tracing.sampling.probability=1.0`) because a head sampler cannot know how a
+trace *ended* — it would discard errors at exactly the same rate as successes, which is backwards.
+**The Collector tail-samples** (`docker/otel-collector.yaml`): every trace with an `ERROR` status and
+every trace slower than 150 ms is kept, the rest is sampled at 5%. Metrics are never sampled — sampling
+a counter does not thin it, it corrupts it, the same class of defect as summing the outbox gauge. Note
+Boot's default probability is **0.1**, so leaving it unset would silently discard nine spans in ten,
+including every span §9.4 asserts on. **No gate covers the Collector config**: nothing in CI starts it,
+because §9.4's Collector test uses its own configuration so that it can assert against a file rather
+than a hosted backend.
 
 **Health:** liveness and readiness are separate, and what each group *contains* is a decision here
 rather than a default.
@@ -1048,11 +1093,21 @@ mark-failed path never sets `completion_date` and resubmission is restart-only, 
 pin `MIN(publication_date)` permanently, firing the alert forever and hiding every genuine excursion
 behind the stuck value.
 
-**Consumer lag and the dead-letter topic are unobserved, and that is a named gap rather than an
-oversight.** Nothing watches consumer offsets, and `FullAdapterConfig` parks unprocessable records on
-`ledger.events.DLT` with a javadoc saying it exists to prevent *"a silent, permanent hole in the
-compliance trail"* — with nothing observing that topic either, which is operationally the hole it was
-written to avoid. Both belong to step 9 part 2, where an exporter exists to carry them.
+**Consumer lag and the dead-letter topic were unobserved. Both are closed at v3.41,** which is where
+this section said they belonged.
+
+- **`ledger.audit.dead_lettered`** counts records `FullAdapterConfig` parks on `ledger.events.DLT`.
+  That handler's javadoc says it exists to prevent *"a silent, permanent hole in the compliance
+  trail"*, and with nothing counting what it parked it produced exactly that hole. Untagged on
+  purpose: the account id and the exception type are both unbounded, and this is a meter. Asserted by
+  `KafkaAuditModuleIT#aRecordWhoseActorHeaderDisagreesWithItsPayloadIsParkedOnTheDlt`.
+- **Consumer lag** needed no code. Boot's `KafkaMetricsAutoConfiguration` registers a
+  `MicrometerConsumerListener` on `@ConditionalOnBean(MeterRegistry)` — read out of
+  `spring-boot-kafka-4.1.0.jar` rather than assumed. So lag was never missing for want of a metric; it
+  was missing for want of a registry, and this application had none before part 2.
+  `KafkaAuditModuleIT#theKafkaConsumerReportsItsOwnClientMetricsIncludingLag` asserts the *condition*,
+  because that is the part that can silently regress; the lag value is an operational reading, not a
+  build assertion.
 
 **The numbers survive as alerting thresholds, relabelled to what they actually describe:**
 outbox pending-age SLO **p99 < 2 s** steady-state, **5 s** the level worth paging on. Both are
@@ -1602,11 +1657,23 @@ the build itself, so nobody can accidentally put a Testcontainers suite on the u
 - A `MovementRejected` increments the rejection counter tagged with the correct reason.
 - Audit-trail lag is reported as a gauge and **does not** drive the readiness probe: with the
   broker paused the gauge rises, balances stay exact, and readiness stays UP (E9, §6.6).
-- Telemetry leaves the process — an OTel Collector container with a file exporter receives real spans
-  and metrics over OTLP. This one **forks the Spring context deliberately**: it needs
-  `@DynamicPropertySource` to address the container's port, which is exactly what `AGENTS.md` trap 5
-  warns costs a whole new context. ADR 0003 carries the written reason that trap demands, and this is
-  the only fork in the suite.
+- Telemetry leaves the process — an OTel Collector container receives real spans **and metrics** over
+  OTLP (`OtlpExportIT`), asserted against its **debug exporter** at `verbosity: detailed`. **Corrected
+  at v3.41 in two places.** The first: this said *file* exporter, which was tried and abandoned for
+  reasons unrelated to telemetry — the contrib image is distroless and has no `/tmp`, and with a tmpfs
+  mounted there `docker cp` cannot read back through the mount. The debug exporter needs no
+  filesystem, and §14's gate asks only that a Collector receive OTLP. The second: this paragraph previously said
+  the test "forks the Spring context deliberately" and was "the only fork in the suite"; both were
+  written before it existed. It runs **`standalone` and starts one container** — nothing it asserts
+  needs Postgres, Redis, Kafka or Keycloak — so it is a separate *profile* context in the same
+  category as `CucumberSpringConfig` and `LedgerEventsListenerTest`, and ADR 0003's forking conditions
+  never arise. The other four assertions above run on the shared `full` context and reach it the way
+  ADR 0003 §1 prescribes: an `@Import` on `AbstractIntegrationTest` **itself** (which moves the cache
+  key uniformly rather than forking) plus two properties through the `@DynamicPropertySource` that was
+  already there. **`spring.test.tracing.export=true` is the non-obvious one** — Boot injects
+  `management.tracing.export.enabled=false` into every test, so without it the `InMemorySpanExporter`
+  is never wired to a processor and the assertions read an empty list, which looks exactly like "no
+  spans are produced".
 
 ### 9.5 Use-case / validation testing
 One test per use case — commands (§2.4) and queries (§4.0) — asserting the *complete* observable
