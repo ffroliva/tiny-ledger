@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.24
+**Version:** 3.25
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -1334,7 +1334,7 @@ indistinguishable from a bug, so the lag is asserted rather than hoped away.
 | E4 | **Duplicate delivery is harmless.** Deliver the same `MoneyDeposited` twice to the projection | Balance credited **once**. At-least-once transport demands an idempotent handler, keyed on `(stream_id, version)` |
 | E5 | **Out-of-order delivery is rejected, not applied.** Deliver version 5 before version 4 | The projection does not apply 5; it either buffers or refuses and catches up in order. A projection that applies out of order produces a balance that never existed |
 | E6 | **Consumer outage and catch-up.** Stop the `audit` consumer, write 50 movements, restart it | All 50 arrive; the audit trail matches the event stream exactly; no gaps, no duplicates — asserted as stream versions `1..51` exactly once each, which refuses a gap, a duplicate and a reordering in one comparison. Covered by `KafkaAuditModuleIT`. The mid-outage control (the trail must *stay* at one entry while 50 records sit unconsumed) is what stops this degenerating into a second proof that delivery works |
-| E7 | **Restart replays incomplete publications.** Kill the app mid-publication, restart | Spring Modulith's incomplete-publication retry completes the delivery; the projection converges without manual intervention. **Open, and precisely so:** the restart cannot be staged inside a shared Spring context (ADR 0003), so what is untested is the `republish-outstanding-events-on-restart` hook specifically. The half it depends on is covered by E12 |
+| E7 | **Restart replays incomplete publications.** Kill the app mid-publication, restart | Spring Modulith's incomplete-publication retry completes the delivery; the projection converges without manual intervention. Covered by `scripts/e2e/restart-replay.sh`, where the application is a real OS process and can actually be `kill -9`'d — no shutdown hook, no graceful drain. Measured 2026-08-07: deposit `201` with Kafka paused → 1 `event_publication` row → process killed, **row survives the process** → restart → row drains to 0 and the entry reaches the trail, unaided. **Not wired into CI stage 9**: killing and restarting a process is a different shape of job from the scenario suite, and adding a stage is a decision to take deliberately |
 | E12 | **An in-flight publication survives a broker outage.** Pause Kafka, write a movement | The `event_publication` row *stays on disk* for the duration — with `completion-mode=DELETE` a surviving row is an incomplete one — and the delivery completes with no manual intervention once the broker returns. This is E7's precondition: if the work were not durable at that instant there would be nothing for a restart to replay, whatever the restart did. It does **not** attribute the recovery to the restart hook — the producer's own in-flight send can complete it |
 | E8 | **Full rebuild from the log.** Drop the projection entirely and replay the stream | Rebuilt state is byte-identical to the state before the drop. This is the strongest guarantee event sourcing offers, and the one that makes the design worth its cost |
 | E9 | **Lag gates readiness.** Hold the listener until projection lag exceeds the threshold | The readiness probe reports *not ready*; the instance stops receiving traffic rather than serving stale balances |
@@ -1363,12 +1363,16 @@ you run, and saying so is the point (`AGENTS.md`: an unenforced rule is a hope):
 ```bash
 comm -23 \
   <(grep -ohE "^\| (P|N|E)[0-9]+" docs/spec.md | tr -d '| ' | sort -u) \
-  <(grep -rhoE "\b(P|N|E)[0-9]{1,2}\b" src/test ledger-cli/tests | sort -u)
+  <(grep -rhoE "\b(P|N|E)[0-9]{1,2}\b" src/test ledger-cli/tests scripts/e2e | sort -u)
 ```
 
-**Known-open as of v3.24: `E7` and `E9`.** `E9` is deferred by decision (§14 step 9); `E7` is unplanned
-rather than declined — it needs the application killed mid-publication, which no harness here can stage
-inside a shared Spring context (its precondition is covered by `E12`).
+**Known-open as of v3.25: `E9` alone**, deferred by decision (§14 step 9). Every other case in this
+catalogue has a test.
+
+`E7` closed on 2026-08-07 by moving it to the layer that could hold it: `scripts/e2e/restart-replay.sh`,
+where the application is a real OS process and `kill -9` is available. The search path above now includes
+`scripts/e2e` for that reason — a case can be covered by a harness rather than by a test method, and a
+sweep that only reads `src/test` would have called `E7` open forever.
 
 **The command prints only `E9`, and the difference is a defect in the command.** It greps for the id
 *anywhere* under `src/test`, so a test that names a case in prose — including to explain why that case is
@@ -1759,3 +1763,4 @@ Javadoc, because a reader checks the spec:
 | 3.23 | 2026-08-07 | E6 covered by `KafkaAuditModuleIT`: the audit consumer stopped, 50 movements written, the consumer restarted — versions `1..51` arrive exactly once each. **The red run validated the control rather than the catch-up**, and found a bug in the test itself: the first version asserted the trail size *once*, immediately after the writes, which a healthy ~100 ms hop would have satisfied without any outage happening. Replaced with an Awaitility `during` window that requires the quiet to hold for two seconds; with the `stop()` removed, 8 tests run and exactly 1 fails. Known-open is now `E7 E9` — `E9` deferred by decision, `E7` needing the app killed mid-publication, which no harness here can do inside a shared context |
 | 3.24 | 2026-08-07 | E12 added and covered: pause Kafka, write a movement, and the `event_publication` row *stays on disk* — with `completion-mode=DELETE` a surviving row is an incomplete one — then completes with no manual intervention once the broker returns. Deliberately **not** tagged E7: E7 needs the process killed and restarted, which no harness can stage inside a shared context, so it stays open and its row now says exactly which half is missing. E12 is the half E7 depends on — without durable in-flight work there is nothing for any restart to replay. The test also states what it does not isolate: the producer's own in-flight send can complete the publication, so "without manual intervention" is not attributed to the restart hook. Its mid-outage check uses the same `during` window E6's red run showed to be necessary |
 | 3.24b | 2026-08-07 | **The traceability sweep itself was found unsound, by its own output.** It greps for a case id anywhere under `src/test`, so `KafkaAuditModuleIT`'s E12 javadoc — whose whole point is the sentence "E7 stays open" — removed `E7` from the command's output. A commit that added no coverage shrank the known-open list by one. §12 now states that the written list is the source of truth and the command is a regression check against it: an id *appearing* that should not is still a real finding, an id *disappearing* is only good news if a test was added. Same shape as `AGENTS.md` trap 7, one level up — a search that has been made to return nothing is not evidence of absence |
+| 3.25 | 2026-08-07 | **E7 closed — the last open case but `E9`.** It had been recorded as unreachable because no test may kill the shared Spring context (ADR 0003); the answer was to stop looking for a *test*. `scripts/e2e/restart-replay.sh` runs the application as a real OS process: Kafka paused, movement written, `kill -9`, and the `event_publication` row **survives the process** — then a restart drains it to zero and the entry reaches the trail with no intervention. E12 remains the unit-scale precondition, and this is the claim itself. Not wired into CI stage 9: killing and restarting a process is a different shape of job, and adding a stage is a decision, not a side effect. The traceability sweep now also reads `scripts/e2e`, because a case can be covered by a harness rather than a test method |
