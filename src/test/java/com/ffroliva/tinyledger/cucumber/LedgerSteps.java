@@ -55,6 +55,7 @@ public class LedgerSteps {
     private String lastMovementPath;
     private String lastMovementBody;
     private UUID lastMovementUid;
+    private UUID firstOpenUid; // N22 only — the accounts map is keyed by name and the second open overwrites it
     private long versionBefore;
     private long amountBefore;
 
@@ -156,6 +157,28 @@ public class LedgerSteps {
     @When("a deposit of {money} is requested into {string}")
     public void aDepositIsRequestedInto(long minorUnits, String name) {
         aDepositInCurrencyIsRequestedInto(minorUnits, currencyOf(name), name);
+    }
+
+    /**
+     * N22. Opens the same *name* a second time, remembering the first UID first — {@code open} keys the
+     * {@code accounts} map by name, so the second open overwrites the first entry and the original UID
+     * would otherwise be unrecoverable. Two accounts, not one, is the whole point of the case.
+     */
+    @When("an account named {string} in {word} is opened again")
+    public void anAccountIsOpenedAgain(String name, String currency) {
+        firstOpenUid = accounts.get(name);
+        open(name, currency);
+    }
+
+    @Then("the two opens returned different account UIDs, each at stream version 1")
+    public void theTwoOpensAreIndependentAccounts() {
+        UUID secondOpenUid = UUID.fromString(text(lastResponse, "$.accountUid"));
+        assertThat(secondOpenUid).isNotNull().isNotEqualTo(firstOpenUid);
+        // Independent streams, not one stream written twice: both sit at the version a fresh account has.
+        for (UUID accountUid : List.of(firstOpenUid, secondOpenUid)) {
+            assertThat(number(get("/api/v1/accounts/" + accountUid + "/balance?consistency=strong"), "$.streamVersion"))
+                    .isEqualTo(1);
+        }
     }
 
     @When("a deposit of {money} in {word} is requested into {string}")
