@@ -247,6 +247,21 @@ green, so 250 ms is not tight enough to disturb normal operation against a same-
 a property of the whole request path, not of the component whose javadoc discusses it. Any future
 client added to that path inherits the obligation, and only an outage test can tell you whether it did.
 
+**The control, run the same day.** `KafkaOutageIT` (E11) asks the identical question of the other piece
+of infrastructure on the write path, and answers it the other way:
+
+| Outage | Cost to a write | Why |
+|---|---|---|
+| Redis paused, before the fix | **64 000 ms** | cache eviction runs inside the append transaction, on an unbounded client |
+| Redis paused, after the fix | ~750 ms | three bounded 250 ms stalls |
+| **Kafka paused** | **164 ms cold, 48 ms warm** | delivery is genuinely off the request path — Modulith writes the publication row inside the append transaction and delivers afterwards (ADR 0002) |
+
+That contrast is the point. Both are "an external system this write touches is down"; one was catastrophic
+and one is a non-event, and no amount of reading the code distinguished them beforehand — §3.2's careful
+reasoning about the very same 250 ms sat two files away from the client that ignored it. The pair also
+disciplines the assertion: E11's bound started at a nominal 15 s and was tightened to 2 s *because* the
+measurement came back at 164 ms. A bound loose enough to pass either way is not a guard.
+
 ---
 
 ## 4. Optimisation candidates — carried forward, not closed
