@@ -82,7 +82,10 @@ class AuditLagIT extends AbstractIntegrationTest {
                 .untilAsserted(() -> assertThat(auditLagGauge.lagSeconds()).isZero());
         assertThat(readiness()).isEqualTo(Status.UP);
 
-        String containerId = KAFKA.getContainerId();
+        // TEMPORARY — RED PROOF, reverted before merge. Pausing Postgres instead of Kafka makes `db`,
+        // which IS in the full readiness group, unreachable. If the readiness assertions below read
+        // real component health rather than a constant, this must redden them.
+        String containerId = POSTGRES.getContainerId();
         try {
             DockerClientFactory.instance()
                     .client()
