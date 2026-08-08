@@ -2,9 +2,10 @@
 <!--
   OWASP Dependency-Check suppressions for tiny-ledger (issue #11, spec §12.1 stage 11).
 
-  THIS FILE IS DELIBERATELY EMPTY. It exists so that the first suppression anyone needs has an
-  obvious, reviewed home instead of being added as a `-D` flag on a CI line, where nobody would
-  ever read it again.
+  It was created EMPTY, deliberately, so that the first suppression anyone needed would have an
+  obvious, reviewed home instead of becoming a `-D` flag on a CI line nobody reads again. It did not
+  stay empty for long: the first Dependency-Check run failed with 22 findings, and the entries below
+  are the result. The rules that follow are what governs them — read them before adding a seventh.
 
   THE RULE, and it is the same one ci.yml already applies to the Keycloak realm file:
 
@@ -15,7 +16,11 @@
 
     2. A BLANKET SUPPRESSION IS NEVER ACCEPTABLE. No bare <packageUrl> or <filePath> element
        without a CVE beside it, and no regex broad enough to cover a vulnerability nobody has seen
-       yet. A standing exemption silently covers future content — which is exactly the reasoning
+       yet. Note what the entries below DO widen and what they do not: two of them match sibling
+       ARTIFACTS (`tomcat-embed-.*`, `httpcore5.*`) because the same CVE is reported against several
+       jars of one library — but the VERSION stays pinned and every CVE stays listed, so the entry
+       expires the moment either moves. Widening the artefact is not widening the exemption.
+       A standing exemption silently covers future content — which is exactly the reasoning
        ci.yml gives for refusing to allowlist docker/keycloak/realm-tiny-ledger.json by path: there
        is no active finding to suppress, and a path exemption would also cover a real secret pasted
        into that file by mistake tomorrow.
@@ -158,7 +163,7 @@
       either: it is shaded inside another artifact, so the fix is a Testcontainers upgrade, not a
       dependencyManagement entry. Re-check when the testcontainers BOM moves past 1.20.5.
     </notes>
-    <packageUrl regex="true">^pkg:maven/org\.apache\.httpcomponents\.core5/httpcore5@5\.0\.2$</packageUrl>
+    <packageUrl regex="true">^pkg:maven/org\.apache\.httpcomponents\.core5/httpcore5.*@5\.0\.2$</packageUrl>
     <cve>CVE-2026-54399</cve>
     <cve>CVE-2026-54428</cve>
   </suppress>
@@ -189,7 +194,7 @@
       2026-08-08), so there is nothing further to upgrade to. Re-check at expiry: Tomcat patches
       often, and this is the entry most likely to be removable rather than renewed.
     </notes>
-    <packageUrl regex="true">^pkg:maven/org\.apache\.tomcat\.embed/tomcat-embed-core@11\.0\.24$</packageUrl>
+    <packageUrl regex="true">^pkg:maven/org\.apache\.tomcat\.embed/tomcat-embed-.*@11\.0\.24$</packageUrl>
     <cve>CVE-2026-66299</cve>
   </suppress>
 
