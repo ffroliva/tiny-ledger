@@ -38,6 +38,19 @@ tls:
 
 http:
   routers:
+    # Keycloak, and it is declared FIRST because it is the specific case. Traefik orders routers by
+    # rule length unless told otherwise, and `Host(...)` is longer than `PathPrefix(`/`)`, so this
+    # already wins — but `priority` is set explicitly rather than resting on that, because a rule
+    # that silently stopped matching would send every token request to the ledger and produce a
+    # `404` where a `401` was expected.
+    auth:
+      rule: "Host(`auth.localhost`)"
+      entryPoints: [websecure]
+      middlewares: [security-headers]
+      service: keycloak
+      priority: 100
+      tls: {}
+
     app:
       # PathPrefix, not Host. run-e2e.sh is obliged to dial 127.0.0.1 (localhost resolves to ::1
       # first on the Windows development machine and the IPv6 path does not route), while a human
@@ -48,6 +61,10 @@ http:
       entryPoints: [websecure]
       middlewares: [security-headers]
       service: app
+      # The catch-all, and deliberately left as one. `https://127.0.0.1` has to keep reaching
+      # the ledger: the ZAP baseline targets it, and an IP literal carries no SNI and no useful
+      # Host header, so a `Host(`app.localhost`)` rule here would answer it with a 404.
+      priority: 1
       tls: {}
 
   middlewares:
@@ -69,6 +86,15 @@ http:
         frameDeny: true
 
   services:
+    keycloak:
+      loadBalancer:
+        # PLAIN HTTP in-network, which is the whole point of terminating at the edge. Keycloak is
+        # told about the outside world by KC_HOSTNAME and KC_PROXY_HEADERS (docker-compose.yml);
+        # without the second it would build URLs from this internal request and `iss` would drift
+        # back to an http:// value that nothing accepts.
+        servers:
+          - url: "http://keycloak:8080"
+
     app:
       loadBalancer:
         # By SERVICE NAME on the Compose network. Issue #11 made the application a Compose service,

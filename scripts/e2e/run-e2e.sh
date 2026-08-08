@@ -37,7 +37,7 @@ READY_TIMEOUT=${READY_TIMEOUT:-120}
 #
 # 127.0.0.1, never `localhost`, for the reason spelled out below — and the dev certificate carries
 # IP:127.0.0.1 in its SAN list precisely so this pinning does not break verification.
-HTTPS_PORT=${TINY_LEDGER_HTTPS_PORT:-8443}
+HTTPS_PORT=${TINY_LEDGER_HTTPS_PORT:-443}
 if [ "${E2E_MODE:-image}" = image ]; then
   BASE_URL=${LEDGER_BASE_URL:-https://127.0.0.1:${HTTPS_PORT}}
 else
@@ -73,6 +73,13 @@ case "$E2E_MODE" in
       echo "::error::$JAR not found — build it first: ./mvnw -q -DskipTests package" >&2
       exit 1
     fi
+    # The CA is needed in THIS mode too, and that surprises people. The application is
+    # plaintext on the host here, but KEYCLOAK IS STILL BEHIND TRAEFIK -- one ingress, one
+    # certificate story -- so both the host JVM and the Python client speak TLS to the
+    # identity provider. The JVM gets the PKCS12 truststore (see the launch below); httpx gets
+    # SSL_CERT_FILE, exactly as in image mode.
+    scripts/tls/gen-dev-ca.sh
+    export SSL_CERT_FILE="$PWD/docker/tls/ca.crt"
     ;;
   image)
     # Compose has no `build:` for this service on purpose (see docker-compose.yml), so a
@@ -148,6 +155,10 @@ fi
 APP_PID=""
 cleanup() {
   rc=$?
+  # Traefik is removed in BOTH modes, because both start it: image mode routes the application
+  # through it, and jar mode still needs it in front of Keycloak. The four backing services stay
+  # up for whoever brought them up.
+  $COMPOSE --profile app rm -sf traefik >/dev/null 2>&1 || true
   if [ "$E2E_MODE" = image ]; then
     echo "--- application log (compose service 'app') ---"
     # stderr is NOT discarded, and that matters more here than it looks. compose demultiplexes
@@ -224,7 +235,33 @@ if [ "$E2E_MODE" = image ]; then
   # script explains.
   LEDGER_RATE_LIMIT_IP_BACKSTOP_CAPACITY=10000 $COMPOSE --profile app up -d app traefik
 else
-  java -jar "$JAR" \
+  # THE TRUSTSTORE IS REQUIRED HERE, and it is the one thing jar mode needs that image mode does
+  # not. The application runs on the host and fetches Keycloak's signing keys over HTTPS, because
+  # Traefik fronts the identity provider and there is no plaintext path left. A JVM reads neither
+  # SSL_CERT_FILE nor a PEM — it consults its own `cacerts`. Measured without it: the jar boots,
+  # answers 401 on the readiness probe, and then every one of the seven scenarios fails, with the
+  # certificate as the real cause and authentication as the visible symptom.
+  #
+  # javax.net.ssl.trustStore REPLACES the default store rather than adding to it, so this JVM
+  # trusts exactly one CA. Correct here — the only TLS peer it has is this stack — and never a
+  # deployment setting.
+  #
+  # In IMAGE mode none of this applies: that container fetches the key set in-network over plain
+  # HTTP (`jwk-set-uri` -> keycloak:8080) while still validating the HTTPS issuer, which is the
+  # split docker-compose.yml explains at length.
+  # -D BEFORE -jar. After it they are ARGUMENTS TO THE APPLICATION, not JVM options: the
+  # process starts, the truststore is never installed, and the failure is indistinguishable
+  # from not passing them at all.
+  # The proxy, WITHOUT the application container: Keycloak is behind it even in jar mode, so
+  # the host JVM and the CLI both reach the issuer through TLS here. `traefik` alone is enough
+  # now that it declares no dependency on `app`.
+  $COMPOSE --profile app up -d traefik
+
+  java \
+    -Djavax.net.ssl.trustStore="$PWD/docker/tls/truststore.p12" \
+    -Djavax.net.ssl.trustStorePassword=changeit \
+    -Djavax.net.ssl.trustStoreType=PKCS12 \
+    -jar "$JAR" \
     --spring.profiles.active=full \
     --spring.datasource.url="jdbc:postgresql://127.0.0.1:${PG_PORT}/tiny_ledger" \
     --spring.data.redis.host=127.0.0.1 \
@@ -246,7 +283,7 @@ if [ "$E2E_MODE" = image ]; then
   # expanded when the second command of the `&&` runs, which is AFTER the `cd`, so the relative
   # form resolved against ledger-cli/ and the script died on FileNotFoundError. The exported
   # variable is already absolute and is the single source of truth for this path.
-  (cd ledger-cli && uv run python ../scripts/e2e/https-check.py "$BASE_URL" "http://127.0.0.1:${TINY_LEDGER_HTTP_PORT:-8000}" "$READY_TIMEOUT" "$SSL_CERT_FILE")
+  (cd ledger-cli && uv run python ../scripts/e2e/https-check.py "$BASE_URL" "http://127.0.0.1:${TINY_LEDGER_HTTP_PORT:-80}" "$READY_TIMEOUT" "$SSL_CERT_FILE")
 else
   # 401 is the ready signal — see scripts/e2e/wait-for.sh for why a status and not a port.
   scripts/e2e/wait-for.sh "$BASE_URL/api/v1/accounts" 401 "$READY_TIMEOUT" "tiny-ledger (full)"

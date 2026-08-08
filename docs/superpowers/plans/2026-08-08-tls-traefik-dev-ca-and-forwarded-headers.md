@@ -78,7 +78,15 @@ trust *every container on the network* — and, on a Kubernetes pod network, eve
 pins a **subnet and a static address for Traefik** in `docker-compose.yml` and sets
 `internal-proxies` to that one address. A deployment overrides it with its own ingress address.
 
-### 3. Keycloak is NOT routed through Traefik, deliberately
+### 3. Keycloak IS routed through Traefik — **this plan originally said the opposite**
+
+> **CORRECTED.** This plan was written proposing that Keycloak stay on plain HTTP, for the reasons
+> below. While it was being executed, PR #25 landed on `main` deciding the other way, deliberately
+> and with the blast radius enumerated: one ingress, one certificate story, and no second scheme in
+> the stack. **`main` is the authority and the implementation follows it** — Keycloak is behind
+> Traefik at `https://auth.localhost`, published on no host port, and the issuer was renamed in all
+> eight places at once. The reasoning below is kept because it is the cost that decision accepted,
+> not because it is what shipped.
 
 Keycloak derives `iss` from the `Host` header; `KC_HOSTNAME: http://localhost:8081` pins it, and
 `docker-compose.yml` already carries the measurement showing `127.0.0.1:8081` and `localhost:8081`

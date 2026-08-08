@@ -27,7 +27,10 @@ set -euo pipefail
 
 JAR=${JAR:-target/tiny-ledger-0.1.0-SNAPSHOT-exec.jar}
 BASE_URL=${LEDGER_BASE_URL:-http://127.0.0.1:8080}
-ISSUER=${LEDGER_ISSUER_URI:-http://localhost:8081/realms/tiny-ledger}
+# HTTPS at the proxy's hostname since Traefik took over the edge — Keycloak is no longer published
+# on 8081 at all. This default must match docker-compose.yml's KC_HOSTNAME exactly or the token is
+# minted with an issuer the application refuses, and the only symptom is a bare 401.
+ISSUER=${LEDGER_ISSUER_URI:-https://auth.localhost/realms/tiny-ledger}
 PG_PORT=${TINY_LEDGER_PG_PORT:-5432}
 READY_TIMEOUT=${READY_TIMEOUT:-120}
 LOG_BEFORE=${LOG_BEFORE:-app-before-kill.log}

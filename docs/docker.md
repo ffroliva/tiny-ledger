@@ -44,7 +44,7 @@ which is OpenSSL on every platform:
 
 ```bash
 (cd ledger-cli && uv run python ../scripts/e2e/https-check.py \
-   https://127.0.0.1:8443 http://127.0.0.1:8000 60 "$OLDPWD/docker/tls/ca.crt")
+   https://127.0.0.1 http://127.0.0.1 60 "$OLDPWD/docker/tls/ca.crt")
 ```
 
 Sections 1–5 need only Docker and the JDK. **Section 6 is the one that needs all three toolchains**
@@ -156,13 +156,13 @@ omission.** Everything arrives through Traefik:
 
 | Host port | Serves | Why |
 |---|---|---|
-| `8443` | HTTPS, the whole API | the only way in |
-| `8000` | **301 to `https://127.0.0.1:8443`**, nothing else | a plaintext caller is moved, never served |
+| `443` | HTTPS — the whole API **and Keycloak**, split by hostname | the only way in |
+| `80` | **301 to `https://127.0.0.1`**, nothing else | a plaintext caller is moved, never served |
 | ~~`8080`~~ | nothing | publishing it would leave a plaintext route straight past Traefik. TLS you can walk around is decoration |
 | ~~`9090`~~ | nothing | spec §6.6 says the management endpoints "rely on the port not being published"; publishing it had made that sentence false |
 
 Measured after this change: `127.0.0.1:8080` and `127.0.0.1:9090` refuse connections from the host
-while `127.0.0.1:8443` accepts. Both remain reachable **inside** the network, which is all either
+while `127.0.0.1:443` accepts. Keycloak's `8081` is gone with them. Both remain reachable **inside** the network, which is all either
 needs — Traefik dials `app:8080`, and in production the kubelet dials the pod IP for the probes.
 
 Override the published pair the same way you override Postgres, and for the same reason:
@@ -170,7 +170,13 @@ Override the published pair the same way you override Postgres, and for the same
 ```bash
 export TINY_LEDGER_HTTPS_PORT=9443
 export TINY_LEDGER_HTTP_PORT=9000
+export TINY_LEDGER_AUTH_ORIGIN=https://auth.localhost:9443   # NOT optional — see below
 ```
+
+**`TINY_LEDGER_HTTPS_PORT` is not a free knob, and 443 is the default for that reason.** Keycloak
+sits behind this proxy, so the published port ends up inside the `iss` claim — and 443 is the one
+port that does not, because it is the scheme default and drops out of the URL. Move the port without
+moving `TINY_LEDGER_AUTH_ORIGIN` and every token is refused with a bare `401`.
 
 **`--wait` does not mean the application is ready.** It blocks on *healthchecks*, and the `app`
 service has none — the run image is `ubuntu-noble-run-tiny`, which ships no shell, so there is no
@@ -187,7 +193,7 @@ and the security chain is wired. A `200` there would itself be a defect.
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' --cacert docker/tls/ca.crt \
-  https://127.0.0.1:8443/api/v1/accounts        # 401
+  https://127.0.0.1/api/v1/accounts        # 401
 ```
 
 The certificate is verified, not skipped. If this reports `000` on Windows that is the Schannel
@@ -222,15 +228,13 @@ docker compose -f docker/docker-compose.yml --profile app logs app | tail -40
 
 ## 4. Get a token
 
-Every route in `full` requires a bearer token. Keycloak is published on **8081** with a fixture realm,
-over **plain HTTP** — it is deliberately *not* behind Traefik. It derives `iss` from the `Host`
-header, so fronting it would change the issuer string for this document, the CLI, the properties and
-CI at once, to buy TLS on a fixture identity provider marked *never deploy*. See
-[`security-material.md`](security-material.md).
+Every route in `full` requires a bearer token. **Keycloak is behind Traefik too, at
+`https://auth.localhost`, and is published on no host port at all** — one ingress, one certificate
+story, and no second scheme in the stack. `8081` is gone.
 
 ```bash
-TOKEN=$(curl -s -X POST \
-  'http://127.0.0.1:8081/realms/tiny-ledger/protocol/openid-connect/token' \
+TOKEN=$(curl -s --cacert docker/tls/ca.crt -X POST \
+  'https://auth.localhost/realms/tiny-ledger/protocol/openid-connect/token' \
   -d 'grant_type=password' \
   -d 'client_id=ledger-test' \
   -d 'username=alice' \
@@ -255,18 +259,47 @@ one whose refusal you want to see:
 Password is `dev-only` for all of them.
 
 **The issuer is pinned, and this is the one piece of configuration worth understanding.** Keycloak
-normally derives the `iss` claim from the caller's `Host` header, which means a token minted through
-`127.0.0.1:8081` and one minted through `localhost:8081` carry *different issuers* and only one of
-them authenticates. Measured here before it was fixed:
+normally derives the `iss` claim from the caller's `Host` header, which means two spellings of the
+same host mint *different issuers* and only one of them authenticates. Measured on this stack back
+when Keycloak was published on 8081:
 
 ```
 minted via 127.0.0.1:8081  ->  iss = http://127.0.0.1:8081/realms/tiny-ledger  ->  401
 minted via localhost:8081  ->  iss = http://localhost:8081/realms/tiny-ledger  ->  200
 ```
 
-`KC_HOSTNAME` now pins it, so either spelling works. The application validates that public issuer
-while fetching the signing keys in-network (`jwk-set-uri` → `keycloak:8080`) — issuer **and**
-audience validation stay fully enforced. Nothing is relaxed to make this convenient.
+`KC_HOSTNAME` pins it. Since TLS landed it pins it to the proxy:
+
+```
+iss = https://auth.localhost/realms/tiny-ledger
+```
+
+**No port**, because Traefik publishes 443 and the scheme default drops out of the URL. That string
+appears in eight places — Compose, the app's properties, the CLI's default, `.env.example`, `ci.yml`
+and three documents — and they agree or nothing authenticates. Measured on the running stack:
+
+```
+POST https://auth.localhost/realms/tiny-ledger/protocol/openid-connect/token  ->  200
+iss  =  https://auth.localhost/realms/tiny-ledger
+aud  =  tiny-ledger-api
+POST https://app.localhost/api/v1/accounts  (with that token)                 ->  201
+```
+
+The application validates that public issuer while fetching the signing keys **in-network**
+(`jwk-set-uri` → `http://keycloak:8080`), which is why the dev CA never enters the app container's
+truststore — issuer **and** audience validation stay fully enforced. Nothing is relaxed to make this
+convenient.
+
+**The host jar is the exception, and it is the one people trip on.** `E2E_MODE=jar` runs the
+application outside the network, so it resolves the issuer itself over TLS — and a JVM reads neither
+`SSL_CERT_FILE` nor a PEM. `gen-dev-ca.sh` also writes `docker/tls/truststore.p12` for exactly that,
+and `run-e2e.sh` passes it with `-Djavax.net.ssl.trustStore` **before** `-jar`; after `-jar` those
+become application arguments and are silently ignored. Measured with the store pointed at a
+non-existent path:
+
+```
+PKIX path building failed: unable to find valid certification path to requested target   ->  500
+```
 
 ---
 
@@ -274,17 +307,17 @@ audience validation stay fully enforced. Nothing is relaxed to make this conveni
 
 ```bash
 # Open an account — note the field is `name`, not `ownerName`
-ACC=$(curl -s --cacert docker/tls/ca.crt -X POST https://127.0.0.1:8443/api/v1/accounts \
+ACC=$(curl -s --cacert docker/tls/ca.crt -X POST https://127.0.0.1/api/v1/accounts \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"name":"ACC-001","currency":"EUR"}' | jq -r .accountUid)
 
 # Deposit. The UID in the PATH is the idempotency key, and amount is an OBJECT, not a string.
-curl -s --cacert docker/tls/ca.crt -X PUT "https://127.0.0.1:8443/api/v1/accounts/$ACC/deposits/$(uuidgen)" \
+curl -s --cacert docker/tls/ca.crt -X PUT "https://127.0.0.1/api/v1/accounts/$ACC/deposits/$(uuidgen)" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"amount":{"currency":"EUR","minorUnits":10000}}' | jq
 
-curl -s --cacert docker/tls/ca.crt "https://127.0.0.1:8443/api/v1/accounts/$ACC/balance" -H "Authorization: Bearer $TOKEN" | jq
-curl -s --cacert docker/tls/ca.crt "https://127.0.0.1:8443/api/v1/accounts/$ACC/transactions" -H "Authorization: Bearer $TOKEN" | jq
+curl -s --cacert docker/tls/ca.crt "https://127.0.0.1/api/v1/accounts/$ACC/balance" -H "Authorization: Bearer $TOKEN" | jq
+curl -s --cacert docker/tls/ca.crt "https://127.0.0.1/api/v1/accounts/$ACC/transactions" -H "Authorization: Bearer $TOKEN" | jq
 ```
 
 Measured responses — re-measured over HTTPS after Traefik landed, and **identical** to the plaintext
@@ -317,7 +350,7 @@ AUDIT=$(curl -s -X POST 'http://127.0.0.1:8081/realms/tiny-ledger/protocol/openi
   -d 'grant_type=password' -d 'client_id=ledger-test' \
   -d 'username=dave' -d 'password=dev-only' | jq -r .access_token)
 
-curl -s --cacert docker/tls/ca.crt https://127.0.0.1:8443/api/v1/audit/entries -H "Authorization: Bearer $AUDIT" | jq
+curl -s --cacert docker/tls/ca.crt https://127.0.0.1/api/v1/audit/entries -H "Authorization: Bearer $AUDIT" | jq
 ```
 
 ---
@@ -347,7 +380,7 @@ running a scenario it proves the transport:
 tiny-ledger (full, HTTPS) ready after 6s (HTTP 401)
   public trust store        -> rejected, as it must be
   dev CA                    -> verified
-  http://127.0.0.1:8000 -> 301 https://127.0.0.1:8443/api/v1/accounts
+  http://127.0.0.1 -> 301 https://127.0.0.1/api/v1/accounts
 ```
 
 **Both trust-store lines are required.** A `https://` URL is not evidence of anything on its own —
@@ -404,11 +437,12 @@ ledger's system of record.
 | `Bind for 0.0.0.0:5432 failed: port is already allocated` | another Postgres | `export TINY_LEDGER_PG_PORT=55432` |
 | `up` fails with a pull error on `tiny-ledger:0.1.0-SNAPSHOT` | the image was never built | `./mvnw spring-boot:build-image -DskipTests` |
 | `app:9090/actuator/health` returns **403** | correct — the root is `denyAll` | use `/actuator/health/readiness` |
-| `127.0.0.1:8080` or `:9090` refuse the connection | correct — neither is published any more | go through `https://127.0.0.1:8443`; for the probes use a container on the network (§3) |
+| `127.0.0.1:8080` or `:9090` refuse the connection | correct — neither is published any more | go through `https://127.0.0.1`; for the probes use a container on the network (§3) |
 | curl reports `CERT_TRUST_IS_UNTRUSTED_ROOT`, or `000` | Windows curl is Schannel-backed and will not accept a private CA | use the Python probe in §0. **Not `-k`** |
 | Traefik serves `CN=TRAEFIK DEFAULT CERT` | the CA was never generated, and Compose created an empty directory for the bind mount | `scripts/tls/gen-dev-ca.sh`, then recreate `traefik` |
 | `Pool overlaps with other one on this address space` | another project holds `10.89.0.0/24` | `export TINY_LEDGER_SUBNET=10.90.0.0/24 TINY_LEDGER_TRAEFIK_IP=10.90.0.250` — **both**, they must move together |
-| Every request `401` with a valid-looking token | `iss` mismatch | mint via `localhost:8081`; check `KC_HOSTNAME` is set on the `keycloak` service. **Never disable issuer validation** |
+| Every request `401` with a valid-looking token | `iss` mismatch | mint via `https://auth.localhost`; check `KC_HOSTNAME` on the `keycloak` service and `TINY_LEDGER_AUTH_ORIGIN`. **Never disable issuer validation** |
+| A host jar answers `500` on any authenticated route, `PKIX path building failed` in its log | the JVM does not trust the dev CA | pass `-Djavax.net.ssl.trustStore=docker/tls/truststore.p12` **before** `-jar`, not after |
 | `docker exec ... cat` → `executable file not found` | the run image has no shell or coreutils | read `docker compose logs app` instead |
 | e2e aborts: "the full stack is not healthy" | a backing service really is unhealthy | `docker compose ps -a`; a container in `Created` usually means a taken host port |
 | `7 deselected` instead of `7 passed` | the `e2e` marker override did not take | run through `scripts/e2e/run-e2e.sh`, not bare `pytest` |

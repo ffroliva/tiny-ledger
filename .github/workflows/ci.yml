@@ -321,7 +321,7 @@ jobs:
       - name: Stage 9 — e2e scenarios over HTTPS (image, through Traefik)
         env:
           LEDGER_PROFILE: full
-          LEDGER_ISSUER_URI: http://localhost:8081/realms/tiny-ledger
+          LEDGER_ISSUER_URI: https://auth.localhost/realms/tiny-ledger
           LEDGER_CLIENT_ID: ledger-test
           LEDGER_USERNAME: alice
           LEDGER_PASSWORD: dev-only
@@ -348,7 +348,9 @@ jobs:
         env:
           E2E_MODE: jar
           LEDGER_PROFILE: full
-          LEDGER_ISSUER_URI: http://localhost:8081/realms/tiny-ledger
+          # SAME issuer as the image leg. Keycloak is behind Traefik in BOTH modes — only the
+          # application moves to the host jar — so a token minted here carries the same `iss`.
+          LEDGER_ISSUER_URI: https://auth.localhost/realms/tiny-ledger
           LEDGER_CLIENT_ID: ledger-test
           LEDGER_USERNAME: alice
           LEDGER_PASSWORD: dev-only
@@ -412,7 +414,7 @@ jobs:
       - name: Wait for the application through TLS
         env:
           CURL_CA_BUNDLE: docker/tls/ca.crt
-        run: ./scripts/e2e/wait-for.sh https://127.0.0.1:8443/api/v1/accounts 401 120 "tiny-ledger (full, HTTPS)"
+        run: ./scripts/e2e/wait-for.sh https://127.0.0.1/api/v1/accounts 401 120 "tiny-ledger (full, HTTPS)"
 
       # fail_action: true, and that is the only setting here that makes this a gate. The action
       # defaults it to FALSE — a scan that reports findings and then exits 0 is the same defect as
@@ -429,7 +431,7 @@ jobs:
       - name: Stage 11c — OWASP ZAP baseline
         uses: zaproxy/action-baseline@v0.15.0
         with:
-          target: https://127.0.0.1:8443
+          target: https://127.0.0.1
           rules_file_name: .zap/rules.tsv
           fail_action: true
           allow_issue_writing: false

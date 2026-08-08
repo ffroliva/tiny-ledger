@@ -144,9 +144,9 @@ resolves to `::1` first on the development machine and the IPv6 path does not ro
 
 | | |
 |---|---|
-| **Terminated at** | Traefik, `profiles: [app]`, published on `8443` (HTTPS) and `8000` (301 → HTTPS) |
-| **Routed to** | `app:8080` by service name, in-network, plaintext |
-| **NOT terminated for** | Keycloak, and every backing service |
+| **Terminated at** | Traefik, `profiles: [app]`, published on **`443`** (HTTPS) and `80` (301 → HTTPS) |
+| **Routed to** | `app:8080` **and `keycloak:8080`** by service name, in-network, plaintext |
+| **NOT terminated for** | every backing service — Postgres, Redis, Kafka |
 | **Minimum version** | TLS 1.2, set as the default TLS option |
 | **Headers set at the edge** | HSTS (1 year), `X-Content-Type-Options`, `X-Frame-Options` |
 
@@ -154,12 +154,44 @@ resolves to `::1` first on the development machine and the IPv6 path does not ro
 named gap this design chose to leave open, not an oversight — a service mesh is the tool for it, and
 ADR 0005 records why one is not in scope.
 
-**Keycloak is deliberately not fronted by Traefik.** It derives `iss` from the `Host` header, and
-`docker-compose.yml` carries the measurement showing two spellings of loopback mint different
-issuers of which only one authenticates. Fronting it would change the issuer string for the CLI,
-`application-full.properties`, `ci.yml` and `ledger-cli/config.py` simultaneously, to buy TLS on a
-fixture identity provider marked *never deploy*. In a real deployment the IdP is a managed service
-with its own certificate. **Nothing about issuer validation was relaxed to make any of this work.**
+**Keycloak IS fronted by Traefik**, decided 2026-08-08 and recorded before the work started. One
+ingress, one certificate story, and no second scheme in the stack — an OIDC provider on plain HTTP
+beside an HTTPS resource server is the shape that teaches people TLS is optional. It is **no longer
+published on 8081 at all**, which matters more than it looks: a plaintext Keycloak on a host port
+would mint tokens whose `iss` is derived from whatever the caller typed there, and that is a
+*different* issuer from the one the application trusts.
+
+**That made it a rename, not a toggle**, and the issuer now reads `https://auth.localhost/realms/tiny-ledger`
+in every one of the eight places that spell it. They move together or nothing authenticates, and the
+failure is a flat `401` that says nothing about which side is wrong.
+
+**The port is absent from that string on purpose.** Traefik publishes **443**, the scheme default,
+so it drops out of the URL — which is what a deployment's issuer looks like and keeps a port number
+out of eight files. `TINY_LEDGER_HTTPS_PORT` is still an escape hatch for a clash, but it is **not a
+free knob**: move it and `TINY_LEDGER_AUTH_ORIGIN` must move with it.
+
+Two consequences, both decided rather than discovered:
+
+- **`KC_PROXY_HEADERS=xforwarded` and `KC_HTTP_ENABLED=true`.** Traefik terminates TLS and speaks
+  plain HTTP to the container; without the first, Keycloak builds URLs from that *internal* request
+  and the issuer drifts back to something no client can reach.
+- **`jwk-set-uri` stays in-network** (`http://keycloak:8080/…`) even though `iss` is HTTPS. Issuer
+  validation and key fetching are independent — verified in the shipped bytecode during #11 — so the
+  fetch stays plaintext inside the network and the dev CA never has to enter the app container's
+  truststore. **Nothing about issuer or audience validation was relaxed to make any of this work.**
+
+**One client cannot use that shortcut, and it is the one people forget.** `E2E_MODE=jar` runs the
+application *on the host*, where it resolves the issuer itself over TLS — and a JVM reads neither
+`SSL_CERT_FILE` nor a PEM. `gen-dev-ca.sh` therefore also emits `docker/tls/truststore.p12` (one CA,
+password `changeit`, no private key), and the runner passes it with `-Djavax.net.ssl.trustStore`
+**before** `-jar`, since after it those are application arguments and are silently ignored. Measured
+with the store pointed at a path that does not exist:
+
+```
+PKIX path building failed: unable to find valid certification path to requested target   -> HTTP 500
+```
+
+and 7 passed with it. So the flag is load-bearing rather than defensive.
 
 **Traefik is given no access to the Docker socket.** The usual Docker provider — which discovers
 routes from container labels — requires mounting `/var/run/docker.sock`, which is root-equivalent on

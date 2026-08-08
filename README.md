@@ -191,9 +191,12 @@ The build is a separate step on purpose. The image is produced by **buildpacks**
 `Dockerfile` that Compose could build for you, so there is exactly one way to make it — see spec §12.
 If the tag is missing, `up` fails rather than quietly starting something else.
 
-**In `full`, everything arrives over HTTPS at `https://127.0.0.1:8443`.** Traefik terminates TLS and
-the application **publishes no port at all** — a published `8080` would leave a plaintext route
-straight past the terminator. The plaintext entrypoint on `8000` answers a `301` and serves nothing.
+**In `full`, everything arrives over HTTPS on 443** — the API at `https://app.localhost` and
+**Keycloak at `https://auth.localhost`**, split by hostname. Traefik terminates TLS and **nothing
+else publishes a port**: not the application, not the management endpoints, not the identity
+provider. A published `8080` would leave a plaintext route straight past the terminator, and a
+published Keycloak would mint tokens with a different `iss` from the one the app trusts. The
+plaintext entrypoint on `80` answers a `301` and serves nothing.
 The certificate is generated on demand, never committed, and **CI holds no certificate secret**: it
 runs that same script inside the run. TLS stops at Traefik — the backing services and Keycloak are
 still plaintext, which spec §6.4a names as a gap rather than leaving implied.

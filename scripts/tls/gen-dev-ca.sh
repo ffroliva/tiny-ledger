@@ -42,13 +42,24 @@ fi
 
 mkdir -p "$OUT"
 
-# BOTH SAN forms, and this is load-bearing rather than belt-and-braces. scripts/e2e/run-e2e.sh
-# pins 127.0.0.1 everywhere because `localhost` resolves to ::1 first on the Windows development
-# machine and the IPv6 path does not route there — so a certificate carrying only DNS:localhost
-# would fail verification on the exact address this repository is obliged to dial. `app` and
-# `traefik` are the in-network service names, for any client that ever connects from inside the
-# Compose network.
-SAN="DNS:localhost,DNS:app,DNS:traefik,IP:127.0.0.1,IP:::1"
+# EVERY name a client can dial, and each entry is here for a measured reason.
+#
+# `auth.localhost` is the one that matters most: Traefik fronts Keycloak too, so `iss` is minted at
+# that hostname and the CLI dials it over TLS. A certificate missing it means every token request
+# fails verification, which surfaces as an authentication problem rather than a certificate one.
+#
+# `*.localhost` rather than a plain hostname because it resolves to loopback with no /etc/hosts
+# edit — and, measured on this machine, it resolves to 127.0.0.1 ONLY, while bare `localhost`
+# offers ::1 first and the IPv6 path does not route here. So the sub-domain form is strictly better
+# than the trap run-e2e.sh already documents:
+#
+#   localhost      -> [::1, 127.0.0.1]
+#   app.localhost  -> [127.0.0.1]
+#   auth.localhost -> [127.0.0.1]
+#
+# IP:127.0.0.1 stays because the ZAP baseline and the readiness probe dial the address directly.
+# `app`, `keycloak` and `traefik` are the in-network service names.
+SAN="DNS:localhost,DNS:app.localhost,DNS:auth.localhost,DNS:app,DNS:keycloak,DNS:traefik,IP:127.0.0.1,IP:::1"
 
 # -noenc, not -nodes: same meaning, and -nodes is the deprecated spelling in OpenSSL 3.x. A
 # passphrase-less key is the point — Traefik reads it unattended at startup.
@@ -84,6 +95,32 @@ rm -f "$OUT/server.csr" "$OUT/ca.srl" "$OUT/leaf.ext"
 # The generator's own check. `openssl verify` exits non-zero on a bad chain, so under `set -e`
 # this line is the gate: a leaf that does not chain to the CA never reaches a caller.
 openssl verify -CAfile "$OUT/ca.crt" "$OUT/server.crt"
+
+# A JAVA TRUSTSTORE OF THE SAME CA, because one client here is a JVM and a JVM does not read PEM.
+#
+# `E2E_MODE=jar` runs the application on the host, where it has to fetch Keycloak's signing keys
+# over HTTPS — Traefik fronts the identity provider now, so there is no plaintext path left. The
+# variables the other clients use do not reach it: SSL_CERT_FILE is OpenSSL's, and the JVM consults
+# its own `cacerts`. Without this the jar boots, answers 401 on the readiness probe, and then fails
+# every scenario with an authentication error whose real cause is a certificate one.
+#
+# `changeit` is the JDK's own default truststore password and is not a secret in any sense: this
+# store contains one public certificate and no private key. Naming it here rather than inventing a
+# value keeps it out of the "is this a credential?" conversation entirely.
+#
+# -noprompt because keytool otherwise asks "Trust this certificate?" on stdin, and this script runs
+# unattended in CI.
+if command -v keytool >/dev/null 2>&1; then
+  rm -f "$OUT/truststore.p12"
+  keytool -importcert -noprompt -alias tiny-ledger-dev-ca \
+    -file "$OUT/ca.crt" -keystore "$OUT/truststore.p12" \
+    -storetype PKCS12 -storepass changeit >/dev/null
+  echo "java truststore written to $OUT/truststore.p12 (one CA, password 'changeit')"
+else
+  # Not fatal: only the jar-mode e2e path needs it, and every other consumer of this script has a
+  # JDK by definition. Say so rather than failing a run that does not need it.
+  echo "keytool not on PATH — skipping the Java truststore; E2E_MODE=jar will not be able to reach Keycloak over TLS" >&2
+fi
 
 # The key must not be world-readable. chmod is a no-op on the Windows filesystem and correct on
 # the CI runner, so it is applied rather than skipped for the platform where it does nothing.

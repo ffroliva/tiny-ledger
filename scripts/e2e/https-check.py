@@ -4,7 +4,7 @@ Run through the CLI's environment (``uv run --project ledger-cli``) so it uses t
 the e2e scenarios use — not a second, more forgiving one::
 
     uv run --project ledger-cli python scripts/e2e/https-check.py \
-        https://127.0.0.1:8443 http://127.0.0.1:8000 120 /abs/path/to/docker/tls/ca.crt
+        https://127.0.0.1 http://127.0.0.1 120 /abs/path/to/docker/tls/ca.crt
 
 **Why this is Python and not ``curl``.** ``scripts/e2e/wait-for.sh`` is curl, and curl on the
 Windows development machine is a **Schannel** build (measured: ``curl 8.12.1 ... Schannel``, no
