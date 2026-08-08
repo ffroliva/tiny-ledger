@@ -91,11 +91,35 @@ http:
         # The reasoning that survived the previous revision worried about `includeSubDomains`
         # spreading the pin across sibling `.localhost` names and missed the bare-host case, which is
         # strictly worse. A real deployment on a real domain sets `stsSeconds` and
-        # `stsIncludeSubdomains` and means it; `docs/security.md` records that as a named gap.
+        # `stsIncludeSubdomains` and means it. `docs/urls-and-tls.md` and `docs/pitfalls.md` record
+        # that as a named gap — this line used to cite `docs/security.md`, which has never existed
+        # in this repository; the file it meant is `docs/security-material.md`, and that one does
+        # not carry the HSTS gap. A dead citation, corrected to the two live ones.
         #
         # These two are unconditionally correct for a JSON API and cost nothing:
         contentTypeNosniff: true
         frameDeny: true
+        # Cross-Origin-Resource-Policy, added because stage 11e FOUND IT MISSING — the only finding
+        # of the first API scan (run `31277939324`, WARN-NEW: 1, rule 90004). It is here rather than
+        # dispositioned in `.zap/api-rules.tsv` because that file's rule is that a finding which
+        # genuinely applies gets fixed on the terminator, and this one does.
+        #
+        # WHY THE BASELINE NEVER SAW IT, which is the interesting part and the justification for
+        # stage 11e existing: rule 90004 fires on a response a browser could embed. The baseline only
+        # ever reached 401s, and there is nothing to protect in an error body. The API scan reads
+        # nine routes with live 200 JSON responses — account balances among them — and the rule
+        # applies immediately. A whole class of finding was invisible to the edge scan, not tolerated
+        # by it.
+        #
+        # `same-origin` is safe for a future browser client, which is worth stating because the name
+        # suggests otherwise: CORP governs NO-CORS cross-origin loads (`<img>`, `<script>`). A
+        # `fetch()` carrying `Authorization` is a cors-mode request and is unaffected. Nothing that
+        # legitimately calls this API is blocked by it.
+        #
+        # It applies to the Keycloak router too, since both share this middleware. Keycloak's login
+        # assets are same-origin to its own pages, so nothing there loses anything either.
+        customResponseHeaders:
+          Cross-Origin-Resource-Policy: "same-origin"
 
   services:
     keycloak:

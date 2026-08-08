@@ -538,6 +538,115 @@ jobs:
           allow_issue_writing: false
           artifact_name: zap-baseline
 
+      # ─────────────────────────────────────────────────────────────────────────────────────────
+      # Stage 11e. THE BASELINE'S CEILING IS STRUCTURAL, not a configuration miss, and this is the
+      # step that lifts it. A baseline spiders for links and then reads passively; this is a
+      # bearer-token JSON API with no anonymous surface and no hyperlinks, so the spider reached
+      # `Total of 3 URLs` on the run above and every one of the NINE operations in
+      # docs/api/openapi.yaml went unvisited. The baseline checks the EDGE — TLS, redirect,
+      # headers, error shapes. It cannot check a route, and no amount of authentication would
+      # change that: with or without a token the spider still has no links to follow.
+      #
+      # zap-api-scan.py enumerates operations from the CONTRACT instead of crawling for them.
+      #
+      # A LIVE TOKEN IS THE WHOLE POINT, AND ITS PROOF IS THE POINT OF THIS FIRST STEP. Without one
+      # every route answers 401, the passive rules read nine error bodies, and the scan reports a
+      # clean result — indistinguishable from a genuinely clean API (AGENTS.md trap 8). A token
+      # that is merely non-empty proves nothing: an expired or wrong-audience one 401s just as
+      # silently. So the check is differential — the same URL, twice, one variable changed.
+      - name: "Stage 11e — mint a bearer token, and prove it authenticates"
+        env:
+          CURL_CA_BUNDLE: docker/tls/ca.crt
+        run: |
+          set -uo pipefail
+          TOKEN=$(curl -sS -X POST https://auth.localhost/realms/tiny-ledger/protocol/openid-connect/token \
+            -d client_id=ledger-test -d username=alice -d password=dev-only -d grant_type=password \
+            | jq -r .access_token)
+          # Emptiness AND "null". A failed connection writes nothing, `jq -r` over empty input
+          # emits the EMPTY STRING, and `"" != "null"` is true — so a null-only guard passes and
+          # `Authorization: Bearer ` goes out blank. scripts/e2e/restart-replay.sh paid for this.
+          [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "::error::no token minted from Keycloak"; exit 1; }
+          echo "::add-mask::$TOKEN"
+          with=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" https://127.0.0.1/api/v1/accounts)
+          without=$(curl -s -o /dev/null -w '%{http_code}' https://127.0.0.1/api/v1/accounts)
+          echo "GET /api/v1/accounts — with token: $with, without: $without"
+          [ "$with" = 200 ] && [ "$without" = 401 ] || {
+            echo "::error::the token is not live: with=$with (want 200), without=$without (want 401)"
+            exit 1
+          }
+          echo "ZAP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      # `-S` IS WHAT KEEPS THE REPOSITORY'S RULE TRUE. zap-api-scan.py runs an ACTIVE scan by
+      # default; safe mode skips it and scans passively instead. A baseline and never an active
+      # scan — no attack payload against a ledger — is the posture stage 11c was chosen for, and
+      # dropping it silently while "upgrading" the coverage would be a worse trade than the gap.
+      #
+      # WHAT IT DOES STILL DO, stated because "passive" oversells it: importing the definition
+      # sends one request per operation, and two of those are PUT deposits/withdrawals and one is
+      # POST an account. The scan therefore WRITES to the ledger — with the contract's own example
+      # values, not attack payloads. Harmless against a stack this job creates and destroys, and it
+      # is why this runs AFTER the baseline rather than before it.
+      #
+      # `-O` because the contract's `servers:` is `/` — a relative URL, deliberately: the contract
+      # does not name a deployment. The host has to come from the runner.
+      #
+      # The ZAP container is run directly rather than through zaproxy/action-api-scan, for the same
+      # reason stage 11d runs Trivy directly: the flags that matter here (-S, -O, the replacer) are
+      # the whole decision, and they belong in the diff rather than inside an action's `cmd_options`
+      # string. `--network=host` so 127.0.0.1 is the runner's loopback and reaches Traefik.
+      - name: "Stage 11e — ZAP API scan over the OpenAPI contract"
+        run: |
+          set -uo pipefail
+          status=0
+          docker run --rm --network=host -v "$PWD:/zap/wrk/:rw" \
+            ghcr.io/zaproxy/zaproxy:2.17.0 \
+            zap-api-scan.py -t /zap/wrk/docs/api/openapi.yaml -f openapi -S \
+              -O https://127.0.0.1 \
+              -c /zap/wrk/.zap/api-rules.tsv \
+              -J zap-api-report.json -r zap-api-report.html \
+              -z "-config replacer.full_list(0).description=auth \
+                  -config replacer.full_list(0).enabled=true \
+                  -config replacer.full_list(0).matchtype=REQ_HEADER \
+                  -config replacer.full_list(0).matchstr=Authorization \
+                  -config replacer.full_list(0).regex=false \
+                  -config replacer.full_list(0).replacement=\"Bearer $ZAP_TOKEN\"" \
+            2>&1 | tee zap-api.log || status=$?
+          echo "zap-api-scan.py exit: $status" >> "$GITHUB_STEP_SUMMARY"
+          # FINDINGS GATE. This landed report-only for exactly one run, which is the same call
+          # stage 11d made — a scanner that arrives red for untriaged reasons is how a gate gets
+          # ignored. That run reported ONE finding, it was triaged, and it was FIXED rather than
+          # dispositioned (Cross-Origin-Resource-Policy, now set in docker/traefik/dynamic.yml), so
+          # there is nothing left to tolerate and no reason to keep the exemption.
+          #
+          # The red half of the proof is a real run rather than a construction: `31277939324`, with
+          # the header absent, reported `WARN-NEW: 1` and this script exited non-zero — so with
+          # this line present that run would have failed. One variable changed between it and the
+          # run that must now be green.
+          exit "$status"
+
+      # THE COVERAGE ASSERTION, and it is the reason this step is not decoration. A scan that
+      # imported nothing reports nothing, which reads exactly like a clean API. ZAP prints its own
+      # count, and the baseline in the step above supplies the control: it reached `Total of 3
+      # URLs`. If this scan does not materially exceed that, it did not enumerate the contract and
+      # its silence means nothing.
+      - name: "Stage 11e — did it actually reach the routes?"
+        if: always()
+        run: |
+          set -uo pipefail
+          n=$(grep -oE 'Total of [0-9]+ URLs' zap-api.log | grep -oE '[0-9]+' | tail -1)
+          n=${n:-0}
+          echo "### Stage 11e — ZAP API scan reached $n URLs (baseline reaches 3)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$n" -le 3 ]; then
+            echo "::error::the API scan reached $n URLs, no more than the baseline's 3 — the contract was not enumerated, so a clean report proves nothing"
+            exit 1
+          fi
+          grep -E 'FAIL-NEW|WARN-NEW|PASS:' zap-api.log | tail -3 >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: "Stage 11e — publish the API scan report"
+        if: always()
+        uses: actions/upload-artifact@v7
+        with: { name: zap-api-scan, path: "zap-api-report.*", if-no-files-found: warn }
+
       - name: Compose logs on failure
         if: failure()
         run: docker compose -f docker/docker-compose.yml --profile app logs --no-color --tail 200
