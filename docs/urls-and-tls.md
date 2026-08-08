@@ -178,7 +178,7 @@ the two ever disagree.
 |---|---|
 | Transport, edge | TLS 1.2 floor, dev CA locally and in CI, Let's Encrypt blocked on a deployment decision |
 | `X-Forwarded-For` | Two layers: **Traefik strips** untrusted forwarded headers at the edge, **and** the application trusts them only from Traefik's pinned address (§6.1) |
-| Response headers | `X-Content-Type-Options`, `X-Frame-Options` at the terminator. **HSTS deliberately not sent** — see `pitfalls.md` for why it would break unrelated localhost projects |
+| Response headers | `X-Content-Type-Options`, `X-Frame-Options` and `Cross-Origin-Resource-Policy: same-origin` at the terminator. **HSTS deliberately not sent** — see `pitfalls.md` for why it would break unrelated localhost projects. CORP was added because the stage 11e API scan found it missing on live `200` responses; the baseline never saw it, having only ever reached `401`s |
 | Authentication | OIDC bearer tokens, issuer **and** audience validated (§6.4) |
 | Authorisation | Five comparison points across four sites, §6.4 |
 | Rate limiting | Four buckets, §6.1, per principal and per IP |
