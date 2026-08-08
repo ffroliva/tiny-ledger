@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.46
+**Version:** 3.47
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -23,7 +23,7 @@ codebase**:
 | Mode | Command | What runs | Purpose |
 |---|---|---|---|
 | **`standalone`** (default) | `./mvnw spring-boot:run` | In-memory event store, in-memory cache, no auth, no broker. Binds `127.0.0.1` only; the startup banner prints `AUTH DISABLED (standalone)`. **JDK 25** is the only prerequisite. | The brief's runtime in one command: clone, run, curl the APIs. The scope beyond the brief is a recorded, deliberate choice (`agentic-workflow.md` §6) — an accepted submission risk, not claimed compliance. |
-| **`full`** | `./mvnw spring-boot:build-image -DskipTests`, then `docker compose -f docker/docker-compose.yml --profile app up -d` — **the app IS a Compose service** (§12, issue #11). The build step is separate on purpose: the image comes from buildpacks, never from a `Dockerfile` Compose could build, so there is one way to produce it | **Built:** PostgreSQL, Kafka (KRaft, no ZooKeeper), Redis and **Keycloak**, each with a healthcheck, plus the **application itself** behind `profiles: [app]` — see `docker/docker-compose.yml`. A plain `up` still starts exactly the four backing services; `--profile app` starts five. Keycloak serves the realm on `8081`, which is the issuer `application-full.properties` has always defaulted to, and `KC_HOSTNAME` pins that issuer so it does not vary with how the caller dialled in (§6.4). Running the jar on the host is still supported and still exercised — `scripts/e2e/run-e2e.sh` keeps it behind `E2E_MODE=jar`. **Observability, §14 step 9:** the Actuator probes and OTLP instrumentation ship inside the application, and the telemetry backend is an **opt-in** Compose profile carrying an OTel Collector *alone* — the default `up` is unchanged, and there is deliberately no Prometheus, Grafana, Tempo or Loki service (§6.6). | The production-shaped system. |
+| **`full`** | `./mvnw spring-boot:build-image -DskipTests`, then `docker compose -f docker/docker-compose.yml --profile app up -d` — **the app IS a Compose service** (§12, issue #11). The build step is separate on purpose: the image comes from buildpacks, never from a `Dockerfile` Compose could build, so there is one way to produce it | **Built:** PostgreSQL, Kafka (KRaft, no ZooKeeper), Redis and **Keycloak**, each with a healthcheck, plus the **application itself** behind `profiles: [app]` — see `docker/docker-compose.yml`. A plain `up` still starts exactly the four backing services; `--profile app` starts **six**, adding the application **and Traefik**. **Keycloak publishes no host port at all** — since v3.44 it sits behind the same proxy as the application (§6.4a), so the realm is served at `https://auth.localhost` and `KC_HOSTNAME` pins that issuer so it does not vary with how the caller dialled in (§6.4). The `8081` mapping this row described until v3.44 is gone: a published plaintext Keycloak mints tokens whose `iss` differs from the one the application trusts. Running the jar on the host is still supported and still exercised — `scripts/e2e/run-e2e.sh` keeps it behind `E2E_MODE=jar`. **Observability, §14 step 9:** the Actuator probes and OTLP instrumentation ship inside the application, and the telemetry backend is an **opt-in** Compose profile carrying an OTel Collector *alone* — the default `up` is unchanged, and there is deliberately no Prometheus, Grafana, Tempo or Loki service (§6.6). | The production-shaped system. |
 
 Both modes run the **same domain code and the same core ledger API** — the two auditor operations
 are `full`-only (§7), a declared profile-gated exclusion from parity, not an adapter difference.
@@ -51,9 +51,9 @@ Versions are governed by **`dr-jskill`'s `versions.json`**, not chosen ad hoc.
 | Java | **25** (LTS, Corretto) | Records, sealed interfaces, pattern matching and virtual threads are all load-bearing below |
 | Spring Boot | **4.1.0** (Spring Framework 7.0) | `ProblemDetail`, Modulith integration and `@ServiceConnection` come free |
 | Spring Modulith | Boot-4 line | Module verification, event publication registry, programmatic event externalisation (§4.3) |
-| PostgreSQL | **18** | Event store + projections |
-| Hibernate | **7.4** | Outbound persistence adapter only |
-| Testcontainers | **2.0.5** | Integration and e2e |
+| PostgreSQL | **16** | Event store + projections. `postgres:16-alpine` in **both** `docker/docker-compose.yml` and `AbstractIntegrationTest`, so Compose and the ITs exercise one version. (This row read **18** until 2026-08-08; nothing ever ran 18) |
+| Hibernate | **7.4** | Outbound persistence adapter only — managed by the Boot parent, not pinned here |
+| Testcontainers | **1.20.5** | Integration and e2e (`<testcontainers.version>` in `pom.xml`). This row read **2.0.5** until 2026-08-08 |
 | Maven wrapper | 3.8+ | `./mvnw` — a JDK is the only prerequisite |
 
 **Jackson 3** ships with Boot 4; annotation imports differ from Jackson 2 and the DTO layer must be
@@ -1350,8 +1350,9 @@ build already runs.
    convention below is a convention, upheld by review and by nothing mechanical.
 2. **Generation is the target wherever generation is possible.** The current and planned rows are
    distinguished in §8.2.
-3. **Committed Gherkin is executable today.** README example extraction belongs to unbuilt stage 9
-   (§8.3/§9.6).
+3. **Committed Gherkin is executable today.** README example extraction is **still not wired** — but
+   stage 9 itself is built and running (§8.3/§9.6), so the extraction is an unbuilt piece *of a built
+   stage*, not a consequence of a missing one.
 4. **Docs have a lifecycle** — an index, an archive, and a revision history (§8.5). This is a
    documentation convention; no gate enforces it.
 
@@ -1397,8 +1398,10 @@ decision.
 
 ### 8.3 Executable documentation
 
-The README's `curl` examples are intended to be extracted and executed by the e2e suite (§9.6), but
-stage 9 is not built and those examples do not currently fail the build.
+The README's `curl` examples are intended to be extracted and executed by the e2e suite (§9.6). **The
+extraction is not wired, so those examples do not fail the build.** Until 2026-08-08 this sentence
+blamed stage 9 for being unbuilt; stage 9 runs on every push, and the extraction is simply a piece of
+it nobody has written — a weaker excuse and the accurate one.
 
 When built, that closes the common documentation lie of a quickstart that no longer runs. The
 committed Gherkin subset in §9.3 already has that property: those files are simultaneously
@@ -1782,19 +1785,34 @@ covering `@standalone` and `@full` at full depth. Then `ledger-cli scenario run`
 flows: open account, deposit, withdraw, verify balance, exhaust the rate limit, confirm the `429`,
 replay an idempotent request, confirm no double credit.
 
-**This stage is not built yet:** the repository has no Python CLI tree or pytest-bdd bindings, and CI
-does not run stage 9. Until those land, stage 5 covers the committed standalone Gherkin subset and
-stage 7 carries the real-stack auth/admin acceptance proof (§9.3).
+**Half of this is built, and the halves are worth separating** — this paragraph claimed the whole
+stage was unbuilt until 2026-08-08, sixty lines from the §12.1 row describing it as running:
+
+- **BUILT and running on every push.** `ledger-cli/` exists and `scripts/e2e/run-e2e.sh` is CI stage
+  9, driving **seven** unmocked scenarios (`movement-chain`, `zero-boundary`,
+  `concurrent-withdrawals`, `racing-replays`, `consistency-boundary`, `edge-cases`, `rate-limit`)
+  against a running `full` stack, in **two legs**: the container image over real HTTPS through
+  Traefik, and `E2E_MODE=jar` plaintext against the host jar as stage 9b.
+- **STILL UNBUILT.** The pytest-bdd binding of the whole catalogue to step definitions, and the
+  README `curl` extraction (§8.3). Until those land, stage 5 covers the committed standalone Gherkin
+  subset and stage 7 carries the real-stack auth/admin acceptance proof (§9.3).
 
 ### 9.7 Load and performance — Gatling + JMH
 
-This stage is specified but not built or wired into CI.
+**This stage is BUILT** — the `load` job in `.github/workflows/ci.yml`, which runs `loadtest/`'s
+Gatling simulation and `benchmarks/`'s JMH suite against the composed stack. It is
+**`workflow_dispatch`-only** by decision, not by omission: a ramp on every push would triple CI time
+to produce a number nobody reads that commit (§12.1 stage 10). This paragraph read "specified but not
+built or wired into CI" until 2026-08-08.
 
 - **Gatling:** ramp to 500 concurrent users; assert p99 write latency < 150 ms, p99 cached read
   < 20 ms, error rate < 0.1%. Scenarios: steady state, burst, and hot-account contention (all
   traffic on one aggregate — the pathological case for optimistic concurrency).
 - **JMH:** microbenchmarks on event replay and `Money` arithmetic.
-- When wired, the thresholds become assertions and a regression will fail the pipeline.
+- **The thresholds are assertions and the job fails on a miss** — and they currently *do* miss.
+  That is a measurement problem rather than a regression: the run recorded in
+  [`performance-findings.md`](performance-findings.md) §2.4 was 20 users on one laptop, not 500 on
+  representative hardware. The dispatch inputs default to 50 users over a 30 s ramp for that reason.
 
 ---
 
@@ -1831,29 +1849,29 @@ preferences.** Re-deciding them file-by-file would produce drift for no gain. Co
 
 | Concern | Choice |
 |---|---|
-| Python | **3.11, 3.12, 3.13** — `requires-python = ">=3.11"`, all three in the classifiers and in the CI matrix |
+| Python | **3.11, 3.12, 3.13** — `requires-python = ">=3.11"` and all three in the classifiers. **There is no CI matrix** (corrected 2026-08-08): stage 8 is a single `cli` job on whichever interpreter `uv` resolves, so 3.12 and 3.13 are declared-supported and untested. `NOTES.md` records that only 3.13 was ever exercised by hand |
 | Packaging | `uv` + `pyproject.toml` (PEP 621), **hatchling** backend, `src/` layout, `uv.lock` committed |
-| Dev deps | **PEP 735 `[dependency-groups]`** — `dev`, `containers` — installed with `uv sync --group` |
+| Dev deps | **PEP 735 `[dependency-groups]`** — **`dev` only**, installed with `uv sync --locked`. A `containers` group is specified here and **not delivered**; there is no `testcontainers` dependency (corrected 2026-08-08) |
 | CLI | **click ≥8.1** (`[project.scripts] ledger-cli = "ledger_cli.cli:main"`) |
 | HTTP | **httpx** with **tenacity** retries and explicit timeouts |
 | Output | **rich** — tables, progress, colour. **`--json` is SPECIFIED AND NOT DELIVERED** (corrected v3.43): the flag parses and sets `settings.json_output`, and **no command reads it**, so every command renders rich output regardless. Stated as a gap rather than left as a claim a machine consumer would build against and find false. The working machine-readable hook is **`scenario run`'s exit code**. See [`ledger-cli.md`](ledger-cli.md) |
 | Logging | **structlog**. `print()` is banned in `src/` by ruff `T20`; `console.print()` is the exception |
 | Config | **pydantic-settings** + **platformdirs** for config/cache locations |
-| Validation | **Pydantic v2** models generated from `openapi.yaml` |
-| Auth | OAuth2 client-credentials against Keycloak; token cached (owner-only file permissions via platformdirs) and refreshed; never logged |
+| Validation | **Pydantic v2** models **hand-mirrored** from `openapi.yaml`'s `components.schemas` — **not codegen** (corrected 2026-08-08). `models.py`'s own docstring says so. Nothing mechanically couples them to the contract, so this is a convention upheld by review; see the drift note below the examples |
+| Auth | **Direct Access Grants** (`grant_type=password`) against the public `ledger-test` client, **not client-credentials** (corrected 2026-08-08, matching §6.4's struck row). The realm defines no confidential client, so client-credentials is not an available grant. `--token` bypasses Keycloak entirely. Token cached (owner-only file permissions via platformdirs), refreshed, never logged |
 | Lint/format | **ruff**, exact-pinned (`ruff==0.16.1`), `line-length = 100`, `target-version = "py311"`, `select = ["E","F","W","I","B","UP","N","T20"]` |
 | Types | **pyright**, `strict` on `src/ledger_cli`, `pythonVersion = "3.11"` — not mypy |
-| Testing | **pytest** + **pytest-bdd** + **pytest-cov** + **respx**; **testcontainers** in the `containers` group |
-| Markers | `unit` (default), `integration`, `containers`, `e2e`, `live`, `smoke`; `addopts` excludes everything but `unit`/`integration` so the default run is fast and offline |
-| Temp files | `--basetemp=tmp/pytest`, so tests never litter the repo root on Windows |
-| Secrets | `detect-secrets` baseline + `gitleaks`, run via `pre-commit` so a leak is caught before it is committed, not after |
+| Testing | **pytest** + **pytest-cov** + **respx**. **`pytest-bdd` and `testcontainers` are specified and NOT delivered** (corrected 2026-08-08) — `pytest-bdd` deliberately, since §9.6's binding has no runner to consume it and an unwired dependency is dead weight (`NOTES.md`) |
+| Markers | **`unit`, `e2e`, `live`** are the three actually declared. `integration`, `containers` and `smoke` are specified and **not declared** (corrected 2026-08-08). `addopts = "-m 'not e2e and not live'"`, so the default run is fast and offline — it excludes the two network markers rather than allow-listing two others |
+| Temp files | **`--basetemp=tmp`**, one level (corrected 2026-08-08). `tmp/pytest` was specified and does not work: pytest's basetemp creation is a non-recursive `mkdir` and fails on a fresh clone where `tmp/` does not exist yet |
+| Secrets | **`gitleaks` in CI stage 11**, on every push. **There is no `pre-commit` configuration in this repository and `detect-secrets` is deliberately unwired** (corrected 2026-08-08) — it covers the same class of finding as `gitleaks`, so running both without a documented reason is redundant scanning rather than extra safety (`ci.yml`, the `security` job's summary step) |
 
 Dependency ranges get upper bounds **only where a bump is load-bearing**, with a comment stating what
 broke and when, so a future reader knows why the ceiling exists rather than guessing. Unbounded
 elsewhere.
 
 ```bash
-ledger-cli account open --currency GBP
+ledger-cli account open --name ACC-001 --currency GBP   # --name is REQUIRED, see below
 ledger-cli deposit  --account ACC-001 --amount 100.00
 ledger-cli withdraw --account ACC-001 --amount 30.00
 ledger-cli balance  --account ACC-001 --watch
@@ -1869,8 +1887,17 @@ safe by construction, since a retried `PUT` carries the same UID (§6.3). Name�
 scoped to the caller's own accounts (`GET /api/v1/accounts`), and names are advisory, not unique:
 on ambiguity the CLI errors and lists the candidate `accountUid`s rather than guessing.
 
-Pydantic models are **generated from `openapi.yaml`**, so the CLI cannot drift from the contract
-either.
+**`account open` requires `--name`**, which this sketch omitted until 2026-08-08. `openAccount`'s
+request body makes it mandatory, and this section's own prose two paragraphs up says the CLI resolves
+accounts *by name* — impossible if opening never set one. `openapi.yaml` wins, as §5 says it does.
+
+**The CLI CAN drift from the contract, and nothing would catch it.** This paragraph claimed Pydantic
+models are "generated from `openapi.yaml`, so the CLI cannot drift from the contract either" — they
+are **hand-mirrored** (`models.py`, and `NOTES.md` on why). The Java side's guarantee is real: the
+controllers implement interfaces generated from the same file, so a controller that drifts fails
+compilation (§5). The Python side has no equivalent — the models are checked against the contract's
+example payloads by unit tests and by nothing mechanical. Generation remains the target; it is not
+the state.
 
 ---
 
@@ -1965,7 +1992,7 @@ Active stages are ordered cheapest-and-most-informative first. The load stage is
 | 11c | **ZAP baseline** | **OWASP ZAP baseline** (`zaproxy/action-baseline@v0.15.0`) against the TLS entrypoint, in its own `zap` job. **Deferred to v3.44 on purpose**: run before Traefik existed, its first report would have been the HSTS, redirect and TLS-version findings the same work was about to configure — a report about an absence rather than about this application. A **baseline**, never an active scan: it spiders and reads passively and sends no attack payload, which matters against a system of record. `fail_action: true`, and that setting is the only thing that makes it a gate — the action defaults it to `false`, which is a scan that reports findings and exits 0, the defect the deleted stage 6 and the pre-v3.41 Sonar step both had. Accepted findings live in `.zap/rules.tsv`, one per line with a rule id and a reason, so what is tolerated appears in a diff. `allow_issue_writing: false`: filing an issue per run on a **public** repository publishes the findings list to anyone watching. **First observed report (run `31257068048`): `FAIL-NEW: 0, WARN-NEW: 1, PASS: 66`** — the single warning is `Non-Storable Content [10049]` on two `401`s, which is required behaviour rather than a weakness, and every header the TLS work configured passed on its own merits. **Its ceiling is stated rather than left to be found:** the same run logged `Job spider error accessing URL … status code returned : 401 expected 200`, because this is a bearer-token API with no anonymous surface and no hyperlinks — so the spider saw **two URLs**. This job checks the *edge* (TLS, redirect, headers, error shapes) and does **not** scan the API's routes; the upgrade is `zap-api-scan.py` fed `docs/api/openapi.yaml`, which is not wired. **Not a required check**, and it cannot become one from here — that is a branch-protection change only the repository owner can make, exactly as 11b already records | every push |
 | 11d | **Compose-image scan** | **Trivy over the images named in `docker/docker-compose.yml`** — postgres, redis, kafka, keycloak, traefik and the Collector — as a shell loop inside the required `security` job, at `CRITICAL,HIGH` with `ignore-unfixed`, writing a per-image count to the job summary and the CVE list to the log. **This was the last uncovered surface here, and the gap was structural**: Dependabot's `docker` ecosystem matches only `/dockerfile|containerfile/i` (`dependabot-core`, `docker/lib/dependabot/docker/file_fetcher.rb`), there is no `docker-compose` ecosystem, and this repository has **no Dockerfile by design** (§12) — so no Dependabot configuration could ever have reached them, and stage 11 scans only the application image. **It REPORTS; it does not gate, and that is the decision rather than an unfinished edge.** Those tags are months old and the step arrives with findings; a scanner that lands red for untriaged reasons is how a gate gets ignored — the defect the deleted stage 6 and the pre-v3.41 Sonar step both had, in its mirror image. `--exit-code` is absent, which is Trivy's default. **Exactly one thing in the step fails the build, and it is not a finding:** it asserts the parse produced **six** image refs, because a parse that matched nothing would scan nothing and print an empty, clean-looking table — a result identical to six genuinely clean images (`AGENTS.md` trap 8). Proven differentially before landing: the real file parses 6 and exits 0, the same file with its `image:` keys renamed parses 0 and exits 1. The compose file is the **only** authority for the list; six refs copied into `ci.yml` would go stale invisibly on the first bump. A `trivy` **container** rather than `trivy-action` because an Action takes one `image-ref` and cannot loop, and Docker is already present in that job | every push |
 | 12 | Publish (planned) | Multi-arch image, CycloneDX SBOM, generated module diagrams to `docs/generated/` | not yet wired |
-| 13 | **SonarCloud** | Static analysis and coverage on `sonarcloud.io`, fed from both JaCoCo reports. **Reports; does not gate** — see below | every push, last: `needs: [unit, integration]` |
+| 13 | **SonarCloud** | Static analysis and coverage on `sonarcloud.io`, fed from both JaCoCo reports. **It GATES** — `-Dsonar.qualitygate.wait=true` makes the scanner poll until the verdict is computed and exit non-zero on ERROR (corrected 2026-08-08) — see below | every push, last: `needs: [unit, integration]` |
 
 Stages 3, 4 and 5 are the ones worth pointing at: they fail on a *design* regression, not a
 behavioural one. An agent-assisted codebase moving at speed needs boundary violations caught
@@ -1998,11 +2025,19 @@ CLI; no dependency-range drift is detected today.
 needs an account and token to verify". The tool arrived; the sentence did not move. Two properties are
 worth stating exactly, because both are easy to read the wrong way round:
 
-- **It reports; it does not gate.** The job runs `./mvnw sonar:sonar` **without**
-  `-Dsonar.qualitygate.wait=true`, so a failing quality gate does not fail the build. That is
-  deliberate, and it is the posture `docs/performance-findings.md` §6 took for mutation coverage:
-  measure first, set the threshold against a real baseline, never gate on a number nobody has seen.
-  **Consequence worth holding on to — the Quality Gate badge can go red while CI stays green.**
+- **It gates, as of the fix in `8eb84db`** — and this bullet said the opposite until 2026-08-08,
+  which is the same class of stale claim the row above it carried. The job runs
+  `./mvnw -q sonar:sonar` **with** `-Dsonar.qualitygate.wait=true`, so the scanner polls SonarCloud
+  until the verdict is computed and exits non-zero on ERROR. **Why the flag was added rather than
+  left off:** without it `sonar:sonar` only *submits* the analysis and exits 0 whatever the verdict —
+  which is exactly what happened. This job reported success on 2026-08-07 while the project's quality
+  gate was ERROR on `new_security_rating` and the README badge read `quality gate failed` at the same
+  time. A green check that cannot fail is the defect this pipeline deleted once already as stage 6.
+  The gate is `Tiny Ledger AAA and 85` — A on reliability, security and maintainability, and 85%
+  coverage, asserted on **both new and overall** code. The overall half is deliberate: that is what
+  the README badges show, and a gate judging only new code lets a badge go red while every build
+  passes. The measure-first posture `docs/performance-findings.md` §6 still takes for mutation
+  coverage was the right one *before* a baseline existed; one exists now.
 - **`sonar` is nevertheless a required status check on `main`** — with `gate`, `unit`, `integration`,
   `security`, `cli` and `e2e`, seven in total. (`load` is deliberately *not* required: it is
   `workflow_dispatch`-only and skips on every run, so requiring it would deadlock every PR
@@ -2030,11 +2065,14 @@ section. Trivy fails the **required** `security` job; Dependency-Check fails the
 `depcheck`, which is **not** a required check, so it cannot block a merge until someone adds it to
 branch protection. That distinction is the coverage claim, and it is the one worth stating.
 
-**Badges are visibility, not gates.** `README.md` carries seven — CI, quality gate, coverage,
-reliability, security, maintainability, duplication — so the state is legible without opening Actions.
-Six of them read from SonarCloud, which per the above gates nothing, so a green badge row means
-*"analysis ran and reported this"*, not *"the build would have failed otherwise"*. The only badge
-tracking something that fails a build is CI's own.
+**Badges are visibility — and since `8eb84db` they are backed by a gate.** `README.md` carries seven
+— CI, quality gate, coverage, reliability, security, maintainability, duplication — so the state is
+legible without opening Actions. Six read from SonarCloud, and because the analysis now waits on the
+verdict, a red quality gate fails the `sonar` job rather than sitting on the badge beside a green
+build. That was the point of the fix: the badge and the build can no longer disagree. **The one
+residual is the token**, and it is the bullet above rather than this one — a run with no
+`SONAR_TOKEN` exits 0 having analysed nothing, so on a fork the badge and the check are both
+uninformative rather than both wrong.
 
 ---
 
@@ -2255,3 +2293,4 @@ replica runs anywhere.
 | 3.44 | 2026-08-08 | **TLS exists, and the piece of it that matters is a rate-limiting control rather than a certificate.** Traefik terminates HTTPS in front of the application (new §6.4a); the certificate is generated on demand by `scripts/tls/gen-dev-ca.sh` into a gitignored directory and **CI holds no certificate secret** — it runs the same generator in-run, so a fork's build goes green holding nothing. The application **stops publishing 8080 and 9090**, and that absence is the control: a published 8080 would leave a plaintext route straight past the terminator, and publishing 9090 had falsified §6.6's own claim that the management endpoints "rely on the port not being published". **§6.1's sentence about `X-Forwarded-For` stops being a caution and becomes configuration**, because a proxy in front changes every request's source address and row 4 meters on it: `forward-headers-strategy=native` with `internal-proxies` naming the ingress and nothing else. `native` **not** `framework` is the control — `ForwardedHeaderFilter` has no trusted-proxy concept at all and would honour the header from any peer. **Boot's default for `internal-proxies` is exploitable on this stack, and that is measured rather than argued**: it covers `172.16.0.0/12`, the range Docker hands to Compose networks, and with the property removed the spoofing test's `429` becomes a `200`. Two tests are the gate and **neither is worth much alone** — `ForwardedHeaderSpoofingTest` would pass just as happily with the valve absent, so `ForwardedHeaderTrustedProxyTest` runs the identical pair with the trust widened and requires the opposite outcome; both red proofs were run. Proven live through the real proxy too: four requests, four different spoofed addresses, `401, 401, 429, 429`. **`E2E_MODE=jar` stops drifting** — it was run by nothing, kept to avoid silent coverage loss and being that loss, and is now stage 9b, as a step rather than a matrix leg because a matrix would rename a **required** check and block every pull request. **The OWASP ZAP baseline lands as stage 11c**, deferred to here on purpose so its first report is about this application rather than about the TLS defaults the same work was configuring, with `fail_action: true` because the action's default of `false` is a scan that reports findings and exits 0 — the defect the deleted stage 6 and the old Sonar step both had. **Three findings this work produced about itself, all caught by controls rather than by review:** (1) the e2e TLS check failed on its first run because Traefik selects certificates by SNI and RFC 6066 forbids an IP literal there, so a `127.0.0.1` dial matched nothing and Traefik served its own `CN=TRAEFIK DEFAULT CERT` — **while every request succeeded end to end**, which is exactly what the two-trust-store control exists to catch; (2) a `traefik.yml` static config file was written and then **deleted**, because Traefik does not expand `${VARS}` in its own config file and, measured, ignores CLI flags entirely when `--configFile` is given, so the override meant to repair that was silently discarded while visible in `docker inspect`; (3) the redirect answered `301 https://127.0.0.1/` — a port nothing publishes — because Traefik v3 has no `redirections.entryPoint.port` setting at all. **Named gaps, unchanged:** the proxy-to-application hop and every backing service are still plaintext. **Let's Encrypt is blocked on a deployment decision, not on TLS** — ADR 0005 targets Kubernetes and no manifests exist, so there is no environment to issue a certificate for. **KEYCLOAK IS FRONTED TOO** (PR #25's decision record, taken independently of the implementation and honoured by it): one ingress, one certificate story, and no second scheme in the stack. That made the change a **rename** rather than a toggle — `iss` moved to `https://auth.localhost/realms/tiny-ledger` in eight places at once, Keycloak stopped publishing 8081 entirely, and `KC_PROXY_HEADERS=xforwarded` is what stops the issuer drifting back to the internal request. **Traefik publishes 443, not 8443, and that is a correctness choice rather than an aesthetic one**: the published port lands inside `iss`, and 443 is the one port that does not because the scheme default drops out of the URL — so the issuer carries no port and `TINY_LEDGER_HTTPS_PORT` stops being a knob that can be turned alone (it moves with `TINY_LEDGER_AUTH_ORIGIN`). **`jwk-set-uri` stays in-network on plain HTTP**, so the dev CA never enters the application container's truststore — but the HOST JAR has no such shortcut, so `gen-dev-ca.sh` also emits a PKCS12 truststore and `run-e2e.sh` passes it with `-Djavax.net.ssl.trustStore` **before** `-jar`, since after `-jar` those are application arguments and are silently ignored. Measured with that store pointed at a path that does not exist: `PKIX path building failed: unable to find valid certification path to requested target` and HTTP 500, against 7 passed with it |
 | 3.45 | 2026-08-08 | **The last uncovered scanning surface is covered, and it is covered by an instrument that deliberately does not gate.** Stage **11d** loops Trivy over the six images named in `docker/docker-compose.yml`, inside the required `security` job. The gap it closes was **structural, not a configuration oversight**: Dependabot's `docker` ecosystem matches only `/dockerfile|containerfile/i` (`dependabot-core`, `docker/lib/dependabot/docker/file_fetcher.rb`), there is no `docker-compose` ecosystem, and this repository has no `Dockerfile` by design — so `security-material.md`'s coverage matrix carried a `❌ nothing` row that **no amount of Dependabot configuration could ever have moved**. Stage 11 scans the application image alone. **It reports rather than gates, and that is this revision's actual decision.** Those tags are months old and the step arrives with findings; making it a gate on arrival would produce a required check that is red for reasons nobody has triaged, which is how a gate stops being read — the same defect as a scan that exits 0, approached from the other side. `--exit-code` is absent. **The coverage matrix says exactly this** (`⚠️ scanned, reports only`) rather than `✅`: the gap is now *observable*, not *closed*, and recording it as closed would be the claim-without-evidence this document has retracted four times. **`AGENTS.md` trap 8 governs the one thing in the step that CAN fail.** A scanner over a list parsed from a file has an inert mode nobody would notice: if the parse matches nothing the loop scans nothing and prints an empty table — a result **identical** to six genuinely clean images. So the step asserts the parse produced six refs and exits 1 otherwise, and that assertion was proven **differentially before landing**: the real compose file parses 6 and exits 0; the same file with its `image:` keys renamed parses 0 and exits 1. The count, not the findings, is what makes a "no findings" summary mean anything. **The compose file is the only authority for the list** — six refs copied into `ci.yml` would go stale on the first bump and the staleness would be invisible, a green scan against versions nothing runs. Implemented as the pinned `aquasec/trivy` **container** rather than `trivy-action`, because an Action takes one `image-ref` and cannot loop, Docker is already present in that job, and a third binary-install mechanism alongside gitleaks' would buy nothing |
 | 3.46 | 2026-08-08 | **The application image tag stops carrying a version, because deriving it from `${project.version}` was a live staleness defect rather than a tidiness question.** The tag is spelled in **four** files — `pom.xml` builds it, `docker/docker-compose.yml` runs it, `scripts/e2e/run-e2e.sh` guards on it, `.github/workflows/ci.yml` scans it — and **only the pom's derived from the version**. So a version bump moved the built image to a new tag while the other three kept naming the old one: Compose would start a **stale** image, and the e2e guard would go green *correctly reporting that the image it named was present*. A guard that passes against the wrong artefact is worse than no guard, and this one would have done so silently — `spring-boot:build-image` leaves the previous tag on disk. The build now produces `tiny-ledger:local`. **The prescribed fix was one generated value all four read, and it was rejected on measurement rather than on taste.** It works — Compose auto-loads a `.env` from the compose file's own directory, verified from two different working directories rather than assumed — but it is roughly four times the diff and it adds a **prerequisite**: `docker compose up` would then require a Maven build to have written that file first, turning a clear *"image not built"* error into an unset-variable one. Taking the version **out** removes the same defect by construction: nothing is derived, so nothing can desync. An `$APP_IMAGE` knob was rejected earlier for the same family of reason (#18) — a knob moves the guard without moving what runs. **What it costs is stated rather than left to be found:** two versions' images can no longer sit side by side locally, and `docker images` no longer shows the version. Nothing here does either, and **publishing (stage 12) tags for the registry from `${project.version}` at that point**, which is where a version-bearing tag belongs. **A `gate` step now enforces the invariant, and it asserts the property rather than a proxy for it:** that all four sites spell the *identical* tag, not merely that no version appears — the latter would pass just as happily if a site were deleted. **Differential by construction per trap 7**: the same pattern must score at least four hits *and* exactly one distinct value, so a search that matched nothing fails on the count and can never read as agreement. Proven against four cases before landing — the tree as it stands passes with 5 mentions of one value; one site drifted to a different tag fails; the version restored *consistently across all four* fails; and the pattern broken so it matches nothing fails on the count. **A consequence worth recording, because the check found it immediately:** no comment in those four files may quote the old versioned tag, since a literal in prose is indistinguishable from a site that has drifted. The explanatory comments were reworded, not exempted |
+| 3.47 | 2026-08-08 | **A repository-wide documentation accuracy pass — every claim in every document cross-checked against the code, the Compose stack and the workflow that actually runs.** Not a feature revision: nothing in the application changed, and every correction below is this document (or another) having described a system different from the one that shipped. The trigger was §12.1 and §9.6 disagreeing about stage 9 within one file. **§1** said Keycloak "serves the realm on `8081`" and that `--profile app` "starts five" — both were true before v3.44 and neither survived it: Keycloak publishes **no host port**, the realm is at `https://auth.localhost`, and `--profile app` starts **six**, adding Traefik. **§1.5's version table carried two versions nothing runs**: PostgreSQL **18** where Compose and `AbstractIntegrationTest` both pin `postgres:16-alpine`, and Testcontainers **2.0.5** where `pom.xml` sets **1.20.5** — a table copied from an intent and never re-read against the build. **§9.6 declared the whole of stage 9 unbuilt** — "the repository has no Python CLI tree or pytest-bdd bindings, and CI does not run stage 9" — sixty lines from the §12.1 row describing seven scenarios running on every push in two legs. Split into the half that is built and the half (the pytest-bdd binding, the README `curl` extraction) that is not; §5 and §8.3's citations of "unbuilt stage 9" corrected the same way, since blaming a missing stage for a missing piece of a running one is the weaker excuse dressed as the stronger. **§9.7 said the load stage was "not built or wired into CI"** while the `load` job exists — `workflow_dispatch`-only by decision, with thresholds that are assertions and currently miss for the reason `performance-findings.md` §2.4 records. **§11's convention table was the largest cluster: eight rows specified a CLI more complete than the one in `ledger-cli/`.** Auth is **Direct Access Grants**, not client-credentials — the same correction §6.4's row already carried at v3.43, which never reached §11. Pydantic models are **hand-mirrored, not generated**, so the closing "the CLI cannot drift from the contract either" was a *safety claim* that was false, and is now stated as the gap it is. `pytest-bdd`, `testcontainers` and the `containers` group are specified and undelivered; the declared markers are `unit`/`e2e`/`live`, not six; `--basetemp` is `tmp`, not `tmp/pytest`, which does not work on a fresh clone; there is **no `pre-commit` configuration and no CI matrix**; and `account open` requires `--name`, which the example omitted. **§12.1 asserted both sides of the Sonar question**: the stage-13 row and a bullet below it said "reports; does not gate" while the workflow passes `-Dsonar.qualitygate.wait=true` — added in `8eb84db` precisely because the job had reported success while the quality gate was ERROR. The gate is real and is now described as one. **Outside this document**, in the same pass: `README.md` listed tracing, OTLP export, JSON logs and the Collector as "not yet built" in a section 60 lines below the one explaining how to turn them on; `agentic-workflow.md` told an auditor that `docker-compose.yml` has "no Keycloak service and no app service"; `ledger-cli/NOTES.md` still read as written before the stack it needed existed; `llms.txt` listed three of five ADRs; `CHANGELOG.md` stopped at issue #11 and recorded neither TLS nor the ZAP baseline; and two code comments made claims their own files contradict. **What this pass did not do:** no gate was added. Nothing in CI checks documentation here (§8.4), so the mechanism that let ten of these accumulate is unchanged, and the honest statement is that the next pass will find more |
