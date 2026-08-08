@@ -118,6 +118,43 @@ The design **is** agreed, and is recorded here so the next person does not re-op
 
 - **Traefik terminates TLS** — the same tool in Compose and as a Kubernetes ingress controller, so
   local rehearses production.
+- **Traefik fronts Keycloak too** (decided 2026-08-08). Not only the application. One ingress, one
+  certificate story, and no second scheme in the stack — an OIDC provider reachable over plain HTTP
+  beside an HTTPS resource server is the shape that teaches people TLS is optional.
+
+  **This is the decision with the largest blast radius in the whole TLS change, and it is a rename,
+  not a config toggle.** Keycloak derives `iss` from the request host, so putting it behind a proxy
+  on a new hostname changes the issuer of every token — and `iss` must match, exactly, in eight
+  places that are currently spelled `http://localhost:8081/realms/tiny-ledger`:
+
+  | Site | What it holds |
+  |---|---|
+  | `docker/docker-compose.yml` | `KC_HOSTNAME`, the app's `LEDGER_ISSUER_URI`, and `…JWT_JWK_SET_URI` |
+  | `src/main/resources/application-full.properties:37` | the `issuer-uri` default |
+  | `ledger-cli/src/ledger_cli/config.py:25` | the CLI's `issuer_uri` default |
+  | `.env.example:43` | `LEDGER_ISSUER_URI` |
+  | `.github/workflows/ci.yml:314` | stage 9's `LEDGER_ISSUER_URI` |
+  | `docs/docker.md`, `docs/ledger-cli.md` | every worked token example |
+  | `docs/spec.md` §6.4 | the security model's description of the issuer |
+
+  **They must all move together or nothing authenticates**, and the failure is a flat `401` that
+  says nothing about which side is wrong. Change them in one commit and re-run the e2e suite.
+
+  Three consequences worth deciding up front rather than discovering:
+
+  1. **Keycloak needs `KC_PROXY_HEADERS=xforwarded` and `KC_HTTP_ENABLED=true`.** Traefik terminates
+     TLS and speaks HTTP to it; without the first, Keycloak builds URLs from the internal request and
+     the issuer drifts back.
+  2. **`jwk-set-uri` should stay in-network** (`http://keycloak:8080/…`) even though `iss` becomes
+     HTTPS. Issuer validation and key fetching are independent — already verified in the shipped
+     bytecode — so keeping the fetch internal avoids putting the dev CA into the application
+     container's truststore for no security gain.
+  3. **The e2e client must trust the dev CA.** `ledger-cli` speaks HTTPS to both the app and
+     Keycloak, so CI needs the generated CA on the Python side (`SSL_CERT_FILE`) as well as on the
+     app side.
+
+  For local hostnames, prefer `*.localhost` — it resolves to loopback without an `/etc/hosts` edit
+  on every developer machine, which is a step that gets skipped and then debugged.
 - **A locally generated CA for dev and CI; Let's Encrypt for the deployed environment**, on the
   domain `archb.uk`.
 - **CI gets no certificate secret.** It generates a throwaway CA in-run — the same principle that
