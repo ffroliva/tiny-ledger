@@ -215,6 +215,27 @@
           -->
           <image>
             <name>tiny-ledger:${project.version}</name>
+            <!--
+              PINNED BY DIGEST, and this was a real defect found in review. Without these two
+              elements the plugin defaults to `paketobuildpacks/builder-noble-java-tiny:latest` —
+              read from the constant pool of the shipped spring-boot-buildpack-platform-4.1.0 jar,
+              not guessed — which is a MUTABLE tag feeding a REQUIRED status check. Three
+              consequences, all bad:
+
+                - re-running `security` on an unchanged commit could build a different image, so
+                  Trivy could redden a required check with nothing in the tree to bump;
+                - `security` and `e2e` pull independently on separate runners, so the artefact
+                  SCANNED and the artefact TESTED could come from different base layers on the same
+                  push — which silently voids this issue's whole premise;
+                - it falsified spec §12's "there is no base image for this repository to patch and
+                  forget". There was one. It was implicit and mutable, which is worse than explicit.
+
+              Every other image here is pinned — postgres:16-alpine, redis:7-alpine, cp-kafka:7.6.0,
+              keycloak:26.4, otel-collector:0.158.0, gitleaks by sha256. This is now consistent.
+              Bumping means changing the digests deliberately, which is the point.
+            -->
+            <builder>paketobuildpacks/builder-noble-java-tiny@sha256:5d484671a3472dc6dd323c297923f33262aa0d4dbcbbcceac3d6c69586d140be</builder>
+            <runImage>paketobuildpacks/ubuntu-noble-run-tiny@sha256:f67248664fcdbea6537c8e5cb3b5a22f3262a93d7623cb090db634e2b7a27a21</runImage>
             <env>
               <!--
                 Spec v3.36 / #11. The CURRENT names — BP_JVM_CDS_ENABLED and
@@ -302,6 +323,24 @@
                (the deleted stage 6, then the Sonar job before -Dsonar.qualitygate.wait=true).
                7.0 is the bottom of CVSS v3 HIGH. -->
           <failBuildOnCVSS>7</failBuildOnCVSS>
+          <!--
+            THE DEFAULT IS `true`, AND THAT MADE THIS JOB'S STATED PURPOSE FALSE. Read from this
+            plugin's own META-INF/maven/plugin.xml at 13.0.0:
+
+                <skipTestScope implementation="boolean" default-value="true">
+
+            Five places — two ci.yml comments, this pom, spec §12.1 and CHANGELOG.md — justified
+            running Dependency-Check alongside Trivy on the grounds that it also sees TEST-SCOPE
+            dependencies. With the default left alone it does not, so the job was paying a runner,
+            a 120-minute timeout and a multi-gigabyte cache to close a gap of exactly zero.
+
+            HONESTY NOTE, because this flag is necessary and may not be sufficient: the same
+            descriptor declares `<requiresDependencyResolution>compile+runtime</requiresDependencyResolution>`
+            for the `check` goal, so Maven may not resolve test artifacts for it at all. Until a run
+            is observed reporting a test-scope jar, the test-scope claim is NOT established — and
+            the documents have been changed to say that rather than to keep asserting it.
+          -->
+          <skipTestScope>false</skipTestScope>
           <suppressionFiles>
             <suppressionFile>.github/owasp-suppressions.xml</suppressionFile>
           </suppressionFiles>

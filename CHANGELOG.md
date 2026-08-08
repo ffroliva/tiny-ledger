@@ -74,13 +74,21 @@
 - The application is now a **Compose service** behind `profiles: [app]`, so `full` no longer means
   "four containers plus a JVM on your host". A plain `up` still starts exactly the four backing
   services. `scripts/e2e/run-e2e.sh` runs the **image** by default and keeps the host jar behind
-  `E2E_MODE=jar`; both are exercised. Keycloak's hostname is pinned, because without it the issuer it
+  `E2E_MODE=jar`. The jar path was run by hand when it landed (7 passed), but **nothing in CI
+  exercises it** — the e2e job builds the image, not the jar — so it is retained coverage, not
+  asserted coverage. Keycloak's hostname is pinned, because without it the issuer it
   stamps varies with how the caller dialled in — `127.0.0.1:8081` and `localhost:8081` minted
   different issuers and only one authenticated.
 - **Stage 11 is no longer partial.** Trivy scans the built image (`CRITICAL,HIGH`, `exit-code: 1`)
-  and OWASP Dependency-Check scans the build tree (`failBuildOnCVSS=7`, so it also covers test-scope
-  dependencies). Both live in the **required** `security` job, because a scan in a job nobody must
-  pass cannot stop a merge. **The Trivy gate found a real HIGH on its first honest run** —
+  in the **required** `security` job, because a scan in a job nobody must pass cannot stop a merge.
+  OWASP Dependency-Check scans the build tree (`failBuildOnCVSS=7`) in its **own `depcheck` job**,
+  which is **not** a required check — inside `security` it did not finish within 80 minutes, and a
+  required check that slow is one people route around. So a CVSS ≥ 7 finding fails the workflow and
+  is visible on the PR, but does **not** block the merge button until `depcheck` is added to branch
+  protection. Whether it also covers **test-scope** dependencies is **unproven**: the plugin defaults
+  `skipTestScope` to true (now set to false) and its `check` goal resolves only `compile+runtime`, so
+  that claim waits on a run actually reporting a test-scope jar.
+  **The Trivy gate found a real HIGH on its first honest run** —
   `CVE-2026-54291` in `org.postgresql:postgresql` — which was **fixed by upgrading to 42.7.13, not
   suppressed**. The image is built and scanned but **never published**; that stays stage 12.
 - **Distributed tracing, OTLP export and an opt-in OTel Collector** (spec §14 step 9 parts 2 and 3,

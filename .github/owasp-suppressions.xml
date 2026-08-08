@@ -37,4 +37,85 @@
   That is the intended starting position.
 -->
 <suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+
+  <!--
+    ================================================================================================
+    ACCEPTED RISK, WITH AN EXPIRY. Added 2026-08-08 (issue #11) by explicit decision, after the first
+    Dependency-Check run failed with 22 findings at CVSS >= 7 (CI 31233407733).
+
+    The reason below is NOT "false positive" — nobody triaged these individually and pretending
+    otherwise would be worse than the findings. The reason is narrower and checkable:
+
+        THERE IS NOTHING STABLE TO UPGRADE TO. Checked against Maven Central's maven-metadata.xml
+        on 2026-08-08: io.netty's current release is 5.0.0.Alpha2 and org.jetbrains.kotlin's is
+        2.4.20-Beta2. Both are pre-release. Taking an alpha or a beta into a ledger that moves money,
+        in order to quieten a scanner, is a worse decision than the finding it silences.
+
+    This is the SAME trade already made and documented for Trivy via `ignore-unfixed: true`, applied
+    consistently rather than left inconsistent between the two scanners. Its cost is stated there in
+    the same words and is restated here: THE BUILD CAN BE GREEN WITH KNOWN CRITICALS PRESENT.
+
+    Two corroborating facts, offered as context and not as the justification:
+      - Trivy, which matches on exact groupId:artifactId and version RANGES rather than on CPE name
+        strings, reports these same jars CLEAN in the built image.
+      - Dependency-Check reaches some of these by CPE mappings that are known to over-match —
+        kotlin-stdlib to `cpe:2.3:a:jetbrains:kotlin` and opentelemetry-semconv to
+        `cpe:2.3:a:opentelemetry:opentelemetry`, the latter a constants-only jar.
+
+    EVERY ENTRY BELOW CARRIES `until`. That is deliberate: it fails again rather than becoming
+    permanent by neglect, which is how accepted risk turns into forgotten risk. When they expire,
+    re-check for a stable release FIRST and upgrade; suppress again only if there still is none.
+    ================================================================================================
+  -->
+
+  <suppress until="2026-11-08Z">
+    <notes>
+      netty-transport 4.2.15.Final. Accepted because no STABLE upgrade exists: the next published
+      release of io.netty is 5.0.0.Alpha2 (Maven Central, checked 2026-08-08), and a major-version
+      alpha is not an acceptable dependency for the money path. Not assessed individually for
+      reachability; re-check for a stable 4.2.x or 5.x GA at expiry.
+    </notes>
+    <packageUrl regex="true">^pkg:maven/io\.netty/netty-.*@4\.2\.15\.Final$</packageUrl>
+    <cve>CVE-2026-56819</cve>
+    <cve>CVE-2026-56817</cve>
+    <cve>CVE-2026-44891</cve>
+    <cve>CVE-2026-55833</cve>
+    <cve>CVE-2026-56745</cve>
+    <cve>CVE-2026-56822</cve>
+    <cve>CVE-2026-55831</cve>
+    <cve>CVE-2026-56821</cve>
+    <cve>CVE-2026-56820</cve>
+    <cve>CVE-2026-56816</cve>
+    <cve>CVE-2026-59901</cve>
+    <cve>CVE-2026-55851</cve>
+  </suppress>
+
+  <suppress until="2026-11-08Z">
+    <notes>
+      kotlin-stdlib 2.3.21. Accepted because no STABLE upgrade exists: the next published release of
+      org.jetbrains.kotlin is 2.4.20-Beta2 (Maven Central, checked 2026-08-08). Reached here via a
+      `cpe:2.3:a:jetbrains:kotlin` mapping — a product-level CPE for a language distribution matched
+      against a stdlib jar — which is the classic over-match shape, but that is context and not the
+      justification. Re-check for a stable 2.4.x at expiry.
+    </notes>
+    <packageUrl regex="true">^pkg:maven/org\.jetbrains\.kotlin/kotlin-stdlib@2\.3\.21$</packageUrl>
+    <cve>CVE-2026-53914</cve>
+  </suppress>
+
+  <suppress until="2026-11-08Z">
+    <notes>
+      opentelemetry-semconv 1.41.1. This one is NOT "no upgrade exists" — 1.43.0 is published. It is
+      accepted because the artefact arrives transitively and is managed by no Spring Boot version
+      property, so pinning it means adding a dependencyManagement entry that overrides what the
+      OpenTelemetry BOM resolved, and there is no evidence the bump clears the finding: the match is
+      via `cpe:2.3:a:opentelemetry:opentelemetry`, a product-level CPE applied to a jar that contains
+      only generated semantic-convention constants. Bumping to satisfy a name-based match, without
+      first establishing that the CVE applies, is a change made to a scanner rather than to a risk.
+      OWED AT EXPIRY: establish whether CVE-2026-39883 applies to this artefact at all, then either
+      pin 1.43.0+ or replace this entry with a reasoned permanent one.
+    </notes>
+    <packageUrl regex="true">^pkg:maven/io\.opentelemetry\.semconv/opentelemetry-semconv@1\.41\.1$</packageUrl>
+    <cve>CVE-2026-39883</cve>
+  </suppress>
+
 </suppressions>

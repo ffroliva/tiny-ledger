@@ -60,8 +60,22 @@ esac
 # OTHER database and failed Liquibase on credentials. Different credentials are the
 # only reason that was visible; a matching ledger/ledger user elsewhere would have
 # been read and written silently. Fail here, loudly, with the likely cause named.
+#
+# THE GUARD NAMES THE FOUR BACKING SERVICES EXPLICITLY, and that is a fix rather than a
+# tidy-up. It used to check every container in the project, which was right when the app
+# was never one of them. It is not any more: `docker compose ps -a` lists containers from
+# INACTIVE profiles too (verified on Docker 28.3.0 / Compose v2.38.1 — a profiled service
+# shows up as `extra Up 8 seconds` with no `--profile` given), and the `app` service has no
+# healthcheck by necessity, since its run image ships no shell to run one.
+#
+# So the old form aborted on the app's own container. Anyone following the README's new
+# recipe — build-image, then `--profile app up -d`, then this script — was told "the full
+# stack is not healthy" and pointed at Postgres, which was fine. The same lockout happened
+# after any run whose EXIT trap did not fire (Ctrl-C, SIGKILL, a cancelled CI job), and to
+# anyone using `--profile observability`, because otel-collector has no healthcheck either.
 COMPOSE="docker compose -f docker/docker-compose.yml"
-unhealthy=$($COMPOSE ps -a --format '{{.Service}} {{.Status}}' 2>/dev/null | grep -v '(healthy)' || true)
+unhealthy=$($COMPOSE ps -a --format '{{.Service}} {{.Status}}' 2>/dev/null \
+  | grep -E '^(postgres|redis|kafka|keycloak) ' | grep -v '(healthy)' || true)
 if [ -n "$unhealthy" ]; then
   echo "::error::the full stack is not healthy — refusing to run e2e against a partial stack" >&2
   echo "$unhealthy" >&2
@@ -75,7 +89,14 @@ cleanup() {
   rc=$?
   if [ "$E2E_MODE" = image ]; then
     echo "--- application log (compose service 'app') ---"
-    $COMPOSE --profile app logs --no-color app 2>/dev/null || echo "(no application log was produced)"
+    # stderr is NOT discarded, and that matters more here than it looks. compose demultiplexes
+    # the container's stderr to the CLI's stderr, which is exactly where the buildpack launcher's
+    # `failed to launch: ...`, `Error occurred during initialization of VM` and OOM-kill messages
+    # go — the most likely image failures. `2>/dev/null` would print this header and then nothing,
+    # defeating the reason this trap exists (see the file header). There is no `|| echo` fallback
+    # because `docker compose logs <service>` exits 0 even when no container exists, so the branch
+    # could never fire; the header plus empty output is the honest signal instead.
+    $COMPOSE --profile app logs --no-color app 2>&1 || true
     # `rm -sf`, not `stop`: the guard above rejects any container that is not (healthy), and a
     # stopped app container would trip it on the NEXT run. The app is the only service this
     # script started, so it is the only one it removes — the four backing services stay up for

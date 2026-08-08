@@ -246,14 +246,28 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
+      # NO `cache: maven` here, deliberately. dependency-check's data directory lives INSIDE
+      # ~/.m2/repository, so setup-java's cache would strictly contain the NVD store cached by the
+      # next step: two differently-aged copies of the same H2 database merged file-by-file on
+      # restore, and — because this PR edits pom.xml and so rotates the shared cache key — a real
+      # chance of saving a multi-gigabyte NVD database into the Maven cache that `gate`, `unit`,
+      # `integration`, `e2e` and `sonar` all download on every push for data none of them use.
       - uses: actions/setup-java@v5
-        with: { distribution: corretto, java-version: '25', cache: maven }
+        with: { distribution: corretto, java-version: '25' }
 
       - name: Cache the NVD data directory
         uses: actions/cache@v6
         with:
           path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: ${{ runner.os }}-owasp-nvd
+          # A CONSTANT KEY WOULD MAKE THIS A ONE-SHOT SEED, NOT A CACHE. actions/cache skips its
+          # post-job save on an exact primary-key hit, so run 1 would save a day-0 database and
+          # every later run would restore that same frozen snapshot, apply an ever-widening delta,
+          # and throw it away — the work growing by a day of CVEs per day until the baseline falls
+          # outside the NVD modified-date window and every run pays the full cold cost forever.
+          # run_id in the key + a restore-keys prefix means each run restores the newest snapshot
+          # and saves an updated one.
+          key: ${{ runner.os }}-owasp-nvd-${{ github.run_id }}
+          restore-keys: ${{ runner.os }}-owasp-nvd-
 
       - name: "Stage 11 — OWASP Dependency-Check"
         env:
@@ -262,11 +276,21 @@ jobs:
         # success it did not earn. A fork has no NVD_API_KEY and its build must still go green —
         # the same principle that keeps a Grafana credential out of CI entirely.
         #
-        # THE PROPERTY IS `nvdApiKey`. Read out of dependency-check-maven 13.0.0's own
-        # META-INF/maven/plugin.xml, which declares ${nvdApiKey}. `-Dnvd.api.key` — the spelling the
-        # #11 plan carried — is NOT a recognised property, and an unrecognised -D is silently
-        # ignored: the build would rate-limit against an anonymous NVD and present as a slow network
-        # rather than as a misconfiguration.
+        # THE KEY IS PASSED BY ENVIRONMENT VARIABLE NAME, NOT AS A VALUE ON THE COMMAND LINE, and
+        # that is a security fix rather than a style choice. `-DnvdApiKey=$NVD_API_KEY` puts the
+        # secret on the `java` process command line, where any other process on the runner can read
+        # it and any `-X` run echoes it. The plugin's own descriptor says so, naming the advisory:
+        #
+        #   nvdApiKey: "The parameters nvdApiKeyEnvironmentVariable or nvdApiServerId should be
+        #               used instead otherwise Maven debug logging could expose the API Key
+        #               (see GHSA-qqhq-8r2c-c3f5)"
+        #   nvdApiKeyEnvironmentVariable: "This is the recommended option to pass the API key in
+        #               CI builds."
+        #
+        # Worth recording how this was missed the first time: the earlier comment here reasoned
+        # carefully about this property's SPELLING (`nvdApiKey`, not the plan's `-Dnvd.api.key`) and
+        # read this very plugin.xml to settle it — and stopped one field short of the advisory
+        # sitting in the adjacent description. Reading the right file is not the same as reading it.
         #
         # The gate is failBuildOnCVSS=7 in pom.xml, not a flag here, so
         # `./mvnw org.owasp:dependency-check-maven:check` reproduces this verdict on a laptop —
@@ -277,7 +301,7 @@ jobs:
             echo "### Dependency-Check: skipped (no NVD_API_KEY)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          ./mvnw -q org.owasp:dependency-check-maven:check -DnvdApiKey="$NVD_API_KEY"
+          ./mvnw -q org.owasp:dependency-check-maven:check -DnvdApiKeyEnvironmentVariable=NVD_API_KEY
 
       - name: "Publish the Dependency-Check report"
         if: always()
@@ -376,13 +400,20 @@ jobs:
           LEDGER_PASSWORD: dev-only
         run: ./scripts/e2e/run-e2e.sh
 
+      # `--profile app` on BOTH, and it is load-bearing rather than cosmetic. Verified on Docker
+      # 28.3.0 / Compose v2.38.1: without it `down -v` leaves the profiled container `Up`, prints
+      # "Network ... Resource is still in use", and STILL EXITS 0 — a teardown reporting success
+      # while the container and network survive. On a reused runner the next `up -d --wait` then
+      # races a stale container holding 8080/9090. And the logs step would have been scoped to the
+      # four backing services, so the one step whose job is to explain an e2e failure would emit
+      # Postgres, Redis, Kafka and Keycloak and nothing from the application.
       - name: Compose logs on failure
         if: failure()
-        run: docker compose -f docker/docker-compose.yml logs --no-color --tail 200
+        run: docker compose -f docker/docker-compose.yml --profile app logs --no-color --tail 200
 
       - name: Stop the stack
         if: always()
-        run: docker compose -f docker/docker-compose.yml down -v
+        run: docker compose -f docker/docker-compose.yml --profile app down -v
 
   # Stage 10 (spec §12.1) — Gatling load simulation and JMH benchmarks.
   #
