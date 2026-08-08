@@ -87,8 +87,8 @@ jobs:
       - name: "Stage 7 — integration suite against real Postgres/Redis/Kafka"
         # Named for what it runs. Stages 8, 9, 10 and 12 (Python CLI, e2e, load, publish) are
         # specified in spec §12.1 and do NOT exist yet — the old "Stages 7-12" label claimed them.
-        # Stage 11 (security) is now partial: the `security` job below runs gitleaks; `detect-secrets`,
-        # Trivy and `dependency-check` are not wired.
+        # Stage 11 (security): the `security` job below runs gitleaks and now Trivy against the built
+        # image (issue #11). `detect-secrets` is deliberately not wired — see that job's summary step.
         run: ./mvnw -q verify -Pit
 
       - name: "Integration test count — a green build that ran nothing is not green"
@@ -153,19 +153,59 @@ jobs:
         # local dev anyway.
         run: echo "see workflow comment — no action needed, this is documentation"
 
-      - name: "Stage 11 — still incomplete"
+      # ---------------------------------------------------------------------------------------
+      # Issue #11. Trivy lives HERE, in `security`, rather than in a new `image` job — and that is a
+      # decision about whether the gate can bite, not about tidiness.
+      #
+      # `security` is one of the branch's REQUIRED status checks. A new job would not be, so a
+      # CRITICAL finding would have gone red in a check nobody is required to pass, which is the
+      # same defect as a scan that exits 0: visible, and unable to stop anything. This pipeline has
+      # already shipped that twice (the deleted stage 6, and the Sonar job before
+      # -Dsonar.qualitygate.wait=true). Adding a third was the thing to avoid.
+      #
+      # It cannot go in `unit`: that job runs on a runner with no Docker on purpose (ADR 0003), and
+      # build-image drives a Docker daemon build. gitleaks stays above this so the fast secret check
+      # still reports first.
+      - uses: actions/setup-java@v5
+        with: { distribution: corretto, java-version: '25', cache: maven }
+
+      - name: "Stage 11 — build the image, so there is something to scan"
+        # The honest excuse this replaces read "no image exists to scan". It was true when written
+        # and is false now. Note this does NOT publish: no registry, no credential, no
+        # packages:write — publishing is stage 12 and stays a separate decision, so a fork's build
+        # still passes.
+        run: ./mvnw -q spring-boot:build-image -DskipTests
+
+      - name: "Stage 11 — Trivy image scan"
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: tiny-ledger:0.1.0-SNAPSHOT
+          scan-type: image
+          severity: CRITICAL,HIGH
+          # THE GATE. Without exit-code the action reports and exits 0, which is a scan that cannot
+          # fail — see the comment above for the two this pipeline already shipped.
+          exit-code: '1'
+          # A deliberate trade, and it has a cost worth stating plainly: a CRITICAL with no
+          # available fix is not actionable, and leaving it red would make this job permanently red,
+          # which trains people to ignore it. THE CONSEQUENCE IS THAT THIS BUILD CAN BE GREEN WITH
+          # KNOWN-UNFIXABLE CRITICALS PRESENT IN THE IMAGE. That is accepted, not overlooked.
+          ignore-unfixed: true
+          format: table
+
+      - name: "Stage 11 — what is covered, and what is not"
         if: always()
         run: |
           {
-            echo "### Stage 11 (spec §12.1) — partial"
+            echo "### Stage 11 (spec §12.1)"
             echo "- gitleaks: above, every push."
+            echo "- Trivy: scans the built image for CRITICAL/HIGH, **exit-code 1**, so it FAILS this"
+            echo "  required check. \`ignore-unfixed: true\` means a known-unfixable critical does not"
+            echo "  fail the build — the build can be green with such a finding present."
             echo "- detect-secrets: not added. It covers the same class of finding as gitleaks; running"
             echo "  both without a documented reason (e.g. one catches something the other's ruleset"
             echo "  misses) is redundant scanning, not extra safety."
-            echo "- Trivy image scan: no image exists to scan. Stage 12 (publish) is unbuilt — building"
-            echo "  an image just to feed Trivy would be scope creep past this stage."
-            echo "- dependency-check: deferred. It's slow (fetches the full NVD feed) and needs its own"
-            echo "  suppression-file pass for false positives — not a drive-by addition to this job."
+            echo "- The image is BUILT and SCANNED, never PUBLISHED. Stage 12 stays a separate"
+            echo "  decision, so this job needs no registry credential and a fork's build passes."
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Stage 8 (spec §12.1) — the Python CLI's own gate. Deliberately needs no Docker: a
