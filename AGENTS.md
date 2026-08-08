@@ -147,6 +147,14 @@ with no secret, so a fork's build still passes.
 
 - Commit per logical change, with explicit pathspecs. **Never `git add -A`** — another agent may have
   uncommitted work in the tree.
+- **No tool attribution in commits or pull requests.** No `Co-Authored-By:` naming an assistant, no
+  "Generated with …" footer, no bot trailer. The commit author is the person who ran the work and is
+  accountable for it; a machine co-author on a public history is noise in `git log`, `git blame` and
+  `git shortlog`, and it implies a second party who cannot answer questions about the change.
+  **The record of how this repository was built lives in `docs/agentic-workflow.md`**, which is the
+  honest and searchable place for it — not scattered through 276 commit messages.
+  *Enforced for Claude Code by `.claude/settings.json`'s `attribution` block (both `commit` and `pr`
+  set to `""`). No gate enforces it for any other tool, so if you are one, this line is the rule.*
 - **Push freely to `origin`; that is how the heavy suite runs.** The remote is
   `github.com/ffroliva/tiny-ledger` and it is **PUBLIC** — corrected 2026-08-07, having said "private"
   since the first revision. Pushing a working branch is still the normal workflow, but it *is* a
