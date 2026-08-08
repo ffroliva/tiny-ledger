@@ -34,6 +34,22 @@
          `owner_repo` form — so the two do not match, which is exactly the trap. Read from
          `api/organizations/search?member=true` after the first attempt failed with
          "Organization key 'ffroliva' does not exist", rather than guessed a second time. -->
+    <!-- OVERRIDES spring-boot-dependencies 4.1.0, which manages postgresql.version at 42.7.11.
+         Found by the Trivy gate on its very first honest run (#11, CI 31229592166): CVE-2026-54291,
+         HIGH, status `fixed`, installed 42.7.11, fixed 42.7.12 — a pgjdbc man-in-the-middle via
+         com.ongres.scram/scram-client. Reported at two locations in the image (runner.jar and the
+         workspace lib), which is why the total read 2 for one CVE.
+
+         FIXED RATHER THAN SUPPRESSED, and that distinction is the whole value of the gate: it is
+         `fixed` upstream, so `ignore-unfixed: true` did NOT hide it, and an entry in
+         .github/owasp-suppressions.xml would have been the wrong answer to an available upgrade.
+         42.7.13 is the current release of the same patch line — taking 42.7.12, the literal minimum
+         that clears today's scan, would just invite a second bump.
+
+         The OS layer scanned clean in the same run (ubuntu 24.04, 0 findings), so this is the only
+         thing standing between the image and a green security job. -->
+    <postgresql.version>42.7.13</postgresql.version>
+
     <sonar.host.url>https://sonarcloud.io</sonar.host.url>
     <sonar.organization>ffroliva-github</sonar.organization>
     <sonar.projectKey>ffroliva_tiny-ledger</sonar.projectKey>
