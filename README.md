@@ -45,6 +45,10 @@ Postgres, Redis and Kafka, from one codebase.
 - [Quick start](#quick-start) — running in three commands
 - [If you are reviewing this](#if-you-are-reviewing-this) — where to look, by how long you have
 - [Two run modes](#two-run-modes)
+- **[Running with Docker](docs/docker.md)** — the `full` profile end to end: image, stack, token,
+  a real deposit, teardown. Verified commands, and the responses that look like faults but are not
+- **[Security material](docs/security-material.md)** — where keys and credentials live, and what
+  does not exist yet
 - [The engineering, briefly](#the-engineering-briefly)
 - [How this was built](#how-this-was-built)
 
@@ -136,6 +140,9 @@ docker compose -f docker/docker-compose.yml --profile app up -d
 The build is a separate step on purpose. The image is produced by **buildpacks**, not by a
 `Dockerfile` that Compose could build for you, so there is exactly one way to make it — see spec §12.
 If the tag is missing, `up` fails rather than quietly starting something else.
+
+**Full runbook: [`docs/docker.md`](docs/docker.md)** — getting a token, moving money, proving the
+Kafka hop landed, and a symptom→cause table for the things that look broken and are not.
 
 `--profile app` is what adds the application. A plain `up` still starts exactly the four backing
 services, which is what you want when you would rather run the app from your IDE:

@@ -1,0 +1,135 @@
+# OWASP Dependency-Check — spec §12.1 stage 11b, issue #11.
+#
+# ITS OWN WORKFLOW, AND NOT ON EVERY PUSH. That is a deliberate reversal of where this started, and
+# the reasoning is worth keeping because "add a scanner to CI" sounds unarguable until you measure it.
+#
+# Measured on this repository:
+#
+#     inside the required `security` job   did not finish in 80 minutes (run 31229974027)
+#     its own job, cold NVD cache          70 minutes            (run 31239298941)
+#     its own job, warm NVD cache          8 m 49 s              (run 31244633248)
+#
+# Even 8 minutes on every push buys almost nothing, because THE THING IT SCANS ONLY CHANGES WHEN
+# `pom.xml` CHANGES. A commit that edits a Java file has the identical dependency set as its parent,
+# so re-scanning it is spending runner minutes to re-derive a known answer. What DOES change daily is
+# the NVD feed — and that is what the nightly run is for.
+#
+# So the trigger set below covers both axes independently:
+#
+#   pull_request + push, paths: pom.xml   the dependency set changed -> scan it, before it merges
+#   schedule (nightly)                    the FEED changed -> re-scan an unchanged tree
+#   workflow_dispatch                     someone wants it now
+#
+# `paths:` is a native GitHub filter, so this needs no third-party action and nothing to maintain.
+#
+# WHY THIS JOB CANNOT SENSIBLY BE A REQUIRED CHECK, and it is a consequence of the above rather than
+# an opinion: a required check must report on every PR, and a path-filtered workflow deliberately does
+# not run on most of them. Required + path-filtered means every PR that does not touch `pom.xml` sits
+# forever on "Expected — waiting for status to be reported". If you want a blocking dependency gate,
+# GitHub's Dependabot alerts (now enabled on this repository) are the better instrument: they cost no
+# runner minutes, they email, and they match on exact package versions rather than CPE name strings.
+#
+# On the CPE point, measured rather than asserted: this scanner's first run produced 22 findings at
+# CVSS >= 7, of which one was a real, fixable upgrade. Others reached `kotlin-stdlib` through
+# `cpe:2.3:a:jetbrains:kotlin` and a repackaged JSON parser through `cpe:2.3:a:google:android_sdk` —
+# a 2008 Android SDK CVE. See `.github/owasp-suppressions.xml`, which records each acceptance with a
+# reason and an expiry date.
+name: depcheck
+
+on:
+  schedule:
+    # 03:17 UTC. Off the hour on purpose: GitHub queues a very large number of jobs at :00, and a
+    # scheduled run that is delayed an hour is a scheduled run nobody trusts.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths: ['pom.xml']
+  push:
+    branches: [main]
+    paths: ['pom.xml']
+
+concurrency:
+  group: depcheck-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  depcheck:
+    runs-on: ubuntu-latest
+    # A hung NVD feed should fail loudly, not burn the six-hour default.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      # NO `cache: maven` here, deliberately. dependency-check's data directory lives INSIDE
+      # ~/.m2/repository, so setup-java's cache would strictly contain the NVD store cached by the
+      # next step: two differently-aged copies of the same H2 database merged file-by-file on
+      # restore, and a real chance of saving a multi-gigabyte NVD database into the shared Maven
+      # cache that every other job downloads on every push for data none of them use.
+      - uses: actions/setup-java@v5
+        with: { distribution: corretto, java-version: '25' }
+
+      - name: Cache the NVD data directory
+        uses: actions/cache@v6
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          # A CONSTANT KEY WOULD MAKE THIS A ONE-SHOT SEED, NOT A CACHE. actions/cache skips its
+          # post-job save on an exact primary-key hit, so run 1 would save a day-0 database and every
+          # later run would restore that same frozen snapshot, apply an ever-widening delta, and throw
+          # it away — the work growing by a day of CVEs per day until the baseline falls outside the
+          # NVD modified-date window and every run pays the full cold cost forever. run_id in the key
+          # plus a restore-keys prefix means each run restores the newest snapshot and saves an
+          # updated one. Measured: 70 minutes cold, 8 m 49 s warm.
+          key: ${{ runner.os }}-owasp-nvd-${{ github.run_id }}
+          restore-keys: ${{ runner.os }}-owasp-nvd-
+
+      - name: "Stage 11b — OWASP Dependency-Check"
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        # Same posture as the Sonar step in ci.yml: SKIP LOUDLY when the credential is absent, never
+        # report a success it did not earn. A fork has no NVD_API_KEY and its build must still go
+        # green — the same principle that keeps a Grafana credential out of CI entirely.
+        #
+        # THE KEY IS PASSED BY ENVIRONMENT VARIABLE NAME, NOT AS A VALUE ON THE COMMAND LINE, and that
+        # is a security fix rather than a style choice. `-DnvdApiKey=$NVD_API_KEY` puts the secret on
+        # the `java` process command line, where any other process on the runner can read it and any
+        # `-X` run echoes it. The plugin's own descriptor says so, naming the advisory:
+        #
+        #   nvdApiKey: "The parameters nvdApiKeyEnvironmentVariable or nvdApiServerId should be used
+        #               instead otherwise Maven debug logging could expose the API Key
+        #               (see GHSA-qqhq-8r2c-c3f5)"
+        #   nvdApiKeyEnvironmentVariable: "This is the recommended option to pass the API key in CI
+        #               builds."
+        #
+        # The gate is failBuildOnCVSS=7 in pom.xml, not a flag here, so
+        # `./mvnw org.owasp:dependency-check-maven:check` reproduces this verdict on a laptop — this
+        # pipeline's stated rule for what a gate must be (§12.1's closing note).
+        run: |
+          if [ -z "$NVD_API_KEY" ]; then
+            echo "::warning::NVD_API_KEY is not set — Dependency-Check skipped, NOT passed"
+            echo "### Dependency-Check: skipped (no NVD_API_KEY)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          ./mvnw -q org.owasp:dependency-check-maven:check -DnvdApiKeyEnvironmentVariable=NVD_API_KEY
+
+      - name: "Publish the Dependency-Check report"
+        if: always()
+        uses: actions/upload-artifact@v7
+        with: { name: dependency-check-report, path: target/dependency-check-report.html, if-no-files-found: warn }
+
+      - name: "What this run covered"
+        if: always()
+        run: |
+          {
+            echo "### Dependency-Check (spec §12.1 stage 11b)"
+            echo "- Trigger: \`${{ github.event_name }}\`."
+            echo "- Scans the BUILD tree at **failBuildOnCVSS=7**, including **test-scope** dependencies"
+            echo "  (\`skipTestScope=false\`) — the only real gap it closes over Trivy, which scans the image."
+            echo "- Does NOT run on every push: the dependency set changes only when \`pom.xml\` does, and"
+            echo "  the NVD feed changes daily. Hence paths-filtered + nightly."
+            echo "- **Not a required check**, and cannot sensibly be one while path-filtered — see the"
+            echo "  comment at the top of this workflow. GitHub Dependabot alerts are the blocking"
+            echo "  instrument, and they are enabled on this repository."
+          } >> "$GITHUB_STEP_SUMMARY"
