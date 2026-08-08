@@ -23,7 +23,6 @@ E2E_MODE=${E2E_MODE:-image}
 # jar stays usable as a dependency (benchmarks/ compiles against it). The runnable,
 # repackaged jar is the one with the classifier.
 JAR=${JAR:-target/tiny-ledger-0.1.0-SNAPSHOT-exec.jar}
-APP_IMAGE=${APP_IMAGE:-tiny-ledger:0.1.0-SNAPSHOT}
 BASE_URL=${LEDGER_BASE_URL:-http://127.0.0.1:8080}
 APP_LOG=${APP_LOG:-app.log}
 READY_TIMEOUT=${READY_TIMEOUT:-120}
@@ -39,8 +38,13 @@ case "$E2E_MODE" in
     # Compose has no `build:` for this service on purpose (see docker-compose.yml), so a
     # missing image is not something `up` can repair. Say which command produces it rather
     # than letting compose fail with "pull access denied", which reads as a registry problem.
-    if ! docker image inspect "$APP_IMAGE" >/dev/null 2>&1; then
-      echo "::error::$APP_IMAGE not found — build it first: ./mvnw -q spring-boot:build-image -DskipTests" >&2
+    #
+    # The tag is a LITERAL, matching docker-compose.yml's `image:` exactly, and is deliberately
+    # not an overridable variable. An $APP_IMAGE knob would move only this check while compose
+    # still started the hardcoded tag — a guard that passes on one image while another runs is
+    # worse than no guard.
+    if ! docker image inspect tiny-ledger:0.1.0-SNAPSHOT >/dev/null 2>&1; then
+      echo "::error::tiny-ledger:0.1.0-SNAPSHOT not found — build it first: ./mvnw -q spring-boot:build-image -DskipTests" >&2
       exit 1
     fi
     ;;

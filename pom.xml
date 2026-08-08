@@ -50,6 +50,28 @@
          thing standing between the image and a green security job. -->
     <postgresql.version>42.7.13</postgresql.version>
 
+    <!-- OVERRIDES spring-boot-dependencies 4.1.0 (which manages tomcat.version at 11.0.22).
+         Surfaced by the first Dependency-Check run (#11, CI 31233407733), which failed with 22
+         CVEs at CVSS >= 7 across four libraries. This is the one with a clean, stable patch
+         upgrade, so it is taken:  11.0.22 -> 11.0.24.
+
+         THE OTHER THREE ARE DELIBERATELY NOT "FIXED", and the reasons differ:
+
+           netty-transport 4.2.15.Final  — next release is 5.0.0.Alpha2
+           kotlin-stdlib   2.3.21        — next release is 2.4.20-Beta2
+
+         Taking an alpha or a beta into a money path to quieten a scanner is a worse decision
+         than the finding it silences.
+
+           opentelemetry-semconv 1.41.1  — arrives transitively and is managed by NO Boot
+                                           property, so a <opentelemetry-semconv.version>
+                                           override would be SILENTLY IGNORED. It was written,
+                                           checked against Boot's BOM, found absent, and removed
+                                           rather than shipped as a line that does nothing.
+
+         The residue is RECORDED, not suppressed. See §12.1 stage 11b. -->
+    <tomcat.version>11.0.24</tomcat.version>
+
     <sonar.host.url>https://sonarcloud.io</sonar.host.url>
     <sonar.organization>ffroliva-github</sonar.organization>
     <sonar.projectKey>ffroliva_tiny-ledger</sonar.projectKey>

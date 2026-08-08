@@ -180,7 +180,10 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: tiny-ledger:0.1.0-SNAPSHOT
-          scan-type: image
+          # Only inputs that DIFFER from the action's defaults are set here. `scan-type: image` and
+          # `format: table` are already the defaults (action.yaml@v0.36.0), so stating them adds
+          # lines that look like decisions and are not. `severity` (default: everything),
+          # `exit-code` (default: none) and `ignore-unfixed` (default: false) are real choices.
           severity: CRITICAL,HIGH
           # THE GATE. Without exit-code the action reports and exits 0, which is a scan that cannot
           # fail — see the comment above for the two this pipeline already shipped.
@@ -190,7 +193,6 @@ jobs:
           # which trains people to ignore it. THE CONSEQUENCE IS THAT THIS BUILD CAN BE GREEN WITH
           # KNOWN-UNFIXABLE CRITICALS PRESENT IN THE IMAGE. That is accepted, not overlooked.
           ignore-unfixed: true
-          format: table
 
       - name: "Stage 11 — what is covered, and what is not"
         if: always()
