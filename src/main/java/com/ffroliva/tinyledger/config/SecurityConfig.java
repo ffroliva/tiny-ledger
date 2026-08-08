@@ -13,8 +13,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer;
+import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer.HstsConfig;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
@@ -109,11 +112,51 @@ public class SecurityConfig {
      * authentication appears anywhere, <em>delete this annotation</em> and answer the rule again. The
      * {@code sessionManagement} line below is the tripwire the class javadoc already names.
      */
+    /**
+     * <strong>HSTS off, and this exists because five documents said it already was.</strong>
+     *
+     * <p>{@code docker/traefik/dynamic.yml}, {@code .zap/rules.tsv}, {@code docs/urls-and-tls.md},
+     * {@code docs/pitfalls.md} and {@code docs/security-material.md} all recorded HSTS as deliberately not
+     * sent, with a specific and correct reason: the {@code app} router is a catch-all, so a browser dialling
+     * {@code https://localhost} — which the README invites — receives a pin on the <em>bare host</em>. HSTS is
+     * host-scoped and PORT-INDEPENDENT, so a one-year pin on {@code localhost} force-upgrades
+     * {@code http://localhost:3000} and every other local development server on that machine, failing with
+     * {@code ERR_SSL_PROTOCOL_ERROR} and clearable only through {@code chrome://net-internals/#hsts}.
+     *
+     * <p><strong>Nothing implemented it.</strong> The reasoning was written against Traefik, where the header
+     * was never configured — but this application sends it itself. {@code SecurityConfig} carried no
+     * {@code headers} configuration at all, so Spring Security's default {@code HstsHeaderWriter} applied, and
+     * {@code application.properties} sets {@code server.forward-headers-strategy=native} with Traefik as an
+     * internal proxy: {@code RemoteIpValve} marks proxied requests secure, {@code isSecure()} returns true, and
+     * the writer emits {@code max-age=31536000 ; includeSubDomains}. The documented hazard was shipping.
+     *
+     * <p><strong>Measured, from the repository's own scans</strong> (run {@code 31278543144}): ZAP rule 10035
+     * appears as {@code PASS} in both the baseline and the API scan. It is dispositioned {@code IGNORE} in
+     * {@code .zap/rules.tsv} on the premise that the header is <em>absent</em> — so had it been absent the rule
+     * would have fired and landed in the IGNORE bucket. The baseline reported {@code IGNORE: 1} (that is
+     * 10049) and the API scan, whose rules file carries no dispositions at all, reported {@code WARN-NEW: 0}.
+     * The rule never fired in either. The header was present, and the disposition was armed to silence the one
+     * alarm that would have said so.
+     *
+     * <p>Applied to <em>all three</em> chains rather than only the browser-reachable ones: the claim those five
+     * documents make is unconditional, and a chain that quietly kept the default would make it false again the
+     * first time something reached it. {@code SecurityConfigTest#hstsIsNotSentOnASecureRequest} is the gate,
+     * and it asserts a secure request specifically — MockMvc requests are insecure by default, where the writer
+     * never runs and the assertion would pass with this configuration deleted.
+     *
+     * <p>A real deployment on a real domain <em>must</em> send HSTS. That belongs on its terminator, with the
+     * hostname it actually serves — not here, and not on a throwaway certificate for a name nobody resolves.
+     */
+    private static Customizer<HeadersConfigurer<HttpSecurity>> hstsOff() {
+        return headers -> headers.httpStrictTransportSecurity(HstsConfig::disable);
+    }
+
     @SuppressWarnings("java:S4502")
     @Bean
     @Order(0)
     SecurityFilterChain managementChain(HttpSecurity http) {
         return http.securityMatcher(EndpointRequest.toAnyEndpoint())
+                .headers(hstsOff())
                 .csrf(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -134,7 +177,8 @@ public class SecurityConfig {
             RateLimitProperties rateLimitProperties,
             CallerPrincipal callerPrincipal,
             ObjectMapper mapper) {
-        return http.csrf(csrf -> csrf.disable())
+        return http.headers(hstsOff())
+                .csrf(csrf -> csrf.disable())
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
@@ -179,7 +223,8 @@ public class SecurityConfig {
             RateLimitProperties rateLimitProperties,
             CallerPrincipal callerPrincipal,
             ObjectMapper mapper) {
-        return http.csrf(csrf -> csrf.disable())
+        return http.headers(hstsOff())
+                .csrf(csrf -> csrf.disable())
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
