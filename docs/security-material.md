@@ -164,8 +164,10 @@ would mint tokens whose `iss` is derived from whatever the caller typed there, a
 *different* issuer from the one the application trusts.
 
 **That made it a rename, not a toggle**, and the issuer now reads `https://auth.localhost/realms/tiny-ledger`
-in every one of the eight places that spell it. They move together or nothing authenticates, and the
-failure is a flat `401` that says nothing about which side is wrong.
+in every one of the **nine operational files** that spell it — `docs/docker.md` lists them and gives
+the one-line command that regenerates the list, because a bare count rots as the string spreads and
+this one already had (it said *eight*). They move together or nothing authenticates, and the failure
+is a flat `401` that says nothing about which side is wrong.
 
 **The port is absent from that string on purpose.** Traefik publishes **443**, the scheme default,
 so it drops out of the URL — which is what a deployment's issuer looks like and keeps a port number
