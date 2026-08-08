@@ -17,6 +17,13 @@ dependencies = [
   "pydantic>=2.6",
   "pydantic-settings>=2.2",
   "platformdirs>=4.2",
+  # DECLARED, not inherited. `scripts/e2e/https-check.py` imports certifi directly to build the
+  # PUBLIC trust store for its differential TLS control — the half that proves verification is ON
+  # rather than merely that a request succeeded. It resolves today only because httpx happens to
+  # pull it in, so an httpx that vendored its own bundle would break the one check whose whole job
+  # is that a TLS regression cannot pass unnoticed, with a ModuleNotFoundError at the readiness
+  # gate. An import that load-bearing does not belong in someone else's dependency graph.
+  "certifi>=2024.2.2",
 ]
 
 [project.scripts]

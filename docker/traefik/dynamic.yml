@@ -1,0 +1,116 @@
+# Traefik DYNAMIC configuration — the certificate, the TLS floor, and the one route.
+#
+# The certificate is produced by `scripts/tls/gen-dev-ca.sh` into `docker/tls/`, which is
+# gitignored: this repository is PUBLIC and holds the names and shapes of secrets, never their
+# values (docs/security-material.md). Nothing here is committed except the paths.
+tls:
+  stores:
+    default:
+      # defaultCertificate, NOT a `tls.certificates:` list entry, and this cost a debugging session
+      # worth writing down.
+      #
+      # Traefik selects a certificate by SNI. `scripts/e2e/run-e2e.sh` is obliged to dial
+      # 127.0.0.1 (localhost resolves to ::1 first on the Windows development machine and the IPv6
+      # path does not route), and RFC 6066 forbids an IP literal in SNI — so the handshake carries
+      # no server name at all, nothing in a certificates list can match it, and Traefik falls back
+      # to its own built-in cert. Measured, with a `certificates:` list configured correctly and
+      # the files verified present inside the container:
+      #
+      #   subject=CN=TRAEFIK DEFAULT CERT
+      #   issuer=CN=TRAEFIK DEFAULT CERT
+      #   [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate
+      #
+      # That is the exact failure the TLS control in scripts/e2e/https-check.py exists to catch:
+      # every request still succeeded end to end, over TLS, against a certificate that proves
+      # nothing. Without the control it would have shipped as "HTTPS works".
+      #
+      # The default certificate is served whenever SNI matches nothing, which covers both the IP
+      # dial and any hostname. One entry, both cases.
+      defaultCertificate:
+        certFile: /etc/traefik/tls/server.crt
+        keyFile: /etc/traefik/tls/server.key
+  options:
+    # `default` is the name Traefik applies to any router that names no option set, so this is the
+    # floor for everything. TLS 1.2 rather than 1.3-only: 1.3 alone would be stricter than any real
+    # deployment could adopt today, and a floor nobody can meet gets relaxed rather than kept.
+    default:
+      minVersion: VersionTLS12
+
+http:
+  routers:
+    # Keycloak, and it is declared FIRST because it is the specific case. Traefik orders routers by
+    # rule length unless told otherwise, and `Host(...)` is longer than `PathPrefix(`/`)`, so this
+    # already wins — but `priority` is set explicitly rather than resting on that, because a rule
+    # that silently stopped matching would send every token request to the ledger and produce a
+    # `404` where a `401` was expected.
+    auth:
+      rule: "Host(`auth.localhost`)"
+      entryPoints: [websecure]
+      middlewares: [security-headers]
+      service: keycloak
+      priority: 100
+      tls: {}
+
+    app:
+      # PathPrefix, not Host. run-e2e.sh is obliged to dial 127.0.0.1 (localhost resolves to ::1
+      # first on the Windows development machine and the IPv6 path does not route), while a human
+      # and the README will type localhost — a Host rule would have to enumerate both spellings and
+      # would still miss the next one. There is exactly one backend here; matching everything is
+      # not a shortcut, it is the truth.
+      rule: "PathPrefix(`/`)"
+      entryPoints: [websecure]
+      middlewares: [security-headers]
+      service: app
+      # The catch-all, and deliberately left as one. `https://127.0.0.1` has to keep reaching the
+      # ledger: the ZAP baseline targets it, and an IP literal carries no SNI and no useful Host
+      # header, so a `Host(`app.localhost`)` rule here would answer it with a 404. No `priority`
+      # -- Traefik orders by rule length and this is the shortest rule in the file, so it already
+      # loses to every specific one. Only the router that must WIN states a priority.
+      tls: {}
+
+  middlewares:
+    # These belong on the terminator rather than in the application, which is the whole reason a
+    # terminator exists: HSTS is a statement about the ORIGIN's transport, and the application
+    # behind this proxy does not know whether it is being served over TLS.
+    #
+    # This is also what keeps the OWASP ZAP baseline honest. Those three headers are most of what a
+    # baseline scan reports against a plain JSON API, and configuring them here means the first ZAP
+    # report is about this application rather than about a missing default.
+    security-headers:
+      headers:
+        # HSTS IS DELIBERATELY NOT SET, and that is a correction rather than an omission.
+        #
+        # An earlier revision sent `max-age=31536000` from this middleware. The `app` router is a
+        # catch-all, so a browser that dialled `https://localhost` — which the README invites — would
+        # receive an HSTS pin for the bare host `localhost`. HSTS is host-scoped and PORT-INDEPENDENT,
+        # so that pin force-upgrades `http://localhost:3000`, `http://localhost:8080` and every other
+        # local development server on that machine for a year, failing with ERR_SSL_PROTOCOL_ERROR
+        # and clearable only through chrome://net-internals/#hsts. Breaking a developer's unrelated
+        # projects is a steep price for a header on a throwaway certificate.
+        #
+        # The reasoning that survived the previous revision worried about `includeSubDomains`
+        # spreading the pin across sibling `.localhost` names and missed the bare-host case, which is
+        # strictly worse. A real deployment on a real domain sets `stsSeconds` and
+        # `stsIncludeSubdomains` and means it; `docs/security.md` records that as a named gap.
+        #
+        # These two are unconditionally correct for a JSON API and cost nothing:
+        contentTypeNosniff: true
+        frameDeny: true
+
+  services:
+    keycloak:
+      loadBalancer:
+        # PLAIN HTTP in-network, which is the whole point of terminating at the edge. Keycloak is
+        # told about the outside world by KC_HOSTNAME and KC_PROXY_HEADERS (docker-compose.yml);
+        # without the second it would build URLs from this internal request and `iss` would drift
+        # back to an http:// value that nothing accepts.
+        servers:
+          - url: "http://keycloak:8080"
+
+    app:
+      loadBalancer:
+        # By SERVICE NAME on the Compose network. Issue #11 made the application a Compose service,
+        # which is precisely what removed the `host.docker.internal` seam this route would otherwise
+        # have needed. 8080 is the CONTAINER port; the host no longer publishes it at all.
+        servers:
+          - url: "http://app:8080"

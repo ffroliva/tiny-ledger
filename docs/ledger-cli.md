@@ -158,7 +158,9 @@ before falling back to a fresh password grant. A stale or corrupt cache file is 
 Delete that directory if you want to force a clean grant.
 
 **The issuer must match what the app validates.** The default is
-`http://localhost:8081/realms/tiny-ledger`, mirroring the app's own `LEDGER_ISSUER_URI`. A token
+`https://auth.localhost/realms/tiny-ledger`, mirroring the app's own `LEDGER_ISSUER_URI` — Keycloak
+is behind Traefik since TLS landed, so this client speaks HTTPS to the identity provider as well as
+to the API and needs the dev CA (`SSL_CERT_FILE`, which `scripts/e2e/run-e2e.sh` exports). A token
 minted from a different host string is rejected with `401` even though it is otherwise valid — the
 single most common `full`-profile confusion, and `docker.md`'s symptom table carries it too.
 
@@ -299,7 +301,8 @@ cd ledger-cli && uv run pytest      # 52 passed, 7 deselected (the e2e marker)
 |---|---|---|
 | `httpx.ConnectError: [Errno 111] Connection refused`, as a traceback | nothing is listening on `--base-url` | start the app. Takes ~2 s: `GET` is idempotent, so the transport retries three times before giving up |
 | `RuntimeError: the full profile needs --token, or --user/--password …` | `--profile full` with no credentials | pass `--user`/`--password`, or `LEDGER_USERNAME`/`LEDGER_PASSWORD`, or `--token` |
-| Every request `401` with a valid-looking token | issuer mismatch | mint against the same host string the app validates — `--issuer-uri http://localhost:8081/realms/tiny-ledger`. **Never disable issuer validation** |
+| Every request `401` with a valid-looking token | issuer mismatch | mint against the same host string the app validates — `--issuer-uri https://auth.localhost/realms/tiny-ledger`. **Never disable issuer validation** |
+| `CERTIFICATE_VERIFY_FAILED` talking to Keycloak | the dev CA is not trusted by this client | `export SSL_CERT_FILE=$PWD/docker/tls/ca.crt`, or run through `scripts/e2e/run-e2e.sh`, which does it for you |
 | `403` on a write that should work | the user's role, or ownership | `carol` is read-only; `dave` writes nothing; `mallory` may not touch another owner's account. That is the model working (§6.4) |
 | `501` from `audit events` / `audit entries` | you are on `standalone` | those are `full`-only by design (§7) |
 | `audit events --account ACC-001` cannot resolve the name | `dave` owns no accounts, so there is nothing to resolve against | pass the `accountUid`; `audit entries` lists them |
