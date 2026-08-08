@@ -1,0 +1,45 @@
+# Traefik STATIC configuration — read once at startup. The routes live next door in dynamic.yml.
+#
+# THE DOCKER PROVIDER IS DELIBERATELY NOT USED. Every Traefik tutorial mounts
+# /var/run/docker.sock into the container so routes can be discovered from service labels. That
+# socket is root-equivalent on the host: anything that can talk to it can start a privileged
+# container and mount the filesystem. Trading that away to avoid writing eight lines of routing
+# by hand is a bad trade in any repository, and an absurd one in the repository whose whole point
+# this week is not to widen a trust boundary while adding TLS.
+#
+# The file provider costs one router and one service, declared explicitly, and Traefik needs no
+# access to anything but its own configuration and its certificate.
+entryPoints:
+  # Plaintext exists ONLY to redirect. A caller who types http:// gets moved rather than served,
+  # which is also the shape the OWASP ZAP baseline checks for.
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+    # No watch: the file is bind-mounted read-only and never edited under a running stack.
+    # Regenerating certificates under a running Traefik is what `gen-dev-ca.sh`'s idempotence
+    # exists to prevent.
+    watch: false
+
+# The dashboard and the API are OFF (they default off; this says so out loud). An unauthenticated
+# dashboard on the edge of a ledger would be a finding in its own right, and there is nothing here
+# a human needs to click.
+api:
+  dashboard: false
+  insecure: false
+
+log:
+  level: INFO
+# Access logs to stdout, so `docker compose logs traefik` answers "did the request reach the
+# proxy at all" — the first question every routing failure asks.
+accessLog: {}

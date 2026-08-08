@@ -1,0 +1,56 @@
+# Traefik DYNAMIC configuration — the certificate, the TLS floor, and the one route.
+#
+# The certificate is produced by `scripts/tls/gen-dev-ca.sh` into `docker/tls/`, which is
+# gitignored: this repository is PUBLIC and holds the names and shapes of secrets, never their
+# values (docs/security-material.md). Nothing here is committed except the paths.
+tls:
+  certificates:
+    - certFile: /etc/traefik/tls/server.crt
+      keyFile: /etc/traefik/tls/server.key
+  options:
+    # `default` is the name Traefik applies to any router that names no option set, so this is the
+    # floor for everything. TLS 1.2 rather than 1.3-only: 1.3 alone would be stricter than any real
+    # deployment could adopt today, and a floor nobody can meet gets relaxed rather than kept.
+    default:
+      minVersion: VersionTLS12
+
+http:
+  routers:
+    app:
+      # PathPrefix, not Host. run-e2e.sh is obliged to dial 127.0.0.1 (localhost resolves to ::1
+      # first on the Windows development machine and the IPv6 path does not route), while a human
+      # and the README will type localhost — a Host rule would have to enumerate both spellings and
+      # would still miss the next one. There is exactly one backend here; matching everything is
+      # not a shortcut, it is the truth.
+      rule: "PathPrefix(`/`)"
+      entryPoints: [websecure]
+      middlewares: [security-headers]
+      service: app
+      tls: {}
+
+  middlewares:
+    # These belong on the terminator rather than in the application, which is the whole reason a
+    # terminator exists: HSTS is a statement about the ORIGIN's transport, and the application
+    # behind this proxy does not know whether it is being served over TLS.
+    #
+    # This is also what keeps the OWASP ZAP baseline honest. Those three headers are most of what a
+    # baseline scan reports against a plain JSON API, and configuring them here means the first ZAP
+    # report is about this application rather than about a missing default.
+    security-headers:
+      headers:
+        # One year, which is the minimum every preload list requires. NOT preloaded and NOT
+        # includeSubDomains: this certificate is a throwaway for `localhost`, and a browser that
+        # pinned HSTS for every localhost subdomain would carry that pin into unrelated projects on
+        # the same developer machine. A real deployment on a real domain sets both.
+        stsSeconds: 31536000
+        contentTypeNosniff: true
+        frameDeny: true
+
+  services:
+    app:
+      loadBalancer:
+        # By SERVICE NAME on the Compose network. Issue #11 made the application a Compose service,
+        # which is precisely what removed the `host.docker.internal` seam this route would otherwise
+        # have needed. 8080 is the CONTAINER port; the host no longer publishes it at all.
+        servers:
+          - url: "http://app:8080"
