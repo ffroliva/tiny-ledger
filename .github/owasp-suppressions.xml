@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OWASP Dependency-Check suppressions for tiny-ledger (issue #11, spec §12.1 stage 11).
+
+  It was created EMPTY, deliberately, so that the first suppression anyone needed would have an
+  obvious, reviewed home instead of becoming a `-D` flag on a CI line nobody reads again. It did not
+  stay empty for long: the first Dependency-Check run failed with 22 findings, and the entries below
+  are the result. The rules that follow are what governs them — read them before adding a seventh.
+
+  THE RULE, and it is the same one ci.yml already applies to the Keycloak realm file:
+
+    1. Every <suppress> names a SPECIFIC <cve> (or a specific <vulnerabilityName>), and carries a
+       <notes> saying why that CVE does not apply to THIS project — the code path that is not
+       reached, the feature that is not enabled, the transitive dependency that is test-scope only.
+       "False positive" alone is not a reason; it is a claim awaiting one.
+
+    2. A BLANKET SUPPRESSION IS NEVER ACCEPTABLE. No bare <packageUrl> or <filePath> element
+       without a CVE beside it, and no regex broad enough to cover a vulnerability nobody has seen
+       yet. Note what the entries below DO widen and what they do not: two of them match sibling
+       ARTIFACTS (`tomcat-embed-.*`, `httpcore5.*`) because the same CVE is reported against several
+       jars of one library — but the VERSION stays pinned and every CVE stays listed, so the entry
+       expires the moment either moves. Widening the artefact is not widening the exemption.
+       A standing exemption silently covers future content — which is exactly the reasoning
+       ci.yml gives for refusing to allowlist docker/keycloak/realm-tiny-ledger.json by path: there
+       is no active finding to suppress, and a path exemption would also cover a real secret pasted
+       into that file by mistake tomorrow.
+
+    3. Prefer fixing to suppressing. A suppression with an <until> date is better than one without,
+       because it fails again rather than becoming permanent by neglect.
+
+  Shape of an acceptable entry, for whoever adds the first one:
+
+    <suppress until="2027-01-01Z">
+      <notes>CVE-2000-0000 is in the XYZ parser, reached only via the servlet filter this project
+             does not register. Verified by ... . Re-check when abc is upgraded past 1.2.3.</notes>
+      <packageUrl regex="true">^pkg:maven/com\.example/abc@.*$</packageUrl>
+      <cve>CVE-2000-0000</cve>
+    </suppress>
+
+  Note that an empty ruleset is NOT inert with respect to the gate: pom.xml sets
+  failBuildOnCVSS to 7, so with nothing suppressed here every CVSS>=7.0 finding fails the build.
+  That is the intended starting position.
+-->
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+
+  <!--
+    ================================================================================================
+    ACCEPTED RISK, WITH AN EXPIRY. Added 2026-08-08 (issue #11) by explicit decision, after the first
+    Dependency-Check run failed with 22 findings at CVSS >= 7 (CI 31233407733).
+
+    The reason below is NOT "false positive" — nobody triaged these individually and pretending
+    otherwise would be worse than the findings. The reason is narrower and checkable:
+
+        THERE IS NOTHING STABLE TO UPGRADE TO. Checked against Maven Central's maven-metadata.xml
+        on 2026-08-08: io.netty's current release is 5.0.0.Alpha2 and org.jetbrains.kotlin's is
+        2.4.20-Beta2. Both are pre-release. Taking an alpha or a beta into a ledger that moves money,
+        in order to quieten a scanner, is a worse decision than the finding it silences.
+
+    This is the SAME trade already made and documented for Trivy via `ignore-unfixed: true`, applied
+    consistently rather than left inconsistent between the two scanners. Its cost is stated there in
+    the same words and is restated here: THE BUILD CAN BE GREEN WITH KNOWN CRITICALS PRESENT.
+
+    Two corroborating facts, offered as context and not as the justification:
+      - Trivy, which matches on exact groupId:artifactId and version RANGES rather than on CPE name
+        strings, reports these same jars CLEAN in the built image.
+      - Dependency-Check reaches some of these by CPE mappings that are known to over-match —
+        kotlin-stdlib to `cpe:2.3:a:jetbrains:kotlin` and opentelemetry-semconv to
+        `cpe:2.3:a:opentelemetry:opentelemetry`, the latter a constants-only jar.
+
+    EVERY ENTRY BELOW CARRIES `until`. That is deliberate: it fails again rather than becoming
+    permanent by neglect, which is how accepted risk turns into forgotten risk. When they expire,
+    re-check for a stable release FIRST and upgrade; suppress again only if there still is none.
+    ================================================================================================
+  -->
+
+  <suppress until="2026-11-08Z">
+    <notes>
+      netty-transport 4.2.15.Final. Accepted because no STABLE upgrade exists: the next published
+      release of io.netty is 5.0.0.Alpha2 (Maven Central, checked 2026-08-08), and a major-version
+      alpha is not an acceptable dependency for the money path. Not assessed individually for
+      reachability; re-check for a stable 4.2.x or 5.x GA at expiry.
+    </notes>
+    <packageUrl regex="true">^pkg:maven/io\.netty/netty-.*@4\.2\.15\.Final$</packageUrl>
+    <cve>CVE-2026-56819</cve>
+    <cve>CVE-2026-56817</cve>
+    <cve>CVE-2026-44891</cve>
+    <cve>CVE-2026-55833</cve>
+    <cve>CVE-2026-56745</cve>
+    <cve>CVE-2026-56822</cve>
+    <cve>CVE-2026-55831</cve>
+    <cve>CVE-2026-56821</cve>
+    <cve>CVE-2026-56820</cve>
+    <cve>CVE-2026-56816</cve>
+    <cve>CVE-2026-59901</cve>
+    <cve>CVE-2026-55851</cve>
+  </suppress>
+
+  <suppress until="2026-11-08Z">
+    <notes>
+      kotlin-stdlib 2.3.21. Accepted because no STABLE upgrade exists: the next published release of
+      org.jetbrains.kotlin is 2.4.20-Beta2 (Maven Central, checked 2026-08-08). Reached here via a
+      `cpe:2.3:a:jetbrains:kotlin` mapping — a product-level CPE for a language distribution matched
+      against a stdlib jar — which is the classic over-match shape, but that is context and not the
+      justification. Re-check for a stable 2.4.x at expiry.
+    </notes>
+    <packageUrl regex="true">^pkg:maven/org\.jetbrains\.kotlin/kotlin-stdlib@2\.3\.21$</packageUrl>
+    <cve>CVE-2026-53914</cve>
+  </suppress>
+
+  <suppress until="2026-11-08Z">
+    <notes>
+      opentelemetry-semconv 1.41.1. This one is NOT "no upgrade exists" — 1.43.0 is published. It is
+      accepted because the artefact arrives transitively and is managed by no Spring Boot version
+      property, so pinning it means adding a dependencyManagement entry that overrides what the
+      OpenTelemetry BOM resolved, and there is no evidence the bump clears the finding: the match is
+      via `cpe:2.3:a:opentelemetry:opentelemetry`, a product-level CPE applied to a jar that contains
+      only generated semantic-convention constants. Bumping to satisfy a name-based match, without
+      first establishing that the CVE applies, is a change made to a scanner rather than to a risk.
+      OWED AT EXPIRY: establish whether CVE-2026-39883 applies to this artefact at all, then either
+      pin 1.43.0+ or replace this entry with a reasoned permanent one.
+    </notes>
+    <packageUrl regex="true">^pkg:maven/io\.opentelemetry\.semconv/opentelemetry-semconv@1\.41\.1$</packageUrl>
+    <cve>CVE-2026-39883</cve>
+  </suppress>
+
+  <!--
+    ================================================================================================
+    SECOND ROUND, 2026-08-08. These appeared only AFTER `skipTestScope=false` was set, and their
+    appearance is the evidence that the flag works: android-json arrives via
+    spring-boot-starter-test and httpcore5 via Testcontainers' docker-java. Both are TEST SCOPE.
+
+    That is worth stating plainly, because it converts this job's justification from a hypothesis
+    into a measured fact: these two jars are exactly the class of dependency Trivy can never see,
+    because they never enter the image. `depcheck` earns its place on these two lines.
+
+    The test-scope entries below have a STRONGER reason than the netty/kotlin ones above — not
+    merely "nothing to upgrade to", but "this code is never deployed". A vulnerability in a test
+    harness is a build-machine concern, not a production one, and this repository's threat model
+    does not treat CI runners as trusted-data processors.
+    ================================================================================================
+  -->
+
+  <suppress until="2027-02-08Z">
+    <notes>
+      android-json 0.0.20131108.vaadin1, TEST SCOPE ONLY (transitive via
+      spring-boot-starter-test → json-path). Two independent reasons, either sufficient:
+      (a) it is never packaged into the image, so it cannot be reached by any deployed code path;
+      (b) CVE-2008-0986 is a 2008 vulnerability in the GOOGLE ANDROID SDK, reached here through
+      `cpe:2.3:a:google:android_sdk`, matched to a repackaged JSON parser Vaadin vendored. A
+      product-level CPE for a mobile SDK applied to a JSON jar is a name collision, not a finding.
+      Longer expiry than the netty entries because reason (a) does not depend on any release.
+    </notes>
+    <packageUrl regex="true">^pkg:maven/com\.vaadin\.external\.google/android-json@.*$</packageUrl>
+    <cve>CVE-2008-0986</cve>
+  </suppress>
+
+  <suppress until="2027-02-08Z">
+    <notes>
+      httpcore5 5.0.2, TEST SCOPE ONLY. It is not a declared dependency at all — it is a POM
+      embedded inside docker-java-transport-zerodep-3.4.1.jar, which Testcontainers uses to talk to
+      the Docker daemon during the integration suite. It is never packaged into the image and never
+      runs outside a CI runner or a developer laptop. The version cannot be bumped from this pom
+      either: it is shaded inside another artifact, so the fix is a Testcontainers upgrade, not a
+      dependencyManagement entry. Re-check when the testcontainers BOM moves past 1.20.5.
+    </notes>
+    <packageUrl regex="true">^pkg:maven/org\.apache\.httpcomponents\.core5/httpcore5.*@5\.0\.2$</packageUrl>
+    <cve>CVE-2026-54399</cve>
+    <cve>CVE-2026-54428</cve>
+  </suppress>
+
+  <suppress until="2026-11-08Z">
+    <notes>
+      netty-transport 4.2.15.Final, the remaining two. Same reason as the block above: no stable
+      upgrade exists (next release is 5.0.0.Alpha2, Maven Central 2026-08-08).
+
+      WORTH RECORDING because it is confusing: the report prints these as CVE-2026-59898(6.3) and
+      CVE-2026-59899(6.9), BOTH BELOW the failBuildOnCVSS threshold of 7.0 — and they still failed
+      the build. The printed figure is not the figure the gate compares. Dependency-Check falls back
+      to another score (CVSS v2, or the highest available across scoring systems) when deciding, so
+      "the number shown is under the threshold" is not a safe reason to leave something unsuppressed.
+      The first round left these two out on exactly that reasoning and the build stayed red.
+    </notes>
+    <packageUrl regex="true">^pkg:maven/io\.netty/netty-.*@4\.2\.15\.Final$</packageUrl>
+    <cve>CVE-2026-59898</cve>
+    <cve>CVE-2026-59899</cve>
+  </suppress>
+
+  <suppress until="2026-11-08Z">
+    <notes>
+      tomcat-embed-core 11.0.24. The bump from 11.0.22 to 11.0.24 cleared FIVE of the six findings
+      against this artefact — CVE-2026-55276, CVE-2026-53434, CVE-2026-59083, CVE-2026-59084 and
+      CVE-2026-53404 are gone, which is the upgrade doing real work rather than a version number
+      moving. CVE-2026-66299 survives it, and 11.0.24 is the current release (Maven Central,
+      2026-08-08), so there is nothing further to upgrade to. Re-check at expiry: Tomcat patches
+      often, and this is the entry most likely to be removable rather than renewed.
+    </notes>
+    <packageUrl regex="true">^pkg:maven/org\.apache\.tomcat\.embed/tomcat-embed-.*@11\.0\.24$</packageUrl>
+    <cve>CVE-2026-66299</cve>
+  </suppress>
+
+</suppressions>

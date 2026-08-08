@@ -1,11 +1,23 @@
 #!/usr/bin/env bash
-# Start the built jar under the `full` profile against a running Compose stack, run
+# Start the application under the `full` profile against a running Compose stack, run
 # the e2e marker, and tear down. Always dumps the application log: a failed e2e run
 # whose cause sits in a log nobody printed costs more than the run itself.
 #
 # Expects `docker compose -f docker/docker-compose.yml up -d --wait` to have brought
 # up Postgres, Redis, Kafka and Keycloak already. Run from the repository root.
 set -euo pipefail
+
+# Issue #11. The artefact under test is now the IMAGE, not a jar on the host — which is
+# the point of the issue: what CI exercises should be what would be deployed.
+#
+#   E2E_MODE=image   (default) the tiny-ledger image as a Compose service
+#   E2E_MODE=jar               the host jar, exactly as before
+#
+# The jar path is KEPT rather than deleted. Running the jar directly is still a
+# supported way to use this project (README, spec §1.5), and deleting the only thing
+# that ever exercised it would be silent coverage loss — the failure mode would be a
+# broken `java -jar` nobody notices until a human tries it.
+E2E_MODE=${E2E_MODE:-image}
 
 # -exec, because the root pom gives spring-boot-maven-plugin a classifier so the plain
 # jar stays usable as a dependency (benchmarks/ compiles against it). The runnable,
@@ -15,10 +27,32 @@ BASE_URL=${LEDGER_BASE_URL:-http://127.0.0.1:8080}
 APP_LOG=${APP_LOG:-app.log}
 READY_TIMEOUT=${READY_TIMEOUT:-120}
 
-if [ ! -f "$JAR" ]; then
-  echo "::error::$JAR not found — build it first: ./mvnw -q -DskipTests package" >&2
-  exit 1
-fi
+case "$E2E_MODE" in
+  jar)
+    if [ ! -f "$JAR" ]; then
+      echo "::error::$JAR not found — build it first: ./mvnw -q -DskipTests package" >&2
+      exit 1
+    fi
+    ;;
+  image)
+    # Compose has no `build:` for this service on purpose (see docker-compose.yml), so a
+    # missing image is not something `up` can repair. Say which command produces it rather
+    # than letting compose fail with "pull access denied", which reads as a registry problem.
+    #
+    # The tag is a LITERAL, matching docker-compose.yml's `image:` exactly, and is deliberately
+    # not an overridable variable. An $APP_IMAGE knob would move only this check while compose
+    # still started the hardcoded tag — a guard that passes on one image while another runs is
+    # worse than no guard.
+    if ! docker image inspect tiny-ledger:0.1.0-SNAPSHOT >/dev/null 2>&1; then
+      echo "::error::tiny-ledger:0.1.0-SNAPSHOT not found — build it first: ./mvnw -q spring-boot:build-image -DskipTests" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "::error::E2E_MODE must be 'image' or 'jar', got '$E2E_MODE'" >&2
+    exit 1
+    ;;
+esac
 
 # Refuse to start against a stack that is not fully up. Without this the app boots
 # anyway and connects to whatever else holds the port — measured: with an unrelated
@@ -26,8 +60,22 @@ fi
 # OTHER database and failed Liquibase on credentials. Different credentials are the
 # only reason that was visible; a matching ledger/ledger user elsewhere would have
 # been read and written silently. Fail here, loudly, with the likely cause named.
+#
+# THE GUARD NAMES THE FOUR BACKING SERVICES EXPLICITLY, and that is a fix rather than a
+# tidy-up. It used to check every container in the project, which was right when the app
+# was never one of them. It is not any more: `docker compose ps -a` lists containers from
+# INACTIVE profiles too (verified on Docker 28.3.0 / Compose v2.38.1 — a profiled service
+# shows up as `extra Up 8 seconds` with no `--profile` given), and the `app` service has no
+# healthcheck by necessity, since its run image ships no shell to run one.
+#
+# So the old form aborted on the app's own container. Anyone following the README's new
+# recipe — build-image, then `--profile app up -d`, then this script — was told "the full
+# stack is not healthy" and pointed at Postgres, which was fine. The same lockout happened
+# after any run whose EXIT trap did not fire (Ctrl-C, SIGKILL, a cancelled CI job), and to
+# anyone using `--profile observability`, because otel-collector has no healthcheck either.
 COMPOSE="docker compose -f docker/docker-compose.yml"
-unhealthy=$($COMPOSE ps -a --format '{{.Service}} {{.Status}}' 2>/dev/null | grep -v '(healthy)' || true)
+unhealthy=$($COMPOSE ps -a --format '{{.Service}} {{.Status}}' 2>/dev/null \
+  | grep -E '^(postgres|redis|kafka|keycloak) ' | grep -v '(healthy)' || true)
 if [ -n "$unhealthy" ]; then
   echo "::error::the full stack is not healthy — refusing to run e2e against a partial stack" >&2
   echo "$unhealthy" >&2
@@ -39,11 +87,28 @@ fi
 APP_PID=""
 cleanup() {
   rc=$?
-  echo "--- application log ($APP_LOG) ---"
-  cat "$APP_LOG" 2>/dev/null || echo "(no application log was produced)"
-  if [ -n "$APP_PID" ]; then
-    kill "$APP_PID" 2>/dev/null || true
-    wait "$APP_PID" 2>/dev/null || true
+  if [ "$E2E_MODE" = image ]; then
+    echo "--- application log (compose service 'app') ---"
+    # stderr is NOT discarded, and that matters more here than it looks. compose demultiplexes
+    # the container's stderr to the CLI's stderr, which is exactly where the buildpack launcher's
+    # `failed to launch: ...`, `Error occurred during initialization of VM` and OOM-kill messages
+    # go — the most likely image failures. `2>/dev/null` would print this header and then nothing,
+    # defeating the reason this trap exists (see the file header). There is no `|| echo` fallback
+    # because `docker compose logs <service>` exits 0 even when no container exists, so the branch
+    # could never fire; the header plus empty output is the honest signal instead.
+    $COMPOSE --profile app logs --no-color app 2>&1 || true
+    # `rm -sf`, not `stop`: the guard above rejects any container that is not (healthy), and a
+    # stopped app container would trip it on the NEXT run. The app is the only service this
+    # script started, so it is the only one it removes — the four backing services stay up for
+    # whoever brought them up.
+    $COMPOSE --profile app rm -sf app >/dev/null 2>&1 || true
+  else
+    echo "--- application log ($APP_LOG) ---"
+    cat "$APP_LOG" 2>/dev/null || echo "(no application log was produced)"
+    if [ -n "$APP_PID" ]; then
+      kill "$APP_PID" 2>/dev/null || true
+      wait "$APP_PID" 2>/dev/null || true
+    fi
   fi
   exit $rc
 }
@@ -79,14 +144,34 @@ PG_PORT=${TINY_LEDGER_PG_PORT:-5432}
 # The integration suite never sees this because Testcontainers hands out an IP, not a
 # hostname. Pinning IPv4 here is a no-op on the Linux CI runner and the difference
 # between working and not on a developer machine.
-java -jar "$JAR" \
-  --spring.profiles.active=full \
-  --spring.datasource.url="jdbc:postgresql://127.0.0.1:${PG_PORT}/tiny_ledger" \
-  --spring.data.redis.host=127.0.0.1 \
-  --spring.kafka.bootstrap-servers=127.0.0.1:9092 \
-  --ledger.rate-limit.ip-backstop.capacity=10000 \
-  > "$APP_LOG" 2>&1 &
-APP_PID=$!
+if [ "$E2E_MODE" = image ]; then
+  # The image resolves its peers by SERVICE NAME on the compose network, so none of the
+  # 127.0.0.1 pinning below applies to it — the IPv6 trap is a property of the host's
+  # resolver, and the app is no longer on the host. TINY_LEDGER_PG_PORT likewise moves only
+  # the host-side publication; the app dials postgres:5432 regardless. That is a real
+  # reduction in moving parts, and the same one that makes Traefik able to route to
+  # `app:8080` without a `host.docker.internal` seam.
+  #
+  # Every connection setting lives in docker-compose.yml. The ONE thing overridden here is
+  # the IP backstop, for the reason above, and it is an environment variable rather than a
+  # file edit for the same reason it was a launch argument before: production defaults stay
+  # untouched and this cannot leak into a real deployment.
+  #
+  # No `--wait`: the app service carries no healthcheck (the run image has no shell to run
+  # one), so `--wait` would return the moment the container starts. wait-for.sh below is the
+  # real readiness gate, and it polls for a STATUS rather than a port for the reason that
+  # script explains.
+  LEDGER_RATE_LIMIT_IP_BACKSTOP_CAPACITY=10000 $COMPOSE --profile app up -d app
+else
+  java -jar "$JAR" \
+    --spring.profiles.active=full \
+    --spring.datasource.url="jdbc:postgresql://127.0.0.1:${PG_PORT}/tiny_ledger" \
+    --spring.data.redis.host=127.0.0.1 \
+    --spring.kafka.bootstrap-servers=127.0.0.1:9092 \
+    --ledger.rate-limit.ip-backstop.capacity=10000 \
+    > "$APP_LOG" 2>&1 &
+  APP_PID=$!
+fi
 
 # 401 is the ready signal — see scripts/e2e/wait-for.sh for why a status and not a port.
 scripts/e2e/wait-for.sh "$BASE_URL/api/v1/accounts" 401 "$READY_TIMEOUT" "tiny-ledger (full)"

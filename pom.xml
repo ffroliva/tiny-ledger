@@ -34,6 +34,44 @@
          `owner_repo` form — so the two do not match, which is exactly the trap. Read from
          `api/organizations/search?member=true` after the first attempt failed with
          "Organization key 'ffroliva' does not exist", rather than guessed a second time. -->
+    <!-- OVERRIDES spring-boot-dependencies 4.1.0, which manages postgresql.version at 42.7.11.
+         Found by the Trivy gate on its very first honest run (#11, CI 31229592166): CVE-2026-54291,
+         HIGH, status `fixed`, installed 42.7.11, fixed 42.7.12 — a pgjdbc man-in-the-middle via
+         com.ongres.scram/scram-client. Reported at two locations in the image (runner.jar and the
+         workspace lib), which is why the total read 2 for one CVE.
+
+         FIXED RATHER THAN SUPPRESSED, and that distinction is the whole value of the gate: it is
+         `fixed` upstream, so `ignore-unfixed: true` did NOT hide it, and an entry in
+         .github/owasp-suppressions.xml would have been the wrong answer to an available upgrade.
+         42.7.13 is the current release of the same patch line — taking 42.7.12, the literal minimum
+         that clears today's scan, would just invite a second bump.
+
+         The OS layer scanned clean in the same run (ubuntu 24.04, 0 findings), so this is the only
+         thing standing between the image and a green security job. -->
+    <postgresql.version>42.7.13</postgresql.version>
+
+    <!-- OVERRIDES spring-boot-dependencies 4.1.0 (which manages tomcat.version at 11.0.22).
+         Surfaced by the first Dependency-Check run (#11, CI 31233407733), which failed with 22
+         CVEs at CVSS >= 7 across four libraries. This is the one with a clean, stable patch
+         upgrade, so it is taken:  11.0.22 -> 11.0.24.
+
+         THE OTHER THREE ARE DELIBERATELY NOT "FIXED", and the reasons differ:
+
+           netty-transport 4.2.15.Final  — next release is 5.0.0.Alpha2
+           kotlin-stdlib   2.3.21        — next release is 2.4.20-Beta2
+
+         Taking an alpha or a beta into a money path to quieten a scanner is a worse decision
+         than the finding it silences.
+
+           opentelemetry-semconv 1.41.1  — arrives transitively and is managed by NO Boot
+                                           property, so a <opentelemetry-semconv.version>
+                                           override would be SILENTLY IGNORED. It was written,
+                                           checked against Boot's BOM, found absent, and removed
+                                           rather than shipped as a line that does nothing.
+
+         The residue is RECORDED, not suppressed. See §12.1 stage 11b. -->
+    <tomcat.version>11.0.24</tomcat.version>
+
     <sonar.host.url>https://sonarcloud.io</sonar.host.url>
     <sonar.organization>ffroliva-github</sonar.organization>
     <sonar.projectKey>ffroliva_tiny-ledger</sonar.projectKey>
@@ -156,7 +194,71 @@
         named -exec (see scripts/e2e/run-e2e.sh).
       -->
       <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId>
-        <configuration><classifier>exec</classifier></configuration></plugin>
+        <configuration>
+          <classifier>exec</classifier>
+          <!--
+            Issue #11 / spec §12. Buildpacks, not a Dockerfile: the image is layered by construction
+            and there is no base image for this repository to patch and forget.
+
+            `image.name` is pinned to a local, unqualified name ON PURPOSE. Nothing publishes it —
+            stage 12 is a separate, unbuilt decision (§12.1) — so a registry-qualified name here would
+            imply a push that does not happen.
+
+            The classifier above is why this needs saying: build-image consumes the REPACKAGED jar,
+            and this project deliberately gives that jar an `exec` classifier so the plain jar stays
+            usable as a dependency by benchmarks/. Getting this wrong produces an image that builds
+            cleanly and fails at startup with a missing main class.
+
+            NO <executions>: nothing binds build-image to a lifecycle phase, for the same reason
+            sonar-maven-plugin and dependency-check-maven below carry none. `verify` must start ZERO
+            containers (ADR 0003) and build-image drives a Docker daemon build.
+          -->
+          <image>
+            <name>tiny-ledger:${project.version}</name>
+            <!--
+              PINNED BY DIGEST, and this was a real defect found in review. Without these two
+              elements the plugin defaults to `paketobuildpacks/builder-noble-java-tiny:latest` —
+              read from the constant pool of the shipped spring-boot-buildpack-platform-4.1.0 jar,
+              not guessed — which is a MUTABLE tag feeding a REQUIRED status check. Three
+              consequences, all bad:
+
+                - re-running `security` on an unchanged commit could build a different image, so
+                  Trivy could redden a required check with nothing in the tree to bump;
+                - `security` and `e2e` pull independently on separate runners, so the artefact
+                  SCANNED and the artefact TESTED could come from different base layers on the same
+                  push — which silently voids this issue's whole premise;
+                - it falsified spec §12's "there is no base image for this repository to patch and
+                  forget". There was one. It was implicit and mutable, which is worse than explicit.
+
+              Every other image here is pinned — postgres:16-alpine, redis:7-alpine, cp-kafka:7.6.0,
+              keycloak:26.4, otel-collector:0.158.0, gitleaks by sha256. This is now consistent.
+              Bumping means changing the digests deliberately, which is the point.
+            -->
+            <builder>paketobuildpacks/builder-noble-java-tiny@sha256:5d484671a3472dc6dd323c297923f33262aa0d4dbcbbcceac3d6c69586d140be</builder>
+            <runImage>paketobuildpacks/ubuntu-noble-run-tiny@sha256:f67248664fcdbea6537c8e5cb3b5a22f3262a93d7623cb090db634e2b7a27a21</runImage>
+            <env>
+              <!--
+                Spec v3.36 / #11. The CURRENT names — BP_JVM_CDS_ENABLED and
+                CDS_TRAINING_JAVA_TOOL_OPTIONS are both DEPRECATED aliases (Paketo spring-boot
+                buildpack README, read 2026-08-08). Same trap as step 9's
+                management.otlp.tracing.*: the spelling in common circulation is the dead one, and a
+                deprecated or misspelled name is SILENTLY IGNORED — indistinguishable from not
+                setting it at all.
+              -->
+              <BP_JVM_AOTCACHE_ENABLED>true</BP_JVM_AOTCACHE_ENABLED>
+              <!--
+                THE TRAINING RUN STARTS THE APPLICATION. Under `full` it would block on Postgres,
+                Redis, Kafka and Liquibase and hang the build — predicted in spec v3.36 before this
+                was ever run, and the buildpack's own documentation for this variable says it exists
+                "to configure your app not to reach external services during" the run.
+
+                `standalone` is the whole answer, and it is available precisely because §1 keeps two
+                run modes in one codebase. The duality earns its keep here in a way nobody planned.
+              -->
+              <TRAINING_RUN_JAVA_TOOL_OPTIONS>-Dspring.profiles.active=standalone</TRAINING_RUN_JAVA_TOOL_OPTIONS>
+            </env>
+          </image>
+        </configuration></plugin>
       <plugin>
         <groupId>org.openapitools</groupId><artifactId>openapi-generator-maven-plugin</artifactId><version>${openapi-generator.version}</version>
         <executions><execution><goals><goal>generate</goal></goals>
@@ -190,6 +292,62 @@
         <groupId>org.sonarsource.scanner.maven</groupId>
         <artifactId>sonar-maven-plugin</artifactId>
         <version>${sonar-maven-plugin.version}</version>
+      </plugin>
+      <!--
+        OWASP Dependency-Check 13.0.0 (issue #11, stage 11). NO <executions>, exactly like
+        sonar-maven-plugin above and for the same stated reason: this is a deliberate invocation and
+        must never ride along with `verify`. It downloads the NVD feed; bound to a phase it would
+        make every local build slow and network-dependent, and `verify` starting to need the internet
+        is a change nobody asked for.
+
+        WHY IT EARNS ITS PLACE ALONGSIDE TRIVY, stated honestly rather than as "Trivy was not
+        enough": Trivy scans the IMAGE, so it sees runtime jars and OS packages. Dependency-Check
+        scans the BUILD, so it also sees TEST-scope dependencies. That is the only real gap between
+        them and it is a small one — belt and braces, chosen deliberately.
+
+        THE NVD KEY IS A COMMAND-LINE PROPERTY AND ITS NAME IS `nvdApiKey`. Read out of this
+        plugin's own META-INF/maven/plugin.xml at 13.0.0, which declares
+        `<nvdApiKey implementation="java.lang.String">${nvdApiKey}</nvdApiKey>` — so the invocation
+        is `-DnvdApiKey=...`. The #11 plan said `-Dnvd.api.key` and that is WRONG: an unrecognised
+        -D is silently ignored, so the build would simply rate-limit against an anonymous NVD and
+        look like a slow network rather than a misconfiguration. Same shape as the deprecated
+        buildpack variables above and step 9's management.otlp.tracing.*.
+      -->
+      <plugin>
+        <groupId>org.owasp</groupId>
+        <artifactId>dependency-check-maven</artifactId>
+        <version>13.0.0</version>
+        <configuration>
+          <!-- THE GATE. The plugin's default is 11, which no CVSS score can reach — that is a
+               reporter, not a gate, and shipping it would be the THIRD check here that cannot fail
+               (the deleted stage 6, then the Sonar job before -Dsonar.qualitygate.wait=true).
+               7.0 is the bottom of CVSS v3 HIGH. -->
+          <failBuildOnCVSS>7</failBuildOnCVSS>
+          <!--
+            THE DEFAULT IS `true`, AND THAT MADE THIS JOB'S STATED PURPOSE FALSE. Read from this
+            plugin's own META-INF/maven/plugin.xml at 13.0.0:
+
+                <skipTestScope implementation="boolean" default-value="true">
+
+            Five places — two ci.yml comments, this pom, spec §12.1 and CHANGELOG.md — justified
+            running Dependency-Check alongside Trivy on the grounds that it also sees TEST-SCOPE
+            dependencies. With the default left alone it does not, so the job was paying a runner,
+            a 120-minute timeout and a multi-gigabyte cache to close a gap of exactly zero.
+
+            HONESTY NOTE, because this flag is necessary and may not be sufficient: the same
+            descriptor declares `<requiresDependencyResolution>compile+runtime</requiresDependencyResolution>`
+            for the `check` goal, so Maven may not resolve test artifacts for it at all. Until a run
+            is observed reporting a test-scope jar, the test-scope claim is NOT established — and
+            the documents have been changed to say that rather than to keep asserting it.
+          -->
+          <skipTestScope>false</skipTestScope>
+          <suppressionFiles>
+            <suppressionFile>.github/owasp-suppressions.xml</suppressionFile>
+          </suppressionFiles>
+          <!-- The retired/experimental analysers add runtime and noise for a Java-only project. -->
+          <nodeAnalyzerEnabled>false</nodeAnalyzerEnabled>
+          <assemblyAnalyzerEnabled>false</assemblyAnalyzerEnabled>
+        </configuration>
       </plugin>
       <plugin>
         <groupId>org.jacoco</groupId><artifactId>jacoco-maven-plugin</artifactId><version>0.8.15</version>

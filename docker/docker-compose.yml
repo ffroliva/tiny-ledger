@@ -48,20 +48,32 @@ services:
     ports:
       - "9092:9092"
     environment:
-      # Single-node KRaft broker+controller — no ZooKeeper. Only the host talks to this broker
-      # (no other compose service does), so one PLAINTEXT listener advertised as localhost is enough.
+      # Single-node KRaft broker+controller — no ZooKeeper.
+      #
+      # TWO client listeners, and issue #11 is why. Until the app became a service below, only the
+      # HOST talked to this broker, so one listener advertised as `localhost:9092` was enough and was
+      # what this file had. That advertisement is actively wrong for an in-network client: a Kafka
+      # client bootstraps, receives the ADVERTISED address back, and reconnects to *that* — so the
+      # app container would dial `localhost:9092`, meaning itself, and fail with a connection refused
+      # naming a broker it can in fact reach. The bootstrap address being correct is precisely what
+      # makes the failure confusing.
+      #
+      # So `kafka:29092` for containers and `localhost:9092` for the host. Both are PLAINTEXT: the
+      # split is about ADDRESSING, not security. Backing-service TLS is a named gap, not scope.
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     healthcheck:
+      # Still `localhost:9092` — PLAINTEXT_HOST binds 0.0.0.0:9092 and this probe runs INSIDE the
+      # broker container, so it exercises the same listener the host uses.
       test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
       interval: 5s
       timeout: 5s
@@ -79,6 +91,23 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # Issue #11. WITHOUT this, Keycloak derives `iss` from the caller's Host header, so the issuer
+      # is whatever the caller happened to TYPE. Measured 2026-08-08 against this exact stack:
+      #
+      #   token minted via 127.0.0.1:8081  ->  iss = http://127.0.0.1:8081/realms/tiny-ledger  -> 401
+      #   token minted via localhost:8081  ->  iss = http://localhost:8081/realms/tiny-ledger  -> 200
+      #
+      # Same host, same realm, same user, two spellings of loopback, and only one of them
+      # authenticates. That is a live trap rather than a hypothetical: `scripts/e2e/run-e2e.sh`
+      # deliberately pins 127.0.0.1 everywhere (the IPv6 routing trap documented in that file), while
+      # `ledger-cli/src/ledger_cli/config.py` defaults issuer_uri to `localhost`. The suite passes
+      # today only because those two disagree — align them in the obvious direction and it breaks.
+      #
+      # Pinning the hostname makes `iss` a property of the DEPLOYMENT instead of a property of the
+      # request, so every caller gets the same issuer no matter how it dialled in. This is the fix
+      # the #11 plan names. The alternative — relaxing issuer validation — throws away the check that
+      # the token came from the issuer we trust, and is never acceptable to make a test pass.
+      KC_HOSTNAME: http://localhost:8081
       # Serves /health/* on the management port (9000). Measured on 26.4: the image ships
       # neither curl nor wget, so the healthcheck below reaches it through bash's /dev/tcp,
       # which is present at /usr/bin/bash.
@@ -128,6 +157,67 @@ services:
     ports:
       - "4317:4317"
       - "4318:4318"
+
+  # Issue #11. Until now this file had NO app service and the README told you to run the jar on the
+  # host — §1's mode table said so, and it was true. The image exists now, so `full` is one command.
+  #
+  # `build` is absent on purpose: the image comes from `./mvnw spring-boot:build-image`, not from a
+  # Dockerfile Compose could build. That keeps ONE way to produce the artefact, which is the point of
+  # buildpacks here — see spec §12. Compose will not build it for you; if the tag is missing, `up`
+  # fails with "pull access denied", which is the honest error rather than a silently different image.
+  #
+  # `profiles: [app]` keeps the default `up` at exactly the four backing services, exactly as the
+  # `observability` profile above does. §6.6 and the README both assert that four-container default.
+  app:
+    image: tiny-ledger:0.1.0-SNAPSHOT
+    profiles: [app]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      kafka:    { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+    environment:
+      SPRING_PROFILES_ACTIVE: full
+      # Service names, not localhost: inside the network the app resolves its peers by name, and the
+      # published host ports are irrelevant to it. Postgres is 5432 here — the CONTAINER port, which
+      # TINY_LEDGER_PG_PORT never changes; that variable only moves the host-side publication.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/tiny_ledger
+      SPRING_DATA_REDIS_HOST: redis
+      # 29092, not 9092 — see the two-listener comment on the broker above.
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      #
+      # THE ISSUER AND THE KEY SET ARE DELIBERATELY DIFFERENT URLS, and this is the one piece of this
+      # file worth reading carefully.
+      #
+      # A token is minted through the PUBLISHED port, so Keycloak stamps `iss` as
+      # http://localhost:8081/realms/tiny-ledger. The app cannot resolve `localhost:8081` — inside
+      # the network that is itself. The tempting fixes are both wrong: relaxing issuer validation
+      # throws away the check that the token came from the issuer we trust, and rewriting `iss` to
+      # `keycloak:8080` breaks every host-side caller instead.
+      #
+      # The real answer is that `iss` and "where do I fetch the signing keys" are two different
+      # questions and Boot lets them be answered separately. Verified in the shipped bytecode
+      # (spring-boot-security-oauth2-resource-server-4.1.0, JwtDecoderConfiguration), not assumed
+      # from docs: buildJwkSetUriJwtDecoder builds NimbusJwtDecoder.withJwkSetUri(...) and then calls
+      # setJwtValidator(getValidator()), and getValidator() reads getIssuerUri() and constructs
+      # `new JwtIssuerValidator(issuerUri)` alongside the `aud` validator from getAudiences().
+      #
+      # So issuer validation and audience validation both stay FULLY ENFORCED. Only the address the
+      # key set is fetched from moves in-network. Nothing is relaxed.
+      LEDGER_ISSUER_URI: http://localhost:8081/realms/tiny-ledger
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/tiny-ledger/protocol/openid-connect/certs
+      # 300 is the PRODUCTION value (application.properties:42), restated here rather than defaulted
+      # to empty — an empty environment variable is a binding failure for an int, not an unset one.
+      # Only scripts/e2e/run-e2e.sh raises it, and only the backstop: the per-principal write bucket
+      # stays at 100 because that bucket is what test_rate_limit is under test. Raising both would
+      # make that test pass for the wrong reason, which its own comment calls the most expensive
+      # kind of green.
+      LEDGER_RATE_LIMIT_IP_BACKSTOP_CAPACITY: ${LEDGER_RATE_LIMIT_IP_BACKSTOP_CAPACITY:-300}
+    ports:
+      - "8080:8080"
+      # Management, §6.6. Reachable as published because `full` pins no management.server.address —
+      # `standalone` pins loopback and would not be, which is deliberate and profile-specific.
+      - "9090:9090"
 
 volumes:
   postgres-data:

@@ -65,6 +65,34 @@
 - Realm fixture user `trent` (`ledger:writer` + `ledger:reader` + `ledger:admin`) and the P9 /
   N13–N18 authorisation scenarios, exercised through the real chain against a Keycloak container
   — **Plan 4 (admin on-behalf-of) complete**, spec v3.12.
+- **A container image, and the image is what CI tests** (issue #11, spec §12, ADR 0005) — spec
+  v3.42. Built by `spring-boot:build-image` with **Paketo buildpacks and no `Dockerfile`**, so it is
+  layered by construction and there is no base image to patch and forget. The **JVM AOT cache** is
+  on, trained under `standalone` because the training run starts the application and would otherwise
+  block on Postgres, Redis, Kafka and Liquibase: **startup 6.588 s → 3.011 s, −54%**, measured over
+  three runs each rather than asserted.
+- The application is now a **Compose service** behind `profiles: [app]`, so `full` no longer means
+  "four containers plus a JVM on your host". A plain `up` still starts exactly the four backing
+  services. `scripts/e2e/run-e2e.sh` runs the **image** by default and keeps the host jar behind
+  `E2E_MODE=jar`. The jar path was run by hand when it landed (7 passed), but **nothing in CI
+  exercises it** — the e2e job builds the image, not the jar — so it is retained coverage, not
+  asserted coverage. Keycloak's hostname is pinned, because without it the issuer it
+  stamps varies with how the caller dialled in — `127.0.0.1:8081` and `localhost:8081` minted
+  different issuers and only one authenticated.
+- **Stage 11 is no longer partial.** Trivy scans the built image (`CRITICAL,HIGH`, `exit-code: 1`)
+  in the **required** `security` job, because a scan in a job nobody must pass cannot stop a merge.
+  OWASP Dependency-Check scans the build tree (`failBuildOnCVSS=7`) in its **own `depcheck` job**,
+  which is **not** a required check — inside `security` it did not finish within 80 minutes, and a
+  required check that slow is one people route around. So a CVSS ≥ 7 finding fails the workflow and
+  is visible on the PR, but does **not** block the merge button until `depcheck` is added to branch
+  protection. It does cover **test-scope** dependencies — but only after `skipTestScope` was set to
+  `false`, because the plugin defaults it to `true`; for two runs this job closed a gap of exactly
+  zero while the docs said otherwise. The proof is `android-json` and `httpcore5`, two jars that
+  reach the build via `spring-boot-starter-test` and Testcontainers and are never packaged into the
+  image, so Trivy cannot see them.
+  **The Trivy gate found a real HIGH on its first honest run** —
+  `CVE-2026-54291` in `org.postgresql:postgresql` — which was **fixed by upgrading to 42.7.13, not
+  suppressed**. The image is built and scanned but **never published**; that stays stage 12.
 - **Distributed tracing, OTLP export and an opt-in OTel Collector** (spec §14 step 9 parts 2 and 3,
   §6.6, ADR 0005) — **step 9 complete**, spec v3.41. Micrometer Tracing over the OpenTelemetry
   *bridge*, wired by a single `spring-boot-starter-opentelemetry`. Four spans: HTTP, the use-case
