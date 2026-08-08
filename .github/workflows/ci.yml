@@ -192,15 +192,53 @@ jobs:
           ignore-unfixed: true
           format: table
 
+      # Without a cached data directory every run re-downloads the whole NVD feed. With a key that
+      # is minutes; without one it can be tens of minutes or an outright rate-limit failure.
+      - name: Cache the NVD data directory
+        uses: actions/cache@v6
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: ${{ runner.os }}-owasp-nvd
+
+      - name: "Stage 11 — OWASP Dependency-Check"
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        # Same posture as the Sonar step: SKIP LOUDLY when the credential is absent, never report a
+        # success it did not earn. A fork has no NVD_API_KEY and its build must still go green —
+        # the same principle that keeps a Grafana credential out of CI entirely.
+        #
+        # THE PROPERTY IS `nvdApiKey`. Read out of dependency-check-maven 13.0.0's own
+        # META-INF/maven/plugin.xml, which declares ${nvdApiKey}. `-Dnvd.api.key` — the spelling the
+        # #11 plan carried — is NOT a recognised property, and an unrecognised -D is silently
+        # ignored: the build would rate-limit against an anonymous NVD and present as a slow network
+        # rather than as a misconfiguration.
+        #
+        # The gate is failBuildOnCVSS=7 in pom.xml, not a flag here, so `./mvnw
+        # org.owasp:dependency-check-maven:check` reproduces this verdict on a laptop — this
+        # pipeline's stated rule for what a gate must be (§12.1's closing note).
+        run: |
+          if [ -z "$NVD_API_KEY" ]; then
+            echo "::warning::NVD_API_KEY is not set — Dependency-Check skipped, NOT passed"
+            echo "### Dependency-Check: skipped (no NVD_API_KEY)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          ./mvnw -q org.owasp:dependency-check-maven:check -DnvdApiKey="$NVD_API_KEY"
+
       - name: "Stage 11 — what is covered, and what is not"
         if: always()
         run: |
           {
             echo "### Stage 11 (spec §12.1)"
             echo "- gitleaks: above, every push."
-            echo "- Trivy: scans the built image for CRITICAL/HIGH, **exit-code 1**, so it FAILS this"
+            echo "- Trivy: scans the built IMAGE for CRITICAL/HIGH, **exit-code 1**, so it FAILS this"
             echo "  required check. \`ignore-unfixed: true\` means a known-unfixable critical does not"
             echo "  fail the build — the build can be green with such a finding present."
+            echo "- Dependency-Check: scans the BUILD, **failBuildOnCVSS=7**. That is the only real"
+            echo "  gap it closes over Trivy — it also sees **test-scope** dependencies, which never"
+            echo "  reach the image. Belt and braces, chosen deliberately."
+            echo "- Trivy needs NO credential and therefore always runs. Dependency-Check is **SKIPPED,"
+            echo "  not passed**, when NVD_API_KEY is absent, and says so loudly. So a fork's build"
+            echo "  stays green holding no secret, while still getting the image scan."
             echo "- detect-secrets: not added. It covers the same class of finding as gitleaks; running"
             echo "  both without a documented reason (e.g. one catches something the other's ruleset"
             echo "  misses) is redundant scanning, not extra safety."

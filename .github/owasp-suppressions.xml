@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OWASP Dependency-Check suppressions for tiny-ledger (issue #11, spec §12.1 stage 11).
+
+  THIS FILE IS DELIBERATELY EMPTY. It exists so that the first suppression anyone needs has an
+  obvious, reviewed home instead of being added as a `-D` flag on a CI line, where nobody would
+  ever read it again.
+
+  THE RULE, and it is the same one ci.yml already applies to the Keycloak realm file:
+
+    1. Every <suppress> names a SPECIFIC <cve> (or a specific <vulnerabilityName>), and carries a
+       <notes> saying why that CVE does not apply to THIS project — the code path that is not
+       reached, the feature that is not enabled, the transitive dependency that is test-scope only.
+       "False positive" alone is not a reason; it is a claim awaiting one.
+
+    2. A BLANKET SUPPRESSION IS NEVER ACCEPTABLE. No bare <packageUrl> or <filePath> element
+       without a CVE beside it, and no regex broad enough to cover a vulnerability nobody has seen
+       yet. A standing exemption silently covers future content — which is exactly the reasoning
+       ci.yml gives for refusing to allowlist docker/keycloak/realm-tiny-ledger.json by path: there
+       is no active finding to suppress, and a path exemption would also cover a real secret pasted
+       into that file by mistake tomorrow.
+
+    3. Prefer fixing to suppressing. A suppression with an <until> date is better than one without,
+       because it fails again rather than becoming permanent by neglect.
+
+  Shape of an acceptable entry, for whoever adds the first one:
+
+    <suppress until="2027-01-01Z">
+      <notes>CVE-2000-0000 is in the XYZ parser, reached only via the servlet filter this project
+             does not register. Verified by ... . Re-check when abc is upgraded past 1.2.3.</notes>
+      <packageUrl regex="true">^pkg:maven/com\.example/abc@.*$</packageUrl>
+      <cve>CVE-2000-0000</cve>
+    </suppress>
+
+  Note that an empty ruleset is NOT inert with respect to the gate: pom.xml sets
+  failBuildOnCVSS to 7, so with nothing suppressed here every CVSS>=7.0 finding fails the build.
+  That is the intended starting position.
+-->
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+</suppressions>

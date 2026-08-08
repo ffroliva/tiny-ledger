@@ -563,7 +563,18 @@ outright. So the step follows the exact pattern the Sonar step already uses in t
 
 - If `NVD_API_KEY` is absent: **skip loudly** and say it was skipped, **not** passed. A fork's build
   must still go green — the same principle that keeps CI free of a Grafana credential.
-- If present: run with `-Dnvd.api.key=$NVD_API_KEY` and let `failBuildOnCVSS` bite.
+- If present: run with `-DnvdApiKey=$NVD_API_KEY` and let `failBuildOnCVSS` bite.
+
+**CORRECTED 2026-08-08. This plan said `-Dnvd.api.key`, and that is not a recognised property.**
+Read out of `dependency-check-maven` 13.0.0's own `META-INF/maven/plugin.xml`, which declares
+`<nvdApiKey implementation="java.lang.String">${nvdApiKey}</nvdApiKey>` — the flag is
+**`-DnvdApiKey`**. An unrecognised `-D` is silently ignored, so the wrong spelling would have
+rate-limited against an anonymous NVD and presented as a slow network rather than a
+misconfiguration. Exactly the shape of the deprecated buildpack variables and step 9's
+`management.otlp.tracing.*`: the plausible spelling is the dead one, and it fails quietly.
+
+Note also that `failBuildOnCVSS` carries **no** `${...}` expression in that descriptor, so it cannot
+be set from the command line at all — it lives in `pom.xml`, which is where a gate belongs anyway.
 
 Cache the NVD data directory between runs or every build pays the download again:
 

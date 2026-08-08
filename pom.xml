@@ -234,6 +234,44 @@
         <artifactId>sonar-maven-plugin</artifactId>
         <version>${sonar-maven-plugin.version}</version>
       </plugin>
+      <!--
+        OWASP Dependency-Check 13.0.0 (issue #11, stage 11). NO <executions>, exactly like
+        sonar-maven-plugin above and for the same stated reason: this is a deliberate invocation and
+        must never ride along with `verify`. It downloads the NVD feed; bound to a phase it would
+        make every local build slow and network-dependent, and `verify` starting to need the internet
+        is a change nobody asked for.
+
+        WHY IT EARNS ITS PLACE ALONGSIDE TRIVY, stated honestly rather than as "Trivy was not
+        enough": Trivy scans the IMAGE, so it sees runtime jars and OS packages. Dependency-Check
+        scans the BUILD, so it also sees TEST-scope dependencies. That is the only real gap between
+        them and it is a small one — belt and braces, chosen deliberately.
+
+        THE NVD KEY IS A COMMAND-LINE PROPERTY AND ITS NAME IS `nvdApiKey`. Read out of this
+        plugin's own META-INF/maven/plugin.xml at 13.0.0, which declares
+        `<nvdApiKey implementation="java.lang.String">${nvdApiKey}</nvdApiKey>` — so the invocation
+        is `-DnvdApiKey=...`. The #11 plan said `-Dnvd.api.key` and that is WRONG: an unrecognised
+        -D is silently ignored, so the build would simply rate-limit against an anonymous NVD and
+        look like a slow network rather than a misconfiguration. Same shape as the deprecated
+        buildpack variables above and step 9's management.otlp.tracing.*.
+      -->
+      <plugin>
+        <groupId>org.owasp</groupId>
+        <artifactId>dependency-check-maven</artifactId>
+        <version>13.0.0</version>
+        <configuration>
+          <!-- THE GATE. The plugin's default is 11, which no CVSS score can reach — that is a
+               reporter, not a gate, and shipping it would be the THIRD check here that cannot fail
+               (the deleted stage 6, then the Sonar job before -Dsonar.qualitygate.wait=true).
+               7.0 is the bottom of CVSS v3 HIGH. -->
+          <failBuildOnCVSS>7</failBuildOnCVSS>
+          <suppressionFiles>
+            <suppressionFile>.github/owasp-suppressions.xml</suppressionFile>
+          </suppressionFiles>
+          <!-- The retired/experimental analysers add runtime and noise for a Java-only project. -->
+          <nodeAnalyzerEnabled>false</nodeAnalyzerEnabled>
+          <assemblyAnalyzerEnabled>false</assemblyAnalyzerEnabled>
+        </configuration>
+      </plugin>
       <plugin>
         <groupId>org.jacoco</groupId><artifactId>jacoco-maven-plugin</artifactId><version>0.8.15</version>
         <executions>
