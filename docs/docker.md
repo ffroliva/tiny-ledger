@@ -18,6 +18,17 @@ want to see the ledger work, use the README. Read this when you want the product
 
 - Docker with Compose v2 (`docker compose`, not `docker-compose`). Verified on Docker **28.3.0**.
 - JDK 25 and the Maven wrapper in this repository.
+- **`uv`** — for §6 only, the e2e suite. `scripts/e2e/run-e2e.sh` ends in `uv run pytest -m e2e`, so
+  without it the runbook fails at its last step having built and started everything. uv provisions
+  the Python interpreter itself (3.11+), so Python is not a separate install.
+- `curl` and `jq` — every verification command below is written with them. On Windows use
+  `curl.exe`; PowerShell aliases bare `curl` to `Invoke-WebRequest`, which does not take these flags.
+- `bash`, for the `scripts/e2e/*.sh` helpers. Git Bash or WSL on Windows.
+
+Sections 1–5 need only Docker and the JDK. **Section 6 is the one that needs all three toolchains**
+at once — Java to build the image, Docker to run the stack, uv to drive it — which is the honest
+prerequisite list for "test the full stack", as opposed to the JDK-only list that gets you the
+`standalone` ledger from the README.
 
 **Check your port 5432 before you start.** It is the most contested port on a developer machine, and
 the failure is worse than a refused bind: without the guard this repository now carries, the
@@ -229,6 +240,9 @@ curl -s http://127.0.0.1:8080/api/v1/audit/entries -H "Authorization: Bearer $AU
 
 ## 6. Run the e2e suite against the container
 
+**This step needs `uv` on top of Docker and the JDK** (§0). The script starts the app service, waits
+for it, then hands over to `pytest` inside `ledger-cli/`; it does not install anything for you.
+
 ```bash
 bash scripts/e2e/run-e2e.sh
 ```
@@ -295,6 +309,7 @@ ledger's system of record.
 | `docker exec ... cat` → `executable file not found` | the run image has no shell or coreutils | read `docker compose logs app` instead |
 | e2e aborts: "the full stack is not healthy" | a backing service really is unhealthy | `docker compose ps -a`; a container in `Created` usually means a taken host port |
 | `7 deselected` instead of `7 passed` | the `e2e` marker override did not take | run through `scripts/e2e/run-e2e.sh`, not bare `pytest` |
+| e2e ends `uv: command not found` | uv is not installed — §6 needs it, §§1–5 do not | install uv; the script does not check for it up front, and its EXIT trap dumps the application log *after* the error, so the cause scrolls past |
 | App can't reach Kafka in-network | advertised listener | containers use `kafka:29092`; the host uses `localhost:9092` |
 
 ## What this stack is not

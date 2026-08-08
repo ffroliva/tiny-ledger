@@ -56,8 +56,37 @@ Full documentation index: [`docs/INDEX.md`](docs/INDEX.md).
 
 ## Prerequisites
 
-**JDK 25.** That is the whole list for the default profile — no database, no broker, no
-configuration. Docker is needed only for `full` mode and the integration suite.
+**JDK 25 — and that is the whole list for the default profile.** The Quick start below and
+`./mvnw verify` need nothing else: no database, no broker, no configuration, nothing installed.
+
+**It is not the whole list for this repository.** This is a Java service with a Python CLI beside it
+and a Docker stack under both, and exercising the *full* stack needs all three at once. Saying "JDK
+25" and stopping would be true of the front door and misleading about everything behind it, so the
+split is stated per task:
+
+| To run | You need | Why |
+|---|---|---|
+| **Quick start** (`standalone`) and `./mvnw verify` | **JDK 25** | In-memory event store and cache; `verify` starts **zero containers by construction** (ADR 0003) |
+| `./mvnw verify -Pit` — the integration suite | JDK 25 + **Docker** | Testcontainers starts its own Postgres, Redis, Kafka and Keycloak on random ports |
+| **`full` mode** — the Compose stack ([`docs/docker.md`](docs/docker.md)) | JDK 25 + **Docker**, Compose v2 | The image is produced by buildpacks, which is a daemon build; the four backing services are containers. `curl` and `jq` for the runbook's commands |
+| `ledger-cli` — `ruff`, `pyright`, its unit tests | **uv** | The Python CLI in `ledger-cli/` is a real component with its own CI gate. Needs no Docker and no running app |
+| **The e2e scenarios** (`scripts/e2e/run-e2e.sh`) | JDK 25 + **Docker** + **uv** + `bash` | The seven unmocked scenarios are `pytest` driving the Python CLI over HTTP against the containerised application — every toolchain in the repository, in one command |
+
+**Versions.** Java **25** (Corretto in CI). Python **3.11, 3.12 or 3.13** — but installing Python is
+not a separate step: `uv` uses a matching interpreter if the machine has one and downloads one if it
+does not, which is why CI's `cli` job sets up uv and no Python at all.
+Docker is verified on **28.3.0** / Compose **v2.38.1**. Everything else is a wrapper or a locked
+dependency: `./mvnw` needs only a JDK, and `uv.lock` is committed and installed with `uv sync
+--locked`.
+
+`bash` is listed because `scripts/e2e/*.sh` are shell scripts; on Windows that means Git Bash or WSL.
+The Java and Python paths are cross-platform — see the `curl.exe` note under the Quick start.
+
+**No gate enforces this table** — nothing in CI checks documentation here (`docs/INDEX.md` says so,
+and spec §8.4 records why). Its evidence is `.github/workflows/ci.yml`, whose jobs are split along
+exactly these lines: `unit` (a runner with no Docker, on purpose), `integration`, `cli` (uv, no
+Docker), and `e2e` (Java, Docker and uv together). If the table and that file ever disagree, the file
+is right.
 
 ## Quick start
 
@@ -106,6 +135,17 @@ Run the tests:
 ./mvnw verify          # unit, architecture and BDD — starts zero containers
 ./mvnw verify -Pit     # integration suite against real Postgres, Redis, Kafka and Keycloak
 ```
+
+Those two are the Java gates, and a JDK is enough for the first. The repository has a third, which is
+neither Java nor optional — the Python CLI in `ledger-cli/` and the e2e scenarios it drives:
+
+```bash
+cd ledger-cli && uv sync --locked && uv run pytest   # the CLI's own suite — offline, no Docker
+bash scripts/e2e/run-e2e.sh                          # the seven e2e scenarios, from the repo root
+```
+
+The e2e run expects the Compose stack already up and needs JDK, Docker and uv together — the full
+sequence, and how to read its output, is [`docs/docker.md`](docs/docker.md) §6.
 
 ## If you are reviewing this
 

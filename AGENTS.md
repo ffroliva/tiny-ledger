@@ -28,6 +28,19 @@ unless the spec says otherwise (§9.2b).
 
 Both must be green before any commit. `spotless:check` runs inside `verify`.
 
+**Neither one covers `ledger-cli/`.** The Python CLI is a real component with its own CI job
+(stage 8), and `./mvnw verify` will not notice a thing you break in it. If you touch that tree, its
+gate is:
+
+```bash
+cd ledger-cli && uv sync --locked && uv run ruff check . && uv run pyright && uv run pytest
+```
+
+So the toolchain a task needs depends on what it touches: **JDK only** for the Java gate, **JDK +
+Docker** for `-Pit`, **uv** for the CLI gate, and **all three together** for the e2e scenarios
+(`scripts/e2e/run-e2e.sh`, CI stage 9). `README.md`'s Prerequisites table is the same split, stated
+for a reader rather than an agent.
+
 **Run `-Pit` in CI, not locally.** The integration suite starts real containers and is the slowest
 thing in this repository, and only one Maven build may run in a tree at a time — so a local `-Pit` run
 blocks all other work for its duration. Push the branch and read the result instead:
