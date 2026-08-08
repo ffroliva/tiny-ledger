@@ -27,6 +27,22 @@ BASE_URL=${LEDGER_BASE_URL:-http://127.0.0.1:8080}
 APP_LOG=${APP_LOG:-app.log}
 READY_TIMEOUT=${READY_TIMEOUT:-120}
 
+# uv is not used until the LAST line of this script, which is exactly why it is checked on the
+# FIRST. Without this guard a missing uv is discovered after the image is built, the app service
+# is up and the readiness poll has passed — and the EXIT trap then dumps the whole application
+# log on top of the one line that said `uv: command not found`, so the cause scrolls past and a
+# missing tool reads as an application failure. That is the same class of bug as the relative
+# APP_LOG the subshell below fixes: the run's real cause present but unreadable.
+#
+# Checked before the E2E_MODE case on purpose. Every other guard here reports something that
+# takes a build to repair; this one takes an install, and there is no reason to learn about it
+# after a ~90 s buildpack run.
+if ! command -v uv >/dev/null 2>&1; then
+  echo "::error::uv not found — the e2e suite is pytest driven by the Python CLI in ledger-cli/, so this script cannot run without it" >&2
+  echo "Install: https://docs.astral.sh/uv/getting-started/installation/ — uv provisions its own Python (3.11+), so Python is not a separate install." >&2
+  exit 1
+fi
+
 case "$E2E_MODE" in
   jar)
     if [ ! -f "$JAR" ]; then

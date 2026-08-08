@@ -18,6 +18,10 @@ where an archived plan and the spec disagree, the spec wins.
 - [README](README.md): what it is, prerequisites, and a three-command quick start that reaches a
   working deposit with no infrastructure
 - [Architecture](docs/architecture.md): the two run modes, the module boundaries, the domain
+- [Running with Docker](docs/docker.md): the `full` profile end to end — image, stack, token, a real
+  deposit, teardown, and the responses that look like faults and are not
+- [The `ledger-cli` operator tool](docs/ledger-cli.md): installing the Python CLI, how it
+  authenticates against Keycloak, worked examples, and the scenario sequences it drives
 - [Documentation index](docs/INDEX.md): routing table for everything below, by the question being asked
 
 ## The contract
