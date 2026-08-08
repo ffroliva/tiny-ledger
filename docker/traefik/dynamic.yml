@@ -107,10 +107,14 @@ http:
         # The reasoning that survived the previous revision worried about `includeSubDomains`
         # spreading the pin across sibling `.localhost` names and missed the bare-host case, which is
         # strictly worse. A real deployment on a real domain sets `stsSeconds` and
-        # `stsIncludeSubdomains` and means it. `docs/urls-and-tls.md` and `docs/pitfalls.md` record
-        # that as a named gap — this line used to cite `docs/security.md`, which has never existed
-        # in this repository; the file it meant is `docs/security-material.md`, and that one does
-        # not carry the HSTS gap. A dead citation, corrected to the two live ones.
+        # `stsIncludeSubdomains` and means it. Three documents record that as a named gap:
+        # `docs/security-material.md` (the edge-headers row), `docs/urls-and-tls.md` (the same row
+        # from the URL side) and `docs/pitfalls.md` (the reasoning above, in full).
+        #
+        # Until 2026-08-08 this cited `docs/security.md`, a file that has never existed here. Two
+        # independent passes found that dead citation; the first replacement asserted that
+        # `security-material.md` does NOT carry the gap, which is also false — it does, at its
+        # edge-headers row. Checked, not assumed, this time.
         #
         # These two are unconditionally correct for a JSON API and cost nothing:
         contentTypeNosniff: true
