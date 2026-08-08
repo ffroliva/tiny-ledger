@@ -91,7 +91,7 @@ credentials, not service accounts. There is no confidential client anywhere in t
 client-credentials — which needs one — is not an available grant.
 
 **Since corrected in the authority itself**: §6.4's `ledger-cli` service-account row was struck at
-spec v3.43, and §11's `Auth` row at v3.45. This section was right, and for two revisions it was the
+spec v3.43, and §11's `Auth` row at v3.47. This section was right, and for two revisions it was the
 only place that said so — which is the failure mode `docs/INDEX.md` warns about, the truth living in
 a secondary file while the contract says otherwise. (The realm now seeds **seven** users, not six:
 `trent` carries `ledger:admin`.)

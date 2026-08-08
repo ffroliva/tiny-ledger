@@ -283,7 +283,9 @@ Not credentials, but the same subject — see [`spec.md`](spec.md) §12.1 stages
 
 - **GitHub Dependabot vulnerability alerts and automated security fixes are ENABLED.** They cost no
   CI minutes, email on a finding, and match exact package versions. This is the always-on instrument.
-- **Trivy** scans the built container image on every push, in the required `security` job.
+- **Trivy** scans the built container image on every push, in the required `security` job, **and
+  since stage 11d also the Compose images** — the second of those reports rather than gates.
+
 **What each ecosystem is actually covered by — checked, not assumed:**
 
 | Ecosystem | Dependabot | OWASP Dependency-Check | Trivy |
@@ -291,11 +293,11 @@ Not credentials, but the same subject — see [`spec.md`](spec.md) §12.1 stages
 | **Java / Maven** (`pom.xml`) | ✅ weekly, grouped, majors excluded | ✅ nightly + on `pom.xml` | ✅ inside the built image |
 | **GitHub Actions** | ✅ weekly | ✗ | ✗ |
 | **Python** (`ledger-cli`, `uv.lock`) | ✅ weekly, `uv` ecosystem | ✗ — the plugin is Maven-only | ✗ — not in the image |
-| **Compose images** (postgres, redis, kafka, keycloak, traefik, collector) | ❌ **nothing** | ✗ | ✗ — it scans only the application image |
+| **Compose images** (postgres, redis, kafka, keycloak, traefik, collector) | ❌ **nothing, and no configuration fixes it** | ✗ | ⚠️ **scanned, reports only** — stage 11d, every push |
 | **Buildpack builder / run image** (pinned by digest in `pom.xml`) | ❌ nothing | ✗ | ✅ *indirectly* — their OS layers are what Trivy scans |
 
-**The Compose images are a real, currently uncovered gap, and it is not a configuration oversight.**
-Dependabot's `docker` ecosystem reads **only** files matching `/dockerfile|containerfile/i` —
+**Dependabot cannot reach the Compose images, and that is structural rather than a configuration
+oversight.** Its `docker` ecosystem reads **only** files matching `/dockerfile|containerfile/i` —
 verified in `dependabot-core`'s `docker/lib/dependabot/docker/file_fetcher.rb` — and there is no
 `docker-compose` ecosystem. This repository has **no Dockerfile at all**, by design: the image comes
 from buildpacks (spec §12). So adding `package-ecosystem: docker` here would match nothing.
@@ -303,15 +305,25 @@ from buildpacks (spec §12). So adding `package-ecosystem: docker` here would ma
 Those images are pinned (`postgres:16-alpine`, `redis:7-alpine`, `confluentinc/cp-kafka:7.6.0`,
 `quay.io/keycloak/keycloak:26.4`, `traefik:v3.5` by digest,
 `otel/opentelemetry-collector-contrib:0.158.0`), which is the right posture for reproducibility and
-the wrong one for staleness: **nothing tells anyone when one of them grows a CVE.** They are
-development and test infrastructure rather than deployed artefacts, which bounds the exposure but
-does not remove it.
+the wrong one for staleness. **Stage 11d is what now tells someone when one of them grows a CVE**: a
+shell loop in the required `security` job over the image refs parsed out of
+`docker/docker-compose.yml`, at `CRITICAL,HIGH` with `ignore-unfixed`, writing a per-image count to
+the job summary and the CVE list to the log.
 
-**The cheap fix, not taken here:** a Trivy step looping over the images named in
-`docker-compose.yml`. It needs no new tool — Trivy is already wired and pinned — and would take
-about a minute. It is named rather than done because this change is already large, and adding a
-scanner that has never been run to a branch under review is how a gate arrives red for reasons
-nobody has triaged.
+**It reports; it does not gate — and the distinction is deliberate, not an unfinished edge.** Those
+tags are months old, so the step arrives with findings, and a scanner that lands red for reasons
+nobody has triaged is how a gate gets ignored. `--exit-code` is therefore absent. Read the summary
+table before treating this row as closed: **the gap is now observable, not yet closed.**
+
+**One thing in that step can fail the build, and it is not a finding.** The step asserts it parsed
+**six** image refs and exits 1 otherwise, because a parse that matched nothing would scan nothing and
+print an empty table — a result identical to six genuinely clean images (`AGENTS.md` trap 8).
+Proven differentially before it landed: the real file parses 6 and exits 0; the same file with its
+`image:` keys renamed parses 0 and exits 1.
+
+The compose file is the **only** authority for that list. Copying six refs into `ci.yml` would go
+stale the first time one was bumped, and the staleness would be invisible — a green scan against
+versions nothing runs.
 
 - **OWASP Dependency-Check** scans the build tree — including test-scope dependencies — nightly and
   whenever `pom.xml` changes. Accepted findings live in `.github/owasp-suppressions.xml`, each

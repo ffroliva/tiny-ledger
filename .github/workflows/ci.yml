@@ -39,6 +39,43 @@ jobs:
         # "17 known, 0 new" whatever changed under docs/. See spec §8.4 and §12.1.
         run: ./mvnw -q spotless:check
 
+      # The application image tag is spelled in FOUR files — pom.xml builds it, and
+      # docker-compose.yml, scripts/e2e/run-e2e.sh and this workflow's Trivy step each name it.
+      # Only the pom's used to derive from ${project.version}, so a version bump moved the built
+      # image to a new tag while the other three kept naming the old one: compose started a STALE
+      # image and the e2e guard confirmed it was present, because it was. Taking the version out of
+      # the tag removes that by construction; this step is what keeps it out.
+      #
+      # It asserts the four sites agree, which is the property itself rather than a proxy for it —
+      # not "no version appears", which would pass just as happily if a site were deleted.
+      #
+      # DIFFERENTIAL BY CONSTRUCTION (AGENTS.md trap 7): the same pattern must score at least four
+      # hits and exactly one distinct value. A pattern that matched nothing fails on the count, so
+      # an empty result can never read as agreement — the failure mode that makes greps untrustworthy
+      # as evidence here.
+      - name: "Stage 1 — the app image tag agrees across every file that spells it"
+        run: |
+          set -uo pipefail
+          files="pom.xml docker/docker-compose.yml scripts/e2e/run-e2e.sh .github/workflows/ci.yml"
+          hits=$(grep -hoE 'tiny-ledger:[A-Za-z0-9._-]+' $files || true)
+          n=$(printf '%s\n' "$hits" | grep -c . || true)
+          distinct=$(printf '%s\n' "$hits" | sort -u | grep -c . || true)
+          echo "$hits" | sort | uniq -c
+          if [ "$n" -lt 4 ]; then
+            echo "::error::found $n image-tag mentions across $files, expected at least 4 — the search broke, or a site was deleted"
+            exit 1
+          fi
+          if [ "$distinct" -ne 1 ]; then
+            echo "::error::those $n mentions spell $distinct DIFFERENT tags; they must all name the same image"
+            printf '%s\n' "$hits" | sort -u
+            exit 1
+          fi
+          case "$(printf '%s\n' "$hits" | sort -u)" in
+            *[0-9].[0-9]*)
+              echo "::error::the tag carries a version again — pom.xml is the only place a version belongs"
+              exit 1 ;;
+          esac
+
   unit:
     needs: gate
     # No Docker required: `verify` starts zero containers **by construction** — surefire's *IT.java
@@ -88,10 +125,10 @@ jobs:
         # Named for what it runs, and ONLY what it runs. The old "Stages 7-12" label claimed stages
         # this job never had; the replacement comment then went stale the other way, still saying
         # 8, 9 and 10 "do NOT exist yet" after they landed in this same file. They are jobs below:
-        # `cli` (stage 8), `e2e` (stages 9 and 9b), `load` (stage 10, workflow_dispatch-only).
-        # Stage 12 (publish) is genuinely unbuilt. Stage 11 (security) is the `security` job.
-        # Stage 11 (security): the `security` job below runs gitleaks and now Trivy against the built
-        # image (issue #11). `detect-secrets` is deliberately not wired — see that job's summary step.
+        # `cli` (stage 8), `e2e` (stages 9 and 9b), `load` (stage 10, workflow_dispatch-only),
+        # `security` (stage 11: gitleaks, the image Trivy scan, and 11d over the Compose images) and
+        # `zap` (11c baseline, 11e API scan). `detect-secrets` is deliberately not wired — see the
+        # `security` job's summary step. Stage 12 (publish) is the only one genuinely unbuilt.
         run: ./mvnw -q verify -Pit
 
       - name: "Integration test count — a green build that ran nothing is not green"
@@ -182,7 +219,9 @@ jobs:
       - name: "Stage 11 — Trivy image scan"
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: tiny-ledger:0.1.0-SNAPSHOT
+          # No version in the tag, deliberately — see pom.xml's <image> block. A versioned tag
+          # here would have scanned an image the bump had already moved away from.
+          image-ref: tiny-ledger:local
           # Only inputs that DIFFER from the action's defaults are set here. `scan-type: image` and
           # `format: table` are already the defaults (action.yaml@v0.36.0), so stating them adds
           # lines that look like decisions and are not. `severity` (default: everything),
@@ -196,6 +235,68 @@ jobs:
           # which trains people to ignore it. THE CONSEQUENCE IS THAT THIS BUILD CAN BE GREEN WITH
           # KNOWN-UNFIXABLE CRITICALS PRESENT IN THE IMAGE. That is accepted, not overlooked.
           ignore-unfixed: true
+
+      # ---------------------------------------------------------------------------------------
+      # Stage 11d. The Compose images were the LAST uncovered surface in this repository, and the
+      # gap was structural rather than a configuration oversight: Dependabot's `docker` ecosystem
+      # matches only /dockerfile|containerfile/i (dependabot-core, docker/lib/dependabot/docker/
+      # file_fetcher.rb), there is no docker-compose ecosystem, and this repository has NO
+      # Dockerfile by design (buildpacks, spec §12). The step above scans only the application
+      # image. Nothing told anyone when postgres, redis, kafka, keycloak, traefik or the Collector
+      # grew a CVE.
+      #
+      # REPORT ONLY, AND THAT IS THE POINT OF THIS REVISION rather than a shortcut. Those tags are
+      # months old and this arrives with findings on its first run. A scanner that lands red for
+      # reasons nobody has triaged is how a gate gets ignored — the failure mode this pipeline has
+      # already shipped twice. Trivy's `--exit-code` is absent below, which is its default and
+      # means "report, do not fail". Tighten AFTER the first run's findings are triaged.
+      #
+      # docker/docker-compose.yml is the ONE authority for the list. Six image refs copied into
+      # this file would drift the first time one is bumped, and the drift would be invisible: the
+      # scan would stay green against versions that are no longer deployed.
+      #
+      # Pinned by tag, like every other version here. It is the trivy CONTAINER rather than
+      # trivy-action because an Action takes one `image-ref` and cannot loop; the binary install
+      # dance gitleaks does above would be a third mechanism for no gain, and Docker is already
+      # present in this job (build-image ran above).
+      - name: "Stage 11d — Trivy over the Compose images (report only)"
+        if: always()
+        run: |
+          set -uo pipefail
+          images=$(sed -n 's/^[[:space:]]*image:[[:space:]]*//p' docker/docker-compose.yml | grep -v '^tiny-ledger:' || true)
+          n=$(printf '%s\n' "$images" | grep -c . || true)
+          # THE CHECK THAT CAN FAIL, and the only one in this step (AGENTS.md trap 8). Without it a
+          # parse that matched nothing would scan nothing and print an empty, clean-looking table —
+          # a result IDENTICAL to six genuinely clean images. The differential is the count: this
+          # asserts the parse found the images, so a "no findings" summary means something.
+          if [ "$n" -lt 6 ]; then
+            echo "::error::parsed $n image refs from docker/docker-compose.yml, expected 6 — the PARSE broke; this is not a clean result"
+            exit 1
+          fi
+          {
+            echo "### Stage 11d — Compose images (report only, does NOT fail this job)"
+            echo ""
+            echo "| Image | CRITICAL/HIGH, fixable |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for ref in $images; do
+            f="trivy-$(printf '%s' "$ref" | tr -c 'A-Za-z0-9._-' '_').json"
+            # --scanners vuln: secret and misconfig scanning of third-party images is a different
+            # question and would report on their build choices, not on ours.
+            if docker run --rm -v trivy-cache:/root/.cache/trivy aquasec/trivy:0.73.0 \
+                 image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+                 --quiet --format json "$ref" > "$f"; then
+              c=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$f")
+              echo "| \`$ref\` | $c |" >> "$GITHUB_STEP_SUMMARY"
+              jq -r --arg r "$ref" '[.Results[]?.Vulnerabilities[]?][] | "\($r)  \(.Severity)  \(.VulnerabilityID)  \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)"' "$f"
+            else
+              # A pull or scan failure is NOT zero findings, and must not read as a clean row.
+              echo "::warning::trivy failed on $ref"
+              echo "| \`$ref\` | **scan failed** |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`ignore-unfixed: true\`, as above — a finding with no available fix is not counted here." >> "$GITHUB_STEP_SUMMARY"
 
       - name: "Stage 11 — what is covered, and what is not"
         if: always()
@@ -439,6 +540,115 @@ jobs:
           fail_action: true
           allow_issue_writing: false
           artifact_name: zap-baseline
+
+      # ─────────────────────────────────────────────────────────────────────────────────────────
+      # Stage 11e. THE BASELINE'S CEILING IS STRUCTURAL, not a configuration miss, and this is the
+      # step that lifts it. A baseline spiders for links and then reads passively; this is a
+      # bearer-token JSON API with no anonymous surface and no hyperlinks, so the spider reached
+      # `Total of 3 URLs` on the run above and every one of the NINE operations in
+      # docs/api/openapi.yaml went unvisited. The baseline checks the EDGE — TLS, redirect,
+      # headers, error shapes. It cannot check a route, and no amount of authentication would
+      # change that: with or without a token the spider still has no links to follow.
+      #
+      # zap-api-scan.py enumerates operations from the CONTRACT instead of crawling for them.
+      #
+      # A LIVE TOKEN IS THE WHOLE POINT, AND ITS PROOF IS THE POINT OF THIS FIRST STEP. Without one
+      # every route answers 401, the passive rules read nine error bodies, and the scan reports a
+      # clean result — indistinguishable from a genuinely clean API (AGENTS.md trap 8). A token
+      # that is merely non-empty proves nothing: an expired or wrong-audience one 401s just as
+      # silently. So the check is differential — the same URL, twice, one variable changed.
+      - name: "Stage 11e — mint a bearer token, and prove it authenticates"
+        env:
+          CURL_CA_BUNDLE: docker/tls/ca.crt
+        run: |
+          set -uo pipefail
+          TOKEN=$(curl -sS -X POST https://auth.localhost/realms/tiny-ledger/protocol/openid-connect/token \
+            -d client_id=ledger-test -d username=alice -d password=dev-only -d grant_type=password \
+            | jq -r .access_token)
+          # Emptiness AND "null". A failed connection writes nothing, `jq -r` over empty input
+          # emits the EMPTY STRING, and `"" != "null"` is true — so a null-only guard passes and
+          # `Authorization: Bearer ` goes out blank. scripts/e2e/restart-replay.sh paid for this.
+          [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "::error::no token minted from Keycloak"; exit 1; }
+          echo "::add-mask::$TOKEN"
+          with=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" https://127.0.0.1/api/v1/accounts)
+          without=$(curl -s -o /dev/null -w '%{http_code}' https://127.0.0.1/api/v1/accounts)
+          echo "GET /api/v1/accounts — with token: $with, without: $without"
+          [ "$with" = 200 ] && [ "$without" = 401 ] || {
+            echo "::error::the token is not live: with=$with (want 200), without=$without (want 401)"
+            exit 1
+          }
+          echo "ZAP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      # `-S` IS WHAT KEEPS THE REPOSITORY'S RULE TRUE. zap-api-scan.py runs an ACTIVE scan by
+      # default; safe mode skips it and scans passively instead. A baseline and never an active
+      # scan — no attack payload against a ledger — is the posture stage 11c was chosen for, and
+      # dropping it silently while "upgrading" the coverage would be a worse trade than the gap.
+      #
+      # WHAT IT DOES STILL DO, stated because "passive" oversells it: importing the definition
+      # sends one request per operation, and two of those are PUT deposits/withdrawals and one is
+      # POST an account. The scan therefore WRITES to the ledger — with the contract's own example
+      # values, not attack payloads. Harmless against a stack this job creates and destroys, and it
+      # is why this runs AFTER the baseline rather than before it.
+      #
+      # `-O` because the contract's `servers:` is `/` — a relative URL, deliberately: the contract
+      # does not name a deployment. The host has to come from the runner.
+      #
+      # The ZAP container is run directly rather than through zaproxy/action-api-scan, for the same
+      # reason stage 11d runs Trivy directly: the flags that matter here (-S, -O, the replacer) are
+      # the whole decision, and they belong in the diff rather than inside an action's `cmd_options`
+      # string. `--network=host` so 127.0.0.1 is the runner's loopback and reaches Traefik.
+      - name: "Stage 11e — ZAP API scan over the OpenAPI contract"
+        run: |
+          set -uo pipefail
+          status=0
+          docker run --rm --network=host -v "$PWD:/zap/wrk/:rw" \
+            ghcr.io/zaproxy/zaproxy:2.17.0 \
+            zap-api-scan.py -t /zap/wrk/docs/api/openapi.yaml -f openapi -S \
+              -O https://127.0.0.1 \
+              -c /zap/wrk/.zap/api-rules.tsv \
+              -J zap-api-report.json -r zap-api-report.html \
+              -z "-config replacer.full_list(0).description=auth \
+                  -config replacer.full_list(0).enabled=true \
+                  -config replacer.full_list(0).matchtype=REQ_HEADER \
+                  -config replacer.full_list(0).matchstr=Authorization \
+                  -config replacer.full_list(0).regex=false \
+                  -config replacer.full_list(0).replacement=\"Bearer $ZAP_TOKEN\"" \
+            2>&1 | tee zap-api.log || status=$?
+          echo "zap-api-scan.py exit: $status" >> "$GITHUB_STEP_SUMMARY"
+          # FINDINGS GATE. This landed report-only for exactly one run, which is the same call
+          # stage 11d made — a scanner that arrives red for untriaged reasons is how a gate gets
+          # ignored. That run reported ONE finding, it was triaged, and it was FIXED rather than
+          # dispositioned (Cross-Origin-Resource-Policy, now set in docker/traefik/dynamic.yml), so
+          # there is nothing left to tolerate and no reason to keep the exemption.
+          #
+          # The red half of the proof is a real run rather than a construction: `31277939324`, with
+          # the header absent, reported `WARN-NEW: 1` and this script exited non-zero — so with
+          # this line present that run would have failed. One variable changed between it and the
+          # run that must now be green.
+          exit "$status"
+
+      # THE COVERAGE ASSERTION, and it is the reason this step is not decoration. A scan that
+      # imported nothing reports nothing, which reads exactly like a clean API. ZAP prints its own
+      # count, and the baseline in the step above supplies the control: it reached `Total of 3
+      # URLs`. If this scan does not materially exceed that, it did not enumerate the contract and
+      # its silence means nothing.
+      - name: "Stage 11e — did it actually reach the routes?"
+        if: always()
+        run: |
+          set -uo pipefail
+          n=$(grep -oE 'Total of [0-9]+ URLs' zap-api.log | grep -oE '[0-9]+' | tail -1)
+          n=${n:-0}
+          echo "### Stage 11e — ZAP API scan reached $n URLs (baseline reaches 3)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$n" -le 3 ]; then
+            echo "::error::the API scan reached $n URLs, no more than the baseline's 3 — the contract was not enumerated, so a clean report proves nothing"
+            exit 1
+          fi
+          grep -E 'FAIL-NEW|WARN-NEW|PASS:' zap-api.log | tail -3 >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: "Stage 11e — publish the API scan report"
+        if: always()
+        uses: actions/upload-artifact@v7
+        with: { name: zap-api-scan, path: "zap-api-report.*", if-no-files-found: warn }
 
       - name: Compose logs on failure
         if: failure()

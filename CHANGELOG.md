@@ -174,6 +174,20 @@
   exits 0 is the defect the deleted stage 6 had. First report: `FAIL-NEW: 0, WARN-NEW: 1, PASS: 66`.
 - **`docs/urls-and-tls.md` and `docs/pitfalls.md`** — which URLs exist and where the encryption
   stops, and the runtime failures that cost hours, grouped by the symptom you actually see.
+- **Stage 11d — Trivy over the six Compose images** (spec v3.45, #28), inside the required `security`
+  job. It **reports and does not gate**, deliberately: those tags are months old and a scanner
+  landing red for untriaged reasons is how a gate gets ignored. Exactly one thing in the step fails
+  the build and it is not a finding — it asserts the parse produced six image refs, because a parse
+  that matched nothing would print an empty, clean-looking table indistinguishable from six clean
+  images (`AGENTS.md` trap 8). The gap it closes was **structural**: Dependabot's `docker` ecosystem
+  matches only `/dockerfile|containerfile/i`, and this repository has no Dockerfile by design.
+- **Stage 11e — a ZAP API scan over `openapi.yaml`** (#30), lifting the baseline's structural
+  ceiling. The baseline is a spider against a bearer-token API with no anonymous surface and no
+  hyperlinks, so it only ever reached three URLs; the API scan reads the contract and exercises nine
+  routes with live `200` JSON. It immediately found what the baseline structurally could not — a
+  missing `Cross-Origin-Resource-Policy`, which rule 90004 raises only on a response a browser could
+  embed, and there is nothing to protect in a `401` body. Fixed on the terminator rather than
+  dispositioned.
 
 ### Removed
 - **CI stage 6 and the vendored ISO-compliance skill, deleted rather than repaired.** The script
@@ -242,6 +256,14 @@
   unauthenticated `GET /logout` with a 302 to a page this API does not serve.
 
 ### Changed
+- **The application image tag stops carrying a version** (spec v3.46, #28). The tag is spelled in
+  four files — `pom.xml` builds it, `docker-compose.yml` runs it, `run-e2e.sh` guards on it and
+  `ci.yml` scans it — and only the pom's derived from `${project.version}`, so a version bump moved
+  the built image to a new tag while the other three kept naming the old one: Compose started a
+  **stale** image and the e2e guard confirmed it was present, because it was. A stage-1 check now
+  asserts the four sites agree, differentially by construction — at least four hits and exactly one
+  distinct value, so an empty result can never read as agreement.
+
 - **Keycloak stopped publishing `8081` entirely**, which made the TLS change a *rename* rather than a
   toggle: `iss` moved to `https://auth.localhost/realms/tiny-ledger` in eight places at once. A
   published plaintext Keycloak mints tokens whose issuer is derived from whatever the caller typed,
@@ -254,7 +276,7 @@
   2026-08-07 while the project's quality gate was ERROR and the README badge read
   `quality gate failed`. `-Dsonar.qualitygate.wait=true` makes the scanner poll for the verdict and
   exit non-zero on ERROR.
-- **A repository-wide documentation accuracy pass** (spec v3.45). Ten documents were cross-checked
+- **A repository-wide documentation accuracy pass** (spec v3.47). Ten documents were cross-checked
   against the code, the Compose stack and the workflow that actually runs; every correction is a
   document having described a system different from the one that shipped, and nothing in the
   application changed. Spec §9.6 called stage 9 unbuilt sixty lines from the §12.1 row describing it
