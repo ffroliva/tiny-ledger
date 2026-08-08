@@ -37,12 +37,27 @@
 #      on the same run rather than assumed. A scan that enumerated nothing fails here instead of
 #      passing quietly.
 #
-# ── STATUS ──────────────────────────────────────────────────────────────────────────────────────
-# NO DISPOSITIONS YET, and the file is committed empty of them on purpose. Findings do not gate on
-# this landing (`|| true` in ci.yml, alongside the reason). The first run's report is the input to
-# triage; each accepted finding then arrives here with its rule id and a reason, where it is
-# visible in a diff, and the `|| true` goes.
+# ── STATUS: NO DISPOSITIONS, AND THAT IS THE RESULT RATHER THAN THE STARTING POINT ──────────────
+# The scan landed report-only for exactly one run. Measured, run `31277939324`:
+#
+#   Total of 14 URLs        (the baseline reaches 3, on the same stack, in the same run)
+#   FAIL-NEW: 0   WARN-NEW: 1   PASS: 118        (the baseline exercises 66)
+#
+# The single finding was `Cross-Origin-Resource-Policy Header Missing or Invalid [90004]`, and it
+# was FIXED rather than tolerated — the header is now set in `docker/traefik/dynamic.yml`. So this
+# file carries no dispositions because there is nothing left to tolerate, not because nobody
+# looked. Findings gate from the next run on.
+#
+# THE FINDING IS ALSO THE ARGUMENT FOR STAGE 11e EXISTING. Rule 90004 fires on a response a browser
+# could embed; the baseline only ever reached 401s, and an error body has nothing to protect. Nine
+# routes with live 200 JSON responses — account balances among them — made the rule apply at once.
+# That class of finding was INVISIBLE to the edge scan, not tolerated by it.
+#
+# The red half of the gate's proof is that same run: with the header absent it reported WARN-NEW: 1
+# and zap-api-scan.py exited non-zero, so with the gate in place it would have failed. One variable
+# changed between it and the run that must now be green.
 #
 # IGNORE means "this does not apply to this system", never "we could not be bothered". A rule that
 # genuinely applies gets fixed — headers on the terminator in docker/traefik/dynamic.yml, response
-# shapes in the application — rather than a line here.
+# shapes in the application — rather than a line here. The first finding this scan ever produced
+# was resolved that way, which is the precedent this line is asking the next reader to follow.
