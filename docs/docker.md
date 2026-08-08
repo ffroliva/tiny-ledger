@@ -346,7 +346,8 @@ published *and* the consumer read it back — which is the strongest single chec
 wired end to end, not just answering health probes.
 
 ```bash
-AUDIT=$(curl -s -X POST 'http://127.0.0.1:8081/realms/tiny-ledger/protocol/openid-connect/token' \
+AUDIT=$(curl -s --cacert docker/tls/ca.crt -X POST \
+  'https://auth.localhost/realms/tiny-ledger/protocol/openid-connect/token' \
   -d 'grant_type=password' -d 'client_id=ledger-test' \
   -d 'username=dave' -d 'password=dev-only' | jq -r .access_token)
 
@@ -422,7 +423,7 @@ docker compose -f docker/docker-compose.yml --profile app down -v     # delete i
 **Always pass `--profile app` to `down`.** Without it, Compose leaves the app container running,
 fails to remove the network, and **still exits 0** — verified on Compose v2.38.1. A teardown that
 reports success while leaving things behind is how the next `up` ends up racing a stale container for
-the published ports. Since TLS landed those are **Traefik's 8443 and 8000**; the application itself
+the published ports. Since TLS landed those are **Traefik's 443 and 80**; the application itself
 publishes nothing.
 
 The event store is a named volume, so plain `down` preserves it. `-v` is the one that discards the

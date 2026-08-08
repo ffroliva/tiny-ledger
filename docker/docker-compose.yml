@@ -99,20 +99,16 @@ services:
       # (Those were the published-port days. The lesson is unchanged and is why the hostname is
       # pinned below; only the value moved.)
       #
-      # Same host, same realm, same user, two spellings of loopback, and only one of them
-      # authenticates. That is a live trap rather than a hypothetical: `scripts/e2e/run-e2e.sh`
-      # deliberately pins 127.0.0.1 everywhere (the IPv6 routing trap documented in that file), while
-      # `ledger-cli/src/ledger_cli/config.py` defaults issuer_uri to `localhost`. The suite passes
-      # today only because those two disagree — align them in the obvious direction and it breaks.
+      # Same host, same realm, same user, two spellings of loopback, and only one authenticates.
+      # Pinning the hostname makes `iss` a property of the DEPLOYMENT rather than of the request, so
+      # every caller gets the same issuer no matter how it dialled in. The alternative — relaxing
+      # issuer validation — throws away the check that the token came from the issuer we trust, and
+      # is never acceptable to make a test pass.
       #
-      # Pinning the hostname makes `iss` a property of the DEPLOYMENT instead of a property of the
-      # request, so every caller gets the same issuer no matter how it dialled in. This is the fix
-      # the #11 plan names. The alternative — relaxing issuer validation — throws away the check that
-      # the token came from the issuer we trust, and is never acceptable to make a test pass.
-      # RENAMED when Traefik took over the edge (PR #25's decision record). `iss` is now minted at
-      # the proxy's hostname over TLS, and this value is what every one of the eight sites that
-      # spell the issuer must agree with — they move together or nothing authenticates, and the
-      # failure is a flat 401 that says nothing about which side is wrong.
+      # `ledger-cli/src/ledger_cli/config.py` now defaults to this SAME value; an earlier version of
+      # this comment said the two disagreed and that aligning them would break the suite. They are
+      # aligned and the suite passes.
+      #
       # ONE variable for the auth origin, and docker-compose derives BOTH this and the application's
       # LEDGER_ISSUER_URI from it, so the two can never drift apart — they are the pair whose
       # disagreement produces a bare 401 that says nothing about which side is wrong.
@@ -255,17 +251,21 @@ services:
     # Both are still reachable from INSIDE the network (Traefik dials app:8080), which is all
     # either of them needs.
 
-  # Terminates TLS for the application, and nothing else. Pinned by tag AND digest for the same
+  # Terminates TLS for the application AND for Keycloak. Pinned by tag AND digest for the same
   # reason the buildpack builder is: a mutable tag feeding a stack that a required check runs
   # against is a base image to patch and forget (spec §12).
   #
   # `profiles: [app]` alongside the application, so a plain `docker compose up` still starts
   # exactly the four backing services §6.6 and the README both assert.
   #
-  # Keycloak is deliberately NOT routed through here — it derives `iss` from the Host header (see
-  # KC_HOSTNAME above, and the measurement beside it), so fronting it would change the issuer for
-  # the CLI, application-full.properties, ci.yml and ledger-cli/config.py at once, to buy TLS on a
-  # fixture identity provider marked "never deploy". A named gap, not an oversight.
+  # Keycloak IS routed through here (PR #25). One ingress, one certificate story, and no second
+  # scheme in the stack — and it publishes no host port, so there is no plaintext path left that
+  # could mint a token with a different `iss` from the one the application trusts. The routing
+  # itself lives once, in docker/traefik/dynamic.yml.
+  #
+  # An earlier draft of this comment said the opposite ("deliberately NOT routed through here") and
+  # survived the decision that reversed it. Replaced rather than amended: two accounts of the same
+  # fact in one file is how a reader ends up restoring the published port this file removed.
   traefik:
     image: traefik:v3.5@sha256:16acb89c6db341182970d6fdafece31303b0a380a8ed7aa51682e225229bf1d2
     profiles: [app]
@@ -280,7 +280,7 @@ services:
     # answering `301 https://127.0.0.1/api/v1/accounts`, a redirect to a port nothing publishes,
     # with the flag visibly present in `docker inspect`.
     #
-    # Compose DOES interpolate, so the published port reaches Traefik only from here. Eight flags
+    # Compose DOES interpolate, so the published port reaches Traefik only from here. Nine flags
     # replaced a forty-five line file that had one job it could not do.
     #
     # The dynamic half (certificate, TLS floor, the route) stays in a file — it needs no host
@@ -335,10 +335,14 @@ services:
     volumes:
       # Read-only, both. NOTE what is NOT here: /var/run/docker.sock — see the provider flag above.
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
-      # Generated by scripts/tls/gen-dev-ca.sh, gitignored. `up` fails here if it was never run,
-      # which is the honest failure — Compose creates a DIRECTORY for a missing bind-mount source,
-      # so Traefik would otherwise start and serve its own self-signed default certificate, and
-      # the round trip would "work" against a chain that proves nothing.
+      # Generated by scripts/tls/gen-dev-ca.sh, gitignored.
+      #
+      # `up` does NOT fail if it was never run, and an earlier version of this comment claimed it
+      # did. Compose CREATES A DIRECTORY for a missing bind-mount source, so Traefik starts and
+      # serves its own `CN=TRAEFIK DEFAULT CERT` while every request succeeds end to end — a silent
+      # downgrade that only scripts/e2e/https-check.py's two-trust-store control catches, and that
+      # control does not run on the plain `docker compose up` path a human follows. Run the
+      # generator first; docs/pitfalls.md carries the symptom.
       - ./tls:/etc/traefik/tls:ro
     ports:
       # THE PRIVILEGED PAIR, on purpose. Keycloak sits behind this proxy now, so the published port

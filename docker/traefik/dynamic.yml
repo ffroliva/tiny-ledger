@@ -78,11 +78,22 @@ http:
     # report is about this application rather than about a missing default.
     security-headers:
       headers:
-        # One year, which is the minimum every preload list requires. NOT preloaded and NOT
-        # includeSubDomains: this certificate is a throwaway for `localhost`, and a browser that
-        # pinned HSTS for every localhost subdomain would carry that pin into unrelated projects on
-        # the same developer machine. A real deployment on a real domain sets both.
-        stsSeconds: 31536000
+        # HSTS IS DELIBERATELY NOT SET, and that is a correction rather than an omission.
+        #
+        # An earlier revision sent `max-age=31536000` from this middleware. The `app` router is a
+        # catch-all, so a browser that dialled `https://localhost` — which the README invites — would
+        # receive an HSTS pin for the bare host `localhost`. HSTS is host-scoped and PORT-INDEPENDENT,
+        # so that pin force-upgrades `http://localhost:3000`, `http://localhost:8080` and every other
+        # local development server on that machine for a year, failing with ERR_SSL_PROTOCOL_ERROR
+        # and clearable only through chrome://net-internals/#hsts. Breaking a developer's unrelated
+        # projects is a steep price for a header on a throwaway certificate.
+        #
+        # The reasoning that survived the previous revision worried about `includeSubDomains`
+        # spreading the pin across sibling `.localhost` names and missed the bare-host case, which is
+        # strictly worse. A real deployment on a real domain sets `stsSeconds` and
+        # `stsIncludeSubdomains` and means it; `docs/security.md` records that as a named gap.
+        #
+        # These two are unconditionally correct for a JSON API and cost nothing:
         contentTypeNosniff: true
         frameDeny: true
 

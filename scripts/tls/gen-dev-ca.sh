@@ -38,8 +38,22 @@ elif [ "$#" -gt 0 ]; then
   exit 2
 fi
 
-if [ -f "$OUT/server.crt" ] && [ "$force" = false ]; then
-  echo "$OUT/server.crt already exists — leaving it alone (pass --force to regenerate)"
+# THE GUARD COVERS EVERY ARTEFACT THIS SCRIPT PROMISES, not just the first one, and that is a fix.
+# Keying on `server.crt` alone meant a tree that had a certificate but no truststore -- one run on a
+# machine without keytool on PATH, or a `docker/tls/` from before the truststore existed -- could
+# never repair itself: the guard fired, the keytool block below was unreachable, and jar mode then
+# passed the JVM a trustStore path that did not exist. The JVM does not fall back to `cacerts` for
+# an explicitly-set missing store; it ends up trusting nothing, and every scenario fails with an
+# authentication symptom whose real cause is `PKIX path building failed`.
+#
+# `-checkend 0` is in the condition for the other silent-staleness case: the material is valid 825
+# days and `docker/tls/` is gitignored rather than cleaned, so without this the generator would keep
+# reporting it was leaving a good certificate alone long after it had expired.
+if [ "$force" = false ] &&
+   [ -f "$OUT/server.crt" ] && [ -f "$OUT/ca.crt" ] && [ -f "$OUT/server.key" ] &&
+   [ -f "$OUT/truststore.p12" ] &&
+   openssl x509 -in "$OUT/server.crt" -noout -checkend 0 >/dev/null 2>&1; then
+  echo "$OUT/ is complete and unexpired — leaving it alone (pass --force to regenerate)"
   exit 0
 fi
 
@@ -120,9 +134,10 @@ if command -v keytool >/dev/null 2>&1; then
     -storetype PKCS12 -storepass changeit >/dev/null
   echo "java truststore written to $OUT/truststore.p12 (one CA, password 'changeit')"
 else
-  # Not fatal: only the jar-mode e2e path needs it, and every other consumer of this script has a
-  # JDK by definition. Say so rather than failing a run that does not need it.
-  echo "keytool not on PATH — skipping the Java truststore; E2E_MODE=jar will not be able to reach Keycloak over TLS" >&2
+  # Not fatal: only the host-jar paths need it, and every other consumer of this script has a JDK by
+  # definition. Loud rather than silent, though — and the guard at the top now tests for the file,
+  # so a later run WITH keytool on PATH regenerates instead of reporting everything is fine.
+  echo "::warning::keytool not on PATH — no Java truststore written. Any host-jar path (E2E_MODE=jar, restart-replay.sh, the load job) will fail to reach Keycloak over TLS." >&2
 fi
 
 # The key must not be world-readable. chmod is a no-op on the Windows filesystem and correct on

@@ -136,7 +136,9 @@ openssl verify -CAfile <a DIFFERENT CA>  docker/tls/server.crt   -> verification
 
 The second line is the control. Without it, "OK" would only mean the command ran.
 
-**The certificate carries `DNS:localhost, DNS:app, DNS:traefik, IP:127.0.0.1, IP:::1`.** The IP SANs
+**The certificate carries `DNS:localhost, DNS:app.localhost, DNS:auth.localhost, DNS:app,
+DNS:keycloak, DNS:traefik, IP:127.0.0.1, IP:::1`.** `auth.localhost` is the one the whole
+authentication path depends on, since `iss` is minted there. The IP SANs
 are load-bearing: `scripts/e2e/run-e2e.sh` is obliged to dial `127.0.0.1` because `localhost`
 resolves to `::1` first on the development machine and the IPv6 path does not route there.
 
@@ -148,7 +150,7 @@ resolves to `::1` first on the development machine and the IPv6 path does not ro
 | **Routed to** | `app:8080` **and `keycloak:8080`** by service name, in-network, plaintext |
 | **NOT terminated for** | every backing service — Postgres, Redis, Kafka |
 | **Minimum version** | TLS 1.2, set as the default TLS option |
-| **Headers set at the edge** | HSTS (1 year), `X-Content-Type-Options`, `X-Frame-Options` |
+| **Headers set at the edge** | `X-Content-Type-Options`, `X-Frame-Options`. **HSTS deliberately not sent** — a pin on bare `localhost` is port-independent and would break every other local dev server for a year ([`pitfalls.md`](pitfalls.md)) |
 
 **The application-to-Traefik hop is plaintext, and so is every backing-service hop.** That is the
 named gap this design chose to leave open, not an oversight — a service mesh is the tool for it, and
@@ -195,8 +197,8 @@ and 7 passed with it. So the flag is load-bearing rather than defensive.
 
 **Traefik is given no access to the Docker socket.** The usual Docker provider — which discovers
 routes from container labels — requires mounting `/var/run/docker.sock`, which is root-equivalent on
-the host. This uses the file provider instead: one router and one service, written out by hand in
-`docker/traefik/dynamic.yml`. Adding TLS is not a reason to hand a network-facing container root.
+the host. This uses the file provider instead: **two routers and two services** — the ledger and Keycloak —
+written out by hand in `docker/traefik/dynamic.yml`. Adding TLS is not a reason to hand a network-facing container root.
 
 ### The `X-Forwarded-For` control — the part that is a security property
 
@@ -282,6 +284,35 @@ Not credentials, but the same subject — see [`spec.md`](spec.md) §12.1 stages
 - **GitHub Dependabot vulnerability alerts and automated security fixes are ENABLED.** They cost no
   CI minutes, email on a finding, and match exact package versions. This is the always-on instrument.
 - **Trivy** scans the built container image on every push, in the required `security` job.
+**What each ecosystem is actually covered by — checked, not assumed:**
+
+| Ecosystem | Dependabot | OWASP Dependency-Check | Trivy |
+|---|---|---|---|
+| **Java / Maven** (`pom.xml`) | ✅ weekly, grouped, majors excluded | ✅ nightly + on `pom.xml` | ✅ inside the built image |
+| **GitHub Actions** | ✅ weekly | ✗ | ✗ |
+| **Python** (`ledger-cli`, `uv.lock`) | ✅ weekly, `uv` ecosystem | ✗ — the plugin is Maven-only | ✗ — not in the image |
+| **Compose images** (postgres, redis, kafka, keycloak, traefik, collector) | ❌ **nothing** | ✗ | ✗ — it scans only the application image |
+| **Buildpack builder / run image** (pinned by digest in `pom.xml`) | ❌ nothing | ✗ | ✅ *indirectly* — their OS layers are what Trivy scans |
+
+**The Compose images are a real, currently uncovered gap, and it is not a configuration oversight.**
+Dependabot's `docker` ecosystem reads **only** files matching `/dockerfile|containerfile/i` —
+verified in `dependabot-core`'s `docker/lib/dependabot/docker/file_fetcher.rb` — and there is no
+`docker-compose` ecosystem. This repository has **no Dockerfile at all**, by design: the image comes
+from buildpacks (spec §12). So adding `package-ecosystem: docker` here would match nothing.
+
+Those images are pinned (`postgres:16-alpine`, `redis:7-alpine`, `confluentinc/cp-kafka:7.6.0`,
+`quay.io/keycloak/keycloak:26.4`, `traefik:v3.5` by digest,
+`otel/opentelemetry-collector-contrib:0.158.0`), which is the right posture for reproducibility and
+the wrong one for staleness: **nothing tells anyone when one of them grows a CVE.** They are
+development and test infrastructure rather than deployed artefacts, which bounds the exposure but
+does not remove it.
+
+**The cheap fix, not taken here:** a Trivy step looping over the images named in
+`docker-compose.yml`. It needs no new tool — Trivy is already wired and pinned — and would take
+about a minute. It is named rather than done because this change is already large, and adding a
+scanner that has never been run to a branch under review is how a gate arrives red for reasons
+nobody has triaged.
+
 - **OWASP Dependency-Check** scans the build tree — including test-scope dependencies — nightly and
   whenever `pom.xml` changes. Accepted findings live in `.github/owasp-suppressions.xml`, each
   naming a specific CVE, a reason, and **an expiry date**.

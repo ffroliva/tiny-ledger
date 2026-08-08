@@ -27,9 +27,26 @@ import java.util.UUID;
  */
 public class LedgerSimulation extends Simulation {
 
+    /**
+     * Plaintext, straight to the host jar. The {@code load} job runs the application as a process
+     * rather than as a container, so nothing is published through Traefik on this path — only the
+     * issuer below crosses TLS, because Keycloak has no plaintext port any more.
+     */
     private static final String BASE_URL = System.getProperty("ledger.baseUrl", "http://127.0.0.1:8080");
+
+    /**
+     * HTTPS at the proxy's hostname. This was {@code http://localhost:8081/realms/tiny-ledger} and
+     * was missed when the issuer was renamed — the sweep counted "eight places" and this was the
+     * ninth. The port it named no longer exists at all, so every virtual user's token request would
+     * have been refused and the §9.7 percentile assertions would have failed reporting latency for
+     * what was an unreachable identity provider.
+     *
+     * <p>The JVM running this simulation needs {@code -Djavax.net.ssl.trustStore} pointed at
+     * {@code docker/tls/truststore.p12} for the same reason the host jar does; {@code ci.yml}'s
+     * {@code load} job passes it.
+     */
     private static final String ISSUER =
-            System.getProperty("ledger.issuerUri", "http://localhost:8081/realms/tiny-ledger");
+            System.getProperty("ledger.issuerUri", "https://auth.localhost/realms/tiny-ledger");
     private static final String USERNAME = System.getProperty("ledger.username", "alice");
     private static final String PASSWORD = System.getProperty("ledger.password", "dev-only");
     private static final String CLIENT_ID = System.getProperty("ledger.clientId", "ledger-test");

@@ -165,15 +165,17 @@ fi
 # The flush targets the COMPOSE service by name, never a host or a URL, so it cannot reach anything
 # but this stack's throwaway Redis. What it clears is rate-limit buckets and the balance cache —
 # both derived, neither a system of record. The event store is Postgres.
-$COMPOSE exec -T redis redis-cli FLUSHALL >/dev/null 2>&1 || true
+# NOT `>/dev/null 2>&1 || true`. If the flush silently no-ops -- a restarting container, a renamed
+# service, an image that stops shipping redis-cli -- the very failure this line was added for comes
+# back as an intermittent `429 /errors/rate-limit-exceeded` on the first write of the second leg,
+# with nothing in the output naming the cause. Same trap gen-dev-ca.sh cites AGENTS.md trap 7 for.
+if ! $COMPOSE exec -T redis redis-cli FLUSHALL >/dev/null; then
+  echo "::warning::could not flush Redis — rate-limit buckets from a previous run survive, and a second e2e leg inside the same minute may fail on an exhausted write bucket" >&2
+fi
 
 APP_PID=""
 cleanup() {
   rc=$?
-  # Traefik is removed in BOTH modes, because both start it: image mode routes the application
-  # through it, and jar mode still needs it in front of Keycloak. The four backing services stay
-  # up for whoever brought them up.
-  $COMPOSE --profile app rm -sf traefik >/dev/null 2>&1 || true
   if [ "$E2E_MODE" = image ]; then
     echo "--- application log (compose service 'app') ---"
     # stderr is NOT discarded, and that matters more here than it looks. compose demultiplexes
@@ -185,9 +187,13 @@ cleanup() {
     # could never fire; the header plus empty output is the honest signal instead.
     $COMPOSE --profile app logs --no-color app traefik 2>&1 || true
     # `rm -sf`, not `stop`: the guard above rejects any container that is not (healthy), and a
-    # stopped app container would trip it on the NEXT run. The app is the only service this
-    # script started, so it is the only one it removes — the four backing services stay up for
-    # whoever brought them up.
+    # stopped app container would trip it on the NEXT run. `app` AND `traefik` — both are services
+    # this script started; the four backing services stay up for whoever brought them up.
+    #
+    # AFTER the log dump, never before. An earlier revision removed traefik on the trap's first
+    # line, ten lines above the `logs ... app traefik` call, so the proxy's access log was destroyed
+    # on exactly the runs that needed it — and `docker compose logs` exits 0 with empty output for a
+    # container that no longer exists, so nothing signalled the loss.
     $COMPOSE --profile app rm -sf app traefik >/dev/null 2>&1 || true
   else
     echo "--- application log ($APP_LOG) ---"
@@ -196,6 +202,11 @@ cleanup() {
       kill "$APP_PID" 2>/dev/null || true
       wait "$APP_PID" 2>/dev/null || true
     fi
+    # Jar mode starts Traefik too — Keycloak is behind it even when the application is not — so jar
+    # mode dumps its log and removes it, in that order, for the same reason image mode does.
+    echo "--- traefik log ---"
+    $COMPOSE --profile app logs --no-color traefik 2>&1 || true
+    $COMPOSE --profile app rm -sf traefik >/dev/null 2>&1 || true
   fi
   exit $rc
 }

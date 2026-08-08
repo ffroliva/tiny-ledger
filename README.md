@@ -208,12 +208,17 @@ Kafka hop landed, and a symptom→cause table for the things that look broken an
 services, which is what you want when you would rather run the app from your IDE:
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d
-./mvnw spring-boot:run -Dspring-boot.run.profiles=full
+docker compose -f docker/docker-compose.yml --profile app up -d --wait
+./mvnw -q -DskipTests package
+E2E_MODE=jar ./scripts/e2e/run-e2e.sh
 ```
 
-That path has **no Traefik and no TLS** — the app binds `8080` on your host directly, which is what
-running a jar actually is. It is exercised in CI too, as stage 9b.
+The **application** binds `8080` on your host with no proxy and no TLS, which is what running a jar
+actually is; CI exercises this as stage 9b. But `--profile app` is still required, because
+**Keycloak is behind Traefik and publishes no port of its own** — and the JVM needs the dev CA in a
+truststore to fetch its signing keys, which `run-e2e.sh` passes for you and a bare
+`spring-boot:run` does not. [`docs/urls-and-tls.md`](docs/urls-and-tls.md) is the full map;
+[`docs/pitfalls.md`](docs/pitfalls.md) has the symptom if you skip a step.
 
 Every route then requires a bearer token, so `full` is the mode to read if you care about the
 authorisation model (spec §6.4) rather than the ledger mechanics.

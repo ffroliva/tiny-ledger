@@ -108,8 +108,17 @@ def main() -> int:
 
     # 3. The plaintext entrypoint exists only to move callers to TLS. A redirect that quietly
     #    stopped working would leave an unencrypted door open on a published port.
-    with httpx.Client(follow_redirects=False, timeout=5.0) as plain:
-        redirect = plain.get(f"{http_base}/api/v1/accounts")
+    # Wrapped, like checks 1 and 2. Unguarded, a closed port 80 -- taken by IIS, by another proxy,
+    # or by Traefik's web entrypoint failing to bind -- escaped main() as a raw traceback, so no
+    # `::error::` annotation was emitted and run-e2e.sh's EXIT trap immediately dumped the whole
+    # application log on top of it. The cause present but unreadable, which is the failure that
+    # runner's uv guard exists to avoid.
+    try:
+        with httpx.Client(follow_redirects=False, timeout=5.0) as plain:
+            redirect = plain.get(f"{http_base}/api/v1/accounts")
+    except httpx.HTTPError as exc:
+        print(f"::error::the plaintext entrypoint at {http_base} could not be reached: {exc}", file=sys.stderr)
+        return 1
     if redirect.status_code != 301 or not redirect.headers.get("location", "").startswith("https://"):
         print(
             f"::error::the plaintext entrypoint answered {redirect.status_code} "

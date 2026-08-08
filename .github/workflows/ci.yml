@@ -464,8 +464,14 @@ jobs:
           java-version: 25
           cache: maven
 
-      - name: Start the full stack
-        run: docker compose -f docker/docker-compose.yml up -d --wait
+      # `--profile app` brings Traefik with it, and it is REQUIRED since Keycloak moved behind the
+      # proxy: without it nothing listens on 443, every virtual user's token request is refused, and
+      # the job reports a §9.7 threshold miss — latency numbers for an unreachable identity provider.
+      - name: Generate the dev CA
+        run: ./scripts/tls/gen-dev-ca.sh
+
+      - name: Start the full stack behind Traefik
+        run: docker compose -f docker/docker-compose.yml --profile app up -d --wait traefik postgres redis kafka keycloak
 
       # install, not package: benchmarks/ and loadtest/ resolve the app from the local
       # repository, and the `exec` classifier means the plain jar they compile against is
@@ -473,9 +479,15 @@ jobs:
       - name: Build and install the application
         run: ./mvnw -q -DskipTests install
 
+      # -D BEFORE -jar: after it they are application arguments and are silently ignored. The
+      # truststore is what lets this host process fetch Keycloak's key set from the HTTPS issuer.
       - name: Start the app under full,load
         run: |
-          nohup java -jar target/tiny-ledger-0.1.0-SNAPSHOT-exec.jar \
+          nohup java \
+            -Djavax.net.ssl.trustStore="$PWD/docker/tls/truststore.p12" \
+            -Djavax.net.ssl.trustStorePassword=changeit \
+            -Djavax.net.ssl.trustStoreType=PKCS12 \
+            -jar target/tiny-ledger-0.1.0-SNAPSHOT-exec.jar \
             --spring.profiles.active=full,load > app.log 2>&1 &
           ./scripts/e2e/wait-for.sh http://127.0.0.1:8080/api/v1/accounts 401 120 "tiny-ledger (full,load)"
 
