@@ -194,6 +194,68 @@ jobs:
           # KNOWN-UNFIXABLE CRITICALS PRESENT IN THE IMAGE. That is accepted, not overlooked.
           ignore-unfixed: true
 
+      # ---------------------------------------------------------------------------------------
+      # Stage 11d. The Compose images were the LAST uncovered surface in this repository, and the
+      # gap was structural rather than a configuration oversight: Dependabot's `docker` ecosystem
+      # matches only /dockerfile|containerfile/i (dependabot-core, docker/lib/dependabot/docker/
+      # file_fetcher.rb), there is no docker-compose ecosystem, and this repository has NO
+      # Dockerfile by design (buildpacks, spec §12). The step above scans only the application
+      # image. Nothing told anyone when postgres, redis, kafka, keycloak, traefik or the Collector
+      # grew a CVE.
+      #
+      # REPORT ONLY, AND THAT IS THE POINT OF THIS REVISION rather than a shortcut. Those tags are
+      # months old and this arrives with findings on its first run. A scanner that lands red for
+      # reasons nobody has triaged is how a gate gets ignored — the failure mode this pipeline has
+      # already shipped twice. Trivy's `--exit-code` is absent below, which is its default and
+      # means "report, do not fail". Tighten AFTER the first run's findings are triaged.
+      #
+      # docker/docker-compose.yml is the ONE authority for the list. Six image refs copied into
+      # this file would drift the first time one is bumped, and the drift would be invisible: the
+      # scan would stay green against versions that are no longer deployed.
+      #
+      # Pinned by tag, like every other version here. It is the trivy CONTAINER rather than
+      # trivy-action because an Action takes one `image-ref` and cannot loop; the binary install
+      # dance gitleaks does above would be a third mechanism for no gain, and Docker is already
+      # present in this job (build-image ran above).
+      - name: "Stage 11d — Trivy over the Compose images (report only)"
+        if: always()
+        run: |
+          set -uo pipefail
+          images=$(sed -n 's/^[[:space:]]*image:[[:space:]]*//p' docker/docker-compose.yml | grep -v '^tiny-ledger:' || true)
+          n=$(printf '%s\n' "$images" | grep -c . || true)
+          # THE CHECK THAT CAN FAIL, and the only one in this step (AGENTS.md trap 8). Without it a
+          # parse that matched nothing would scan nothing and print an empty, clean-looking table —
+          # a result IDENTICAL to six genuinely clean images. The differential is the count: this
+          # asserts the parse found the images, so a "no findings" summary means something.
+          if [ "$n" -lt 6 ]; then
+            echo "::error::parsed $n image refs from docker/docker-compose.yml, expected 6 — the PARSE broke; this is not a clean result"
+            exit 1
+          fi
+          {
+            echo "### Stage 11d — Compose images (report only, does NOT fail this job)"
+            echo ""
+            echo "| Image | CRITICAL/HIGH, fixable |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for ref in $images; do
+            f="trivy-$(printf '%s' "$ref" | tr -c 'A-Za-z0-9._-' '_').json"
+            # --scanners vuln: secret and misconfig scanning of third-party images is a different
+            # question and would report on their build choices, not on ours.
+            if docker run --rm -v trivy-cache:/root/.cache/trivy aquasec/trivy:0.73.0 \
+                 image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+                 --quiet --format json "$ref" > "$f"; then
+              c=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$f")
+              echo "| \`$ref\` | $c |" >> "$GITHUB_STEP_SUMMARY"
+              jq -r --arg r "$ref" '[.Results[]?.Vulnerabilities[]?][] | "\($r)  \(.Severity)  \(.VulnerabilityID)  \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)"' "$f"
+            else
+              # A pull or scan failure is NOT zero findings, and must not read as a clean row.
+              echo "::warning::trivy failed on $ref"
+              echo "| \`$ref\` | **scan failed** |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`ignore-unfixed: true\`, as above — a finding with no available fix is not counted here." >> "$GITHUB_STEP_SUMMARY"
+
       - name: "Stage 11 — what is covered, and what is not"
         if: always()
         run: |
