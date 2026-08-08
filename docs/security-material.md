@@ -2,10 +2,10 @@
 
 **Read this before adding any credential, key or certificate to this repository.**
 
-This is a **live document**. It describes what is true today, not what is planned, and the section
-that matters most right now is the one saying **there are no TLS certificates yet** — because the
-next piece of work creates them, and a document that pre-announced them would be the exact kind of
-claim spec §12 had to retract once already.
+This is a **live document**. It describes what is true today, not what is planned. Until 2026-08-08
+the section that mattered most was the one saying **there are no TLS certificates yet**; that work
+has landed, and the TLS section below has been **replaced** by what exists — which is what that
+section said would happen, rather than amended around the edges.
 
 > Contract questions → [`spec.md`](spec.md) §6.4. Running the stack → [`docker.md`](docker.md).
 > The rules an agent must know → [`../AGENTS.md`](../AGENTS.md).
@@ -33,9 +33,11 @@ and per `AGENTS.md`, a rule with no gate is a hope, so that is stated rather tha
 
 ## What exists today
 
-**Verified 2026-08-08:** `git ls-files | grep -iE '\.(pem|key|p12|jks|crt|cer|pfx)$'` returns
-**nothing**. Control: the same search shape finds 3 `.json` files, so the zero is an absence and not
-a broken search.
+**Verified 2026-08-08, and re-verified after TLS landed:** `git ls-files | grep -iE
+'\.(pem|key|p12|jks|crt|cer|pfx)$'` returns **nothing**. Control: the same search shape finds 3
+`.json` files, so the zero is an absence and not a broken search. Note that `git ls-files` is the
+right question and `ls` is not — `docker/tls/` holds real key material on any machine that has run
+the e2e suite, and is kept out of git by `.gitignore` rather than by not existing.
 
 | Material | Where it lives | How it is injected | Secret? |
 |---|---|---|---|
@@ -46,7 +48,7 @@ a broken search.
 | `NVD_API_KEY` | GitHub Actions secret; `.env.nvd` locally | `env:` on the Dependency-Check step, passed **by variable name** | **Yes** |
 | `GRAFANA_SERVICE_ACCOUNT_TOKEN` | `.env.grafana` (ignored) | `${VAR}` expansion in `.mcp.json`, read from the shell Claude Code was launched with | **Yes** |
 | `GRAFANA_CLOUD_OTLP_TOKEN` / `..._HEADERS_AUTHORIZATION` | `.env.grafana` (ignored) | `environment:` on the opt-in `otel-collector` service | **Yes** |
-| **TLS certificates** | **none exist** | — | — |
+| **Dev CA + server certificate** | `docker/tls/` — **gitignored**, never committed | generated on demand by `scripts/tls/gen-dev-ca.sh`; CI runs the same script in-run | **No** — throwaway, per machine or per CI run |
 
 **CI holds exactly two secrets: `SONAR_TOKEN` and `NVD_API_KEY`.** No Grafana credential, no registry
 credential, no certificate. Both CI steps that use a secret **skip loudly and say they skipped**
@@ -108,34 +110,136 @@ the JVM started and does not survive it.
 
 ---
 
-## TLS — DOES NOT EXIST YET
+## TLS — BUILT, for the edge only
 
-**There is no certificate, no CA, no keystore and no HTTPS listener in this repository today.** Every
-hop in the Compose stack is plaintext, including the backing services. If you are looking for "where
-is the certificate and how was it generated", the honest answer is that there is not one to find.
+**Traefik terminates TLS in front of the application.** The certificate is generated on demand, is
+never committed, and CI holds no certificate secret at all — it generates its own throwaway CA
+inside the run. What follows is what exists, verified by running it.
 
-The design **is** agreed, and is recorded here so the next person does not re-open it:
+### Where the material lives, and why none of it is in git
 
-- **Traefik terminates TLS** — the same tool in Compose and as a Kubernetes ingress controller, so
-  local rehearses production.
-- **A locally generated CA for dev and CI; Let's Encrypt for the deployed environment**, on the
-  domain `archb.uk`.
-- **CI gets no certificate secret.** It generates a throwaway CA in-run — the same principle that
-  keeps the Grafana token out of CI entirely.
-- **No service mesh.** Its value here would be encrypting the backing-service hops, which are a named
-  gap rather than scope.
-- **Backing-service TLS (Postgres, Redis, Kafka): a named gap, not built.**
-- **mTLS / FAPI is a separate, later piece of work.**
+| Thing | Where | How it gets there | In git? |
+|---|---|---|---|
+| Dev CA key + certificate | `docker/tls/ca.key`, `docker/tls/ca.crt` | `scripts/tls/gen-dev-ca.sh` | **No** — `docker/tls/` is gitignored |
+| Server key + certificate | `docker/tls/server.key`, `docker/tls/server.crt` | signed by that CA, same script | **No** |
+| The certificate Traefik serves | inside the container | read-only bind mount of `docker/tls` | n/a |
+| The CA a client trusts | `SSL_CERT_FILE`, exported by `run-e2e.sh` | the file above | n/a |
 
-**The trap that matters most in that work is a security regression, not a config detail.** Putting a
-proxy in front changes every request's source address, and spec §6.1's IP backstop rate-limits by
-client IP. If the application trusts `X-Forwarded-For` from anywhere, **any caller can spoof their IP
-and walk past the backstop** — adding TLS would have quietly removed a control. Trust forwarded
-headers only from Traefik's address, and give that a test that fails if the trust is widened.
+The generator is **idempotent** — it regenerates only with `--force`, because handing Traefik a new
+certificate under a running stack produces a failure that reads as a routing problem. It verifies
+its own output before exiting:
 
-**When TLS lands, this section gets replaced by the real thing:** how the dev CA is generated, where
-the certificate and key live, how they reach the container, how CI produces its throwaway pair, and
-what the renewal path is. Until then it says "not built", because that is what is true.
+```
+openssl verify -CAfile docker/tls/ca.crt docker/tls/server.crt   -> OK                      exit 0
+openssl verify -CAfile <a DIFFERENT CA>  docker/tls/server.crt   -> verification failed     exit 2
+```
+
+The second line is the control. Without it, "OK" would only mean the command ran.
+
+**The certificate carries `DNS:localhost, DNS:app, DNS:traefik, IP:127.0.0.1, IP:::1`.** The IP SANs
+are load-bearing: `scripts/e2e/run-e2e.sh` is obliged to dial `127.0.0.1` because `localhost`
+resolves to `::1` first on the development machine and the IPv6 path does not route there.
+
+### What TLS is, and what it is not, in this repository
+
+| | |
+|---|---|
+| **Terminated at** | Traefik, `profiles: [app]`, published on `8443` (HTTPS) and `8000` (301 → HTTPS) |
+| **Routed to** | `app:8080` by service name, in-network, plaintext |
+| **NOT terminated for** | Keycloak, and every backing service |
+| **Minimum version** | TLS 1.2, set as the default TLS option |
+| **Headers set at the edge** | HSTS (1 year), `X-Content-Type-Options`, `X-Frame-Options` |
+
+**The application-to-Traefik hop is plaintext, and so is every backing-service hop.** That is the
+named gap this design chose to leave open, not an oversight — a service mesh is the tool for it, and
+ADR 0005 records why one is not in scope.
+
+**Keycloak is deliberately not fronted by Traefik.** It derives `iss` from the `Host` header, and
+`docker-compose.yml` carries the measurement showing two spellings of loopback mint different
+issuers of which only one authenticates. Fronting it would change the issuer string for the CLI,
+`application-full.properties`, `ci.yml` and `ledger-cli/config.py` simultaneously, to buy TLS on a
+fixture identity provider marked *never deploy*. In a real deployment the IdP is a managed service
+with its own certificate. **Nothing about issuer validation was relaxed to make any of this work.**
+
+**Traefik is given no access to the Docker socket.** The usual Docker provider — which discovers
+routes from container labels — requires mounting `/var/run/docker.sock`, which is root-equivalent on
+the host. This uses the file provider instead: one router and one service, written out by hand in
+`docker/traefik/dynamic.yml`. Adding TLS is not a reason to hand a network-facing container root.
+
+### The `X-Forwarded-For` control — the part that is a security property
+
+Spec §6.1 row 4 rate-limits *any traffic, per IP* at 300/minute, and `IpBackstopFilter` reads
+`getRemoteAddr()`. A proxy in front makes every request arrive from the proxy's address, so the
+application has to read the forwarded address — and the moment it does, the question is **from
+whom**. Answer it wrong and adding TLS *removes* a control: a caller varying one header lands in a
+fresh bucket every request and never exhausts one.
+
+```properties
+server.forward-headers-strategy=native
+server.tomcat.remoteip.internal-proxies=${LEDGER_TRUSTED_PROXIES:10.89.0.250}
+```
+
+**`native`, not `framework`, and that choice is the control.** `framework` is Spring's
+`ForwardedHeaderFilter`, which has no trusted-proxy concept at all and processes `X-Forwarded-*`
+from any peer — it is the setting that *creates* the hole. `native` is Tomcat's `RemoteIpValve`,
+which rewrites `remoteAddr` only when the directly connected peer already matches
+`internal-proxies`.
+
+**Boot's default for `internal-proxies` is unsafe here, and that is measured rather than argued.**
+The default covers `172.16.0.0/12` — the range Docker hands to Compose networks — so it trusts every
+container on the network, and on a Kubernetes pod network every pod. That is why
+`docker-compose.yml` declares an explicit subnet and pins Traefik to a static address: the trust
+names one host.
+
+**Two tests are the gate, and neither is worth much alone** (`src/test/java/.../platform/`):
+
+| Test | Configuration | Two requests, different `X-Forwarded-For` |
+|---|---|---|
+| `ForwardedHeaderSpoofingTest` | as shipped — the caller is **not** the trusted proxy | share one bucket → **429** |
+| `ForwardedHeaderTrustedProxyTest` | `internal-proxies` covers the caller | separate buckets → **both 200** |
+
+The first would pass just as happily with the valve missing, the property misspelled or the strategy
+left at `none`. Together they are **differential**: one property, contradictory results. Both red
+proofs were run; commenting the property out so Boot's default applies turns the spoofing test's
+`429` into a `200`, which is what makes "the default is exploitable on this stack" a measurement.
+
+**Proven live through the real proxy too**, backstop capacity 2, four requests each with a different
+spoofed address: `401, 401, 429, 429`. Traefik *appends* the real client to `X-Forwarded-For` and
+`RemoteIpValve` walks the list right to left, so the spoofed entry is discarded.
+
+### How CI gets a certificate without a secret
+
+`scripts/e2e/run-e2e.sh` and the `zap` job both call `scripts/tls/gen-dev-ca.sh`. A clean checkout
+produces a fresh throwaway CA per run. **CI still holds exactly two secrets, `SONAR_TOKEN` and
+`NVD_API_KEY`, and neither of these jobs uses either.** A fork's build goes green holding nothing.
+
+**The e2e suite proves the round trip is real TLS rather than asserting it.**
+`scripts/e2e/https-check.py` runs the same request against two trust stores and requires both
+outcomes — verified against the dev CA, rejected by the public one. That control earned its keep on
+its first run: Traefik selects certificates by SNI, RFC 6066 forbids an IP literal in SNI, so a
+`127.0.0.1` dial carried no server name, nothing in a `tls.certificates:` list could match it, and
+Traefik served its own `CN=TRAEFIK DEFAULT CERT` while every request succeeded end to end. Fixed
+with `tls.stores.default.defaultCertificate`. **Without the control that ships as "HTTPS works".**
+
+### What is NOT built, and what each is blocked on
+
+- **Let's Encrypt — blocked on a *deployment* decision, not on TLS.** HTTP-01 needs a publicly
+  reachable `archb.uk:80/443`; DNS-01 needs a provider token. ADR 0005 makes Kubernetes the
+  production target and **no manifests exist**, so there is no environment to issue a certificate
+  *for* and nowhere to hold an ACME account key. Writing an `acme` resolver into the configuration
+  today would be configuration for a host that does not exist.
+- **Backing-service TLS (Postgres, Redis, Kafka)** — a named gap. Every hop behind Traefik is
+  plaintext.
+- **mTLS / FAPI** — its own later plan. The archived OBIE assessment sized it **L**.
+- **Certificate renewal** — there is none, and none is owed: the material is regenerated on demand
+  and valid 825 days, which outlives any stack it is issued for.
+
+### Rotation
+
+**Nothing here is owed rotation.** The CA and leaf are per-machine or per-CI-run, no client outside
+this stack trusts either, and nothing signed with them would be accepted anywhere. If a developer's
+`docker/tls/` is ever suspected, the response is `scripts/tls/gen-dev-ca.sh --force` and a restart —
+not an incident.
 
 ---
 
@@ -156,7 +260,9 @@ Not credentials, but the same subject — see [`spec.md`](spec.md) §12.1 stages
 
 This page goes stale silently, which is the failure mode it exists to prevent. **Re-read it when:**
 
-1. **TLS lands** — the section above is rewritten, not amended.
+1. **TLS changes shape** — Let's Encrypt is wired, a deployment appears, or backing-service TLS
+   stops being a gap. The TLS section is then rewritten again, not amended. (Its first rewrite,
+   for the dev-CA work, happened 2026-08-08.)
 2. **A suppression expires** — the next is **2026-11-08**. Re-check for a stable upstream release
    *first*, upgrade if one exists, and suppress again only if none does.
 3. **Anything is deployed anywhere real** — at which point the fixture realm, the public clients and

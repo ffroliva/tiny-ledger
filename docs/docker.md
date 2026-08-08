@@ -25,6 +25,27 @@ want to see the ledger work, use the README. Read this when you want the product
 - `curl` and `jq` — every verification command below is written with them. On Windows use
   `curl.exe`; PowerShell aliases bare `curl` to `Invoke-WebRequest`, which does not take these flags.
 - `bash`, for the `scripts/e2e/*.sh` helpers. Git Bash or WSL on Windows.
+- **`openssl`** — for §1b, the dev certificate. Git for Windows bundles it; so does every Linux and
+  macOS install.
+
+**One warning about `curl` and TLS, measured on this machine.** From §2 onward the application is
+reachable only over **HTTPS, on a private CA**. Git for Windows ships a **Schannel**-backed curl
+(`curl 8.12.1 ... Schannel`), and Schannel resolves chains through the Windows certificate store, so
+`--cacert` is accepted and the chain is rejected anyway:
+
+```
+schannel: added 1 certificate(s) from CA file 'docker/tls/ca.crt'
+schannel: CertGetCertificateChain trust error CERT_TRUST_IS_UNTRUSTED_ROOT
+```
+
+The curl commands below are correct on Linux and macOS, where curl is OpenSSL-backed. **On Windows,
+do not reach for `-k`** — that deletes the check. Use the repository's own Python probe instead,
+which is OpenSSL on every platform:
+
+```bash
+(cd ledger-cli && uv run python ../scripts/e2e/https-check.py \
+   https://127.0.0.1:8443 http://127.0.0.1:8000 60 "$OLDPWD/docker/tls/ca.crt")
+```
 
 Sections 1–5 need only Docker and the JDK. **Section 6 is the one that needs all three toolchains**
 at once — Java to build the image, Docker to run the stack, uv to drive it — which is the honest
@@ -80,6 +101,32 @@ three runs each: **6.588 s → 3.011 s to start, −54 %**.
 
 ---
 
+## 1b. Generate the dev certificate
+
+Traefik terminates TLS in front of the application, and it needs something to terminate it *with*.
+Nothing is committed — this repository is public and holds the names of secrets, never their values.
+
+```bash
+scripts/tls/gen-dev-ca.sh
+```
+
+```
+Certificate request self-signature ok
+subject=CN=localhost
+docker/tls/server.crt: OK
+dev CA and leaf written to docker/tls/ (gitignored, valid 825 days)
+```
+
+`docker/tls/server.crt: OK` is `openssl verify` — the script gates on its own output, so a leaf that
+does not chain to the CA never reaches Traefik. It is **idempotent**: run it again and it leaves an
+existing certificate alone, because regenerating under a running stack hands Traefik a certificate
+its clients no longer trust and the resulting failure reads as a routing problem. Force it with
+`--force`.
+
+CI runs this same script inside its own runs, which is why **no certificate is a secret anywhere**.
+
+---
+
 ## 2. Start the whole stack
 
 ```bash
@@ -92,15 +139,37 @@ tiny-ledger-redis-1     Healthy
 tiny-ledger-kafka-1     Healthy
 tiny-ledger-keycloak-1  Healthy
 tiny-ledger-app-1       Started
+tiny-ledger-traefik-1   Started
 ```
 
-**`--profile app` is what adds the application.** A plain `up` starts exactly the four backing
+**`--profile app` adds the application AND Traefik.** A plain `up` starts exactly the four backing
 services — that is the mode you want when you would rather run the app from your IDE:
 
 ```bash
 docker compose -f docker/docker-compose.yml config --services | sort   # 4 names
 COMPOSE_PROFILES=app \
-docker compose -f docker/docker-compose.yml config --services | sort   # 5 names
+docker compose -f docker/docker-compose.yml config --services | sort   # 6 names
+```
+
+**The application no longer publishes any port, and that absence is a control rather than an
+omission.** Everything arrives through Traefik:
+
+| Host port | Serves | Why |
+|---|---|---|
+| `8443` | HTTPS, the whole API | the only way in |
+| `8000` | **301 to `https://127.0.0.1:8443`**, nothing else | a plaintext caller is moved, never served |
+| ~~`8080`~~ | nothing | publishing it would leave a plaintext route straight past Traefik. TLS you can walk around is decoration |
+| ~~`9090`~~ | nothing | spec §6.6 says the management endpoints "rely on the port not being published"; publishing it had made that sentence false |
+
+Measured after this change: `127.0.0.1:8080` and `127.0.0.1:9090` refuse connections from the host
+while `127.0.0.1:8443` accepts. Both remain reachable **inside** the network, which is all either
+needs — Traefik dials `app:8080`, and in production the kubelet dials the pod IP for the probes.
+
+Override the published pair the same way you override Postgres, and for the same reason:
+
+```bash
+export TINY_LEDGER_HTTPS_PORT=9443
+export TINY_LEDGER_HTTP_PORT=9000
 ```
 
 **`--wait` does not mean the application is ready.** It blocks on *healthchecks*, and the `app`
@@ -112,23 +181,32 @@ as the readiness signal.
 
 ## 3. Is it actually up?
 
-The management endpoints are on **port 9090**, not 8080.
+**The readiness signal is a `401` over HTTPS**, not a health probe — the management port is no longer
+published (§2). A `401` on a protected route proves two things at once: the application is serving,
+and the security chain is wired. A `200` there would itself be a defect.
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9090/actuator/health/readiness   # 200
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9090/actuator/health/liveness    # 200
+curl -s -o /dev/null -w '%{http_code}\n' --cacert docker/tls/ca.crt \
+  https://127.0.0.1:8443/api/v1/accounts        # 401
 ```
 
-```json
-{"status":"UP"}
+The certificate is verified, not skipped. If this reports `000` on Windows that is the Schannel
+problem from §0, not a broken stack — use the Python probe named there.
+
+**The probes still exist; they are in-network now.** Reach them from a throwaway container on the
+same network rather than from the host:
+
+```bash
+docker run --rm --network tiny-ledger_default curlimages/curl:8.11.1 \
+  -s -o /dev/null -w '%{http_code}\n' http://app:9090/actuator/health/readiness   # 200
 ```
 
 **Two responses that look like faults and are not:**
 
 | Request | Answer | Why it is correct |
 |---|---|---|
-| `:9090/actuator/health` | **403** | The health *root* is `denyAll`. Only the probe sub-paths are exposed (spec §6.6). A `200` here would be the bug. |
-| `:8080/actuator/health` | **404** | Actuator is on the management port. Nothing is wrong. |
+| `app:9090/actuator/health` (in-network) | **403** | The health *root* is `denyAll`. Only the probe sub-paths are exposed (spec §6.6). A `200` here would be the bug |
+| `127.0.0.1:9090` from the **host** | connection refused | The port is not published. ADR 0005's intent: a misconfigured endpoint is unreachable rather than merely denied |
 
 **Do not use `curl -sf` to check these.** It exits non-zero on `403` and `404` alike, so both become
 indistinguishable from a container that never started. Print the status code.
@@ -144,7 +222,11 @@ docker compose -f docker/docker-compose.yml --profile app logs app | tail -40
 
 ## 4. Get a token
 
-Every route in `full` requires a bearer token. Keycloak is published on **8081** with a fixture realm.
+Every route in `full` requires a bearer token. Keycloak is published on **8081** with a fixture realm,
+over **plain HTTP** — it is deliberately *not* behind Traefik. It derives `iss` from the `Host`
+header, so fronting it would change the issuer string for this document, the CLI, the properties and
+CI at once, to buy TLS on a fixture identity provider marked *never deploy*. See
+[`security-material.md`](security-material.md).
 
 ```bash
 TOKEN=$(curl -s -X POST \
@@ -192,20 +274,21 @@ audience validation stay fully enforced. Nothing is relaxed to make this conveni
 
 ```bash
 # Open an account — note the field is `name`, not `ownerName`
-ACC=$(curl -s -X POST http://127.0.0.1:8080/api/v1/accounts \
+ACC=$(curl -s --cacert docker/tls/ca.crt -X POST https://127.0.0.1:8443/api/v1/accounts \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"name":"ACC-001","currency":"EUR"}' | jq -r .accountUid)
 
 # Deposit. The UID in the PATH is the idempotency key, and amount is an OBJECT, not a string.
-curl -s -X PUT "http://127.0.0.1:8080/api/v1/accounts/$ACC/deposits/$(uuidgen)" \
+curl -s --cacert docker/tls/ca.crt -X PUT "https://127.0.0.1:8443/api/v1/accounts/$ACC/deposits/$(uuidgen)" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"amount":{"currency":"EUR","minorUnits":10000}}' | jq
 
-curl -s "http://127.0.0.1:8080/api/v1/accounts/$ACC/balance" -H "Authorization: Bearer $TOKEN" | jq
-curl -s "http://127.0.0.1:8080/api/v1/accounts/$ACC/transactions" -H "Authorization: Bearer $TOKEN" | jq
+curl -s --cacert docker/tls/ca.crt "https://127.0.0.1:8443/api/v1/accounts/$ACC/balance" -H "Authorization: Bearer $TOKEN" | jq
+curl -s --cacert docker/tls/ca.crt "https://127.0.0.1:8443/api/v1/accounts/$ACC/transactions" -H "Authorization: Bearer $TOKEN" | jq
 ```
 
-Measured responses:
+Measured responses — re-measured over HTTPS after Traefik landed, and **identical** to the plaintext
+ones. That is the point: TLS is terminated at the edge and the application's contract is unchanged.
 
 ```
 POST /api/v1/accounts                      -> 201
@@ -234,7 +317,7 @@ AUDIT=$(curl -s -X POST 'http://127.0.0.1:8081/realms/tiny-ledger/protocol/openi
   -d 'grant_type=password' -d 'client_id=ledger-test' \
   -d 'username=dave' -d 'password=dev-only' | jq -r .access_token)
 
-curl -s http://127.0.0.1:8080/api/v1/audit/entries -H "Authorization: Bearer $AUDIT" | jq
+curl -s --cacert docker/tls/ca.crt https://127.0.0.1:8443/api/v1/audit/entries -H "Authorization: Bearer $AUDIT" | jq
 ```
 
 ---
@@ -256,8 +339,23 @@ collected 59 items / 52 deselected / 7 selected
 **Check for `selected`, not `deselected`.** `ledger-cli/pyproject.toml` excludes the `e2e` marker by
 default, so a run reporting `7 deselected` is green having tested nothing.
 
-The script brings the `app` service up itself and removes it afterwards; the four backing services
-stay up for whoever started them. To exercise the host jar instead of the image:
+The script brings `app` **and `traefik`** up itself and removes both afterwards; the four backing
+services stay up for whoever started them. It generates the certificate if it is missing, and before
+running a scenario it proves the transport:
+
+```
+tiny-ledger (full, HTTPS) ready after 6s (HTTP 401)
+  public trust store        -> rejected, as it must be
+  dev CA                    -> verified
+  http://127.0.0.1:8000 -> 301 https://127.0.0.1:8443/api/v1/accounts
+```
+
+**Both trust-store lines are required.** A `https://` URL is not evidence of anything on its own —
+the run would look identical against a client that skipped verification. The rejection is what makes
+the verification mean something.
+
+To exercise the host jar instead of the image — **plaintext and direct, with no proxy in front**,
+because that is what `java -jar` actually is:
 
 ```bash
 ./mvnw -q -DskipTests package
@@ -291,7 +389,8 @@ docker compose -f docker/docker-compose.yml --profile app down -v     # delete i
 **Always pass `--profile app` to `down`.** Without it, Compose leaves the app container running,
 fails to remove the network, and **still exits 0** — verified on Compose v2.38.1. A teardown that
 reports success while leaving things behind is how the next `up` ends up racing a stale container for
-ports 8080 and 9090.
+the published ports. Since TLS landed those are **Traefik's 8443 and 8000**; the application itself
+publishes nothing.
 
 The event store is a named volume, so plain `down` preserves it. `-v` is the one that discards the
 ledger's system of record.
@@ -304,8 +403,11 @@ ledger's system of record.
 |---|---|---|
 | `Bind for 0.0.0.0:5432 failed: port is already allocated` | another Postgres | `export TINY_LEDGER_PG_PORT=55432` |
 | `up` fails with a pull error on `tiny-ledger:0.1.0-SNAPSHOT` | the image was never built | `./mvnw spring-boot:build-image -DskipTests` |
-| `:9090/actuator/health` returns **403** | correct — the root is `denyAll` | use `/actuator/health/readiness` |
-| `:8080/actuator/health` returns **404** | correct — actuator is on 9090 | use 9090 |
+| `app:9090/actuator/health` returns **403** | correct — the root is `denyAll` | use `/actuator/health/readiness` |
+| `127.0.0.1:8080` or `:9090` refuse the connection | correct — neither is published any more | go through `https://127.0.0.1:8443`; for the probes use a container on the network (§3) |
+| curl reports `CERT_TRUST_IS_UNTRUSTED_ROOT`, or `000` | Windows curl is Schannel-backed and will not accept a private CA | use the Python probe in §0. **Not `-k`** |
+| Traefik serves `CN=TRAEFIK DEFAULT CERT` | the CA was never generated, and Compose created an empty directory for the bind mount | `scripts/tls/gen-dev-ca.sh`, then recreate `traefik` |
+| `Pool overlaps with other one on this address space` | another project holds `10.89.0.0/24` | `export TINY_LEDGER_SUBNET=10.90.0.0/24 TINY_LEDGER_TRAEFIK_IP=10.90.0.250` — **both**, they must move together |
 | Every request `401` with a valid-looking token | `iss` mismatch | mint via `localhost:8081`; check `KC_HOSTNAME` is set on the `keycloak` service. **Never disable issuer validation** |
 | `docker exec ... cat` → `executable file not found` | the run image has no shell or coreutils | read `docker compose logs app` instead |
 | e2e aborts: "the full stack is not healthy" | a backing service really is unhealthy | `docker compose ps -a`; a container in `Created` usually means a taken host port |
@@ -320,7 +422,11 @@ ledger's system of record.
 - **The root filesystem is not read-only.** It runs as a non-root user (`1002:1001`) and has no
   shell, both verified — but read-only rootfs is *not* configured, and spec §12 says so rather than
   claiming it.
-- **Nothing here is TLS.** Every hop is plaintext, including the backing services. TLS is the next
-  piece of work; see [`security-material.md`](security-material.md).
+- **TLS stops at Traefik.** The proxy-to-application hop and every backing-service hop (Postgres,
+  Redis, Kafka) are plaintext, and so is Keycloak. That is a **named gap**, not an oversight; see
+  [`security-material.md`](security-material.md).
+- **The certificate is a throwaway.** Generated per machine and per CI run, trusted by no client
+  outside this stack. Let's Encrypt is blocked on a *deployment* decision rather than on TLS — ADR
+  0005 targets Kubernetes and no manifests exist.
 - **Compose is local only.** Kubernetes is the stated production target (ADR 0005) and no manifests
   exist, on purpose.

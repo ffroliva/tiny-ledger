@@ -1,17 +1,34 @@
-# OWASP ZAP baseline — per-rule dispositions. Tab-separated: <rule id>\t<WARN|IGNORE|FAIL>\t<comment>
+# OWASP ZAP baseline — per-rule dispositions. TAB-separated: <rule id> <IGNORE|WARN|FAIL> <comment>
 #
 # THIS FILE IS THE ONLY PLACE A FINDING IS TOLERATED, and that is deliberate. `ci.yml` sets
-# `fail_action: true`, so the job goes red on anything at WARN or above — which means every
-# accepted finding has to be written down here, with its rule id and a reason, where it shows up
-# in a diff. The alternative the action offers by default (`fail_action: false`) is a scan that
-# reports findings and exits 0: the same defect as the Sonar step that submitted an analysis and
-# never read the verdict, and as the deleted stage 6.
+# `fail_action: true`, so the job goes red on anything the scan reports — which means every accepted
+# finding has to be written down here, with its rule id and a reason, where it shows up in a diff.
+# The alternative the action offers by default (`fail_action: false`) is a scan that reports findings
+# and exits 0: the same defect as the Sonar step that submitted an analysis and never read the
+# verdict, and as the deleted stage 6.
 #
 # IGNORE means "this does not apply to this system", never "we could not be bothered". If a rule
 # genuinely applies, fix it in `docker/traefik/dynamic.yml` — headers belong on the terminator —
 # rather than adding a line here.
 #
-# Empty on purpose right now. The first CI run against the TLS entrypoint is what says which rules
-# actually fire; filling this in beforehand would be guessing, and a pre-emptive IGNORE would
-# suppress a real finding before anyone had seen it. Entries get added from an observed report,
-# each one naming what was seen.
+# ── Observed report, run 31257068048, against https://127.0.0.1:8443 ────────────────────────────
+#   FAIL-NEW: 0   WARN-NEW: 1   PASS: 66
+# The one entry below is that single WARN. Everything the TLS work configured passed on its own
+# merits and needed no entry: Strict-Transport-Security, X-Content-Type-Options, X-Frame-Options,
+# Content Security Policy, Permissions Policy, Cross-Domain Misconfiguration, Private IP Disclosure
+# and Application Error Disclosure are all PASS.
+#
+# ── A LIMIT OF THIS SCAN, STATED RATHER THAN LEFT TO BE DISCOVERED ──────────────────────────────
+# The same run reported:
+#   Job spider error accessing URL https://127.0.0.1:8443 status code returned : 401 expected 200
+# That is correct behaviour and it is also the ceiling on what this gate can see. A baseline scan
+# spiders for links and then reads passively; this is a bearer-token JSON API with no anonymous
+# surface and no hyperlinks, so the spider found exactly two URLs and both answered 401. **This job
+# checks the edge — TLS, redirect, headers, error shapes — and does NOT scan the API's routes.**
+#
+# The upgrade is `zap-api-scan.py` fed `docs/api/openapi.yaml`, which enumerates routes from the
+# contract instead of crawling for them. It is not wired, and would need a token minted for it.
+# Adding authentication to *this* baseline would not help: with or without a token the spider still
+# has no links to follow.
+
+10049	IGNORE	Non-Storable Content, on two 401 responses. The rule flags content a cache cannot store, which is a caching observation rather than a weakness — and on an authenticated ledger API non-storable is the REQUIRED behaviour, not a defect. Making this rule pass would mean making 401s cacheable.
