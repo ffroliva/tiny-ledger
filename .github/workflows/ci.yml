@@ -203,10 +203,13 @@ jobs:
             echo "- Trivy: scans the built IMAGE for CRITICAL/HIGH, **exit-code 1**, so it FAILS this"
             echo "  required check. \`ignore-unfixed: true\` means a known-unfixable critical does not"
             echo "  fail the build — the build can be green with such a finding present."
-            echo "- Dependency-Check runs in its own **\`depcheck\`** job, not here — it is far too slow"
-            echo "  to sit in front of a required check. It scans the BUILD at **failBuildOnCVSS=7**,"
-            echo "  which also covers **test-scope** dependencies; that is the only real gap it closes"
-            echo "  over Trivy. Belt and braces, chosen deliberately."
+            echo "- Dependency-Check runs in its **own workflow** (\`depcheck.yml\`), nightly and on"
+            echo "  \`pom.xml\` changes — not on every push, and not here. It scans the BUILD at"
+            echo "  **failBuildOnCVSS=7** including **test-scope** dependencies, the only real gap it"
+            echo "  closes over Trivy. That file carries the measurements."
+            echo "- **GitHub Dependabot vulnerability alerts are ENABLED** on this repository. They cost"
+            echo "  no runner minutes, email on a finding, and match exact package versions rather than"
+            echo "  CPE name strings — so they, not \`depcheck\`, are the always-on dependency instrument."
             echo "- Trivy needs NO credential and therefore always runs, so a fork still gets the image"
             echo "  scan while holding no secret."
             echo "- detect-secrets: not added. It covers the same class of finding as gitleaks; running"
@@ -216,97 +219,11 @@ jobs:
             echo "  decision, so this job needs no registry credential and a fork's build passes."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Stage 11, second half (issue #11) — OWASP Dependency-Check.
-  #
-  # IT IS ITS OWN JOB BECAUSE IT IS SLOW, and that number is measured rather than feared. Placed
-  # inside `security` it did NOT COMPLETE IN 80 MINUTES on a cold NVD cache (run 31229974027), while
-  # the rest of that job — gitleaks, the image build and Trivy — finishes in about four. Leaving it
-  # there would have made a REQUIRED check take over an hour on every push, and a gate that slow is
-  # one people learn to route around, which costs more than the gate is worth. Split out, `security`
-  # stays fast and Dependency-Check still fails the workflow when it finds something.
-  #
-  # WHY IT EXISTS AT ALL, given Trivy already scans the image: Trivy sees the image, so runtime jars
-  # and OS packages. This sees the BUILD, so it also sees TEST-SCOPE dependencies, which never reach
-  # the image. That is the whole of the difference and it is a small one — belt and braces, chosen
-  # deliberately rather than because Trivy was insufficient.
-  #
-  # THE COLD-CACHE COST IS A KNOWN, UNFIXED CEILING. The cache below makes warm runs cheap, but a
-  # GitHub cache written on a feature branch is not visible to `main`, so the first run after a merge
-  # pays it again. If that proves intolerable, the upgrade path is `nvdDatafeedUrl` — one gzipped
-  # mirror download instead of paging the NVD API — at the cost of pinning a third-party mirror.
-  # Not done here, and named so nobody has to rediscover why this job is slow.
-  #
-  # NOT in main's required checks, because adding one is a branch-protection change that is the
-  # repository owner's to make. Until it is, this reports and fails the workflow but cannot block a
-  # merge — stated plainly rather than implied.
-  depcheck:
-    runs-on: ubuntu-latest
-    needs: gate
-    # A hung NVD feed should fail loudly, not burn the six-hour default.
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v7
-      # NO `cache: maven` here, deliberately. dependency-check's data directory lives INSIDE
-      # ~/.m2/repository, so setup-java's cache would strictly contain the NVD store cached by the
-      # next step: two differently-aged copies of the same H2 database merged file-by-file on
-      # restore, and — because this PR edits pom.xml and so rotates the shared cache key — a real
-      # chance of saving a multi-gigabyte NVD database into the Maven cache that `gate`, `unit`,
-      # `integration`, `e2e` and `sonar` all download on every push for data none of them use.
-      - uses: actions/setup-java@v5
-        with: { distribution: corretto, java-version: '25' }
-
-      - name: Cache the NVD data directory
-        uses: actions/cache@v6
-        with:
-          path: ~/.m2/repository/org/owasp/dependency-check-data
-          # A CONSTANT KEY WOULD MAKE THIS A ONE-SHOT SEED, NOT A CACHE. actions/cache skips its
-          # post-job save on an exact primary-key hit, so run 1 would save a day-0 database and
-          # every later run would restore that same frozen snapshot, apply an ever-widening delta,
-          # and throw it away — the work growing by a day of CVEs per day until the baseline falls
-          # outside the NVD modified-date window and every run pays the full cold cost forever.
-          # run_id in the key + a restore-keys prefix means each run restores the newest snapshot
-          # and saves an updated one.
-          key: ${{ runner.os }}-owasp-nvd-${{ github.run_id }}
-          restore-keys: ${{ runner.os }}-owasp-nvd-
-
-      - name: "Stage 11 — OWASP Dependency-Check"
-        env:
-          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-        # Same posture as the Sonar step: SKIP LOUDLY when the credential is absent, never report a
-        # success it did not earn. A fork has no NVD_API_KEY and its build must still go green —
-        # the same principle that keeps a Grafana credential out of CI entirely.
-        #
-        # THE KEY IS PASSED BY ENVIRONMENT VARIABLE NAME, NOT AS A VALUE ON THE COMMAND LINE, and
-        # that is a security fix rather than a style choice. `-DnvdApiKey=$NVD_API_KEY` puts the
-        # secret on the `java` process command line, where any other process on the runner can read
-        # it and any `-X` run echoes it. The plugin's own descriptor says so, naming the advisory:
-        #
-        #   nvdApiKey: "The parameters nvdApiKeyEnvironmentVariable or nvdApiServerId should be
-        #               used instead otherwise Maven debug logging could expose the API Key
-        #               (see GHSA-qqhq-8r2c-c3f5)"
-        #   nvdApiKeyEnvironmentVariable: "This is the recommended option to pass the API key in
-        #               CI builds."
-        #
-        # Worth recording how this was missed the first time: the earlier comment here reasoned
-        # carefully about this property's SPELLING (`nvdApiKey`, not the plan's `-Dnvd.api.key`) and
-        # read this very plugin.xml to settle it — and stopped one field short of the advisory
-        # sitting in the adjacent description. Reading the right file is not the same as reading it.
-        #
-        # The gate is failBuildOnCVSS=7 in pom.xml, not a flag here, so
-        # `./mvnw org.owasp:dependency-check-maven:check` reproduces this verdict on a laptop —
-        # this pipeline's stated rule for what a gate must be (§12.1's closing note).
-        run: |
-          if [ -z "$NVD_API_KEY" ]; then
-            echo "::warning::NVD_API_KEY is not set — Dependency-Check skipped, NOT passed"
-            echo "### Dependency-Check: skipped (no NVD_API_KEY)" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          ./mvnw -q org.owasp:dependency-check-maven:check -DnvdApiKeyEnvironmentVariable=NVD_API_KEY
-
-      - name: "Publish the Dependency-Check report"
-        if: always()
-        uses: actions/upload-artifact@v7
-        with: { name: dependency-check-report, path: target/dependency-check-report.html, if-no-files-found: warn }
+  # Dependency-Check used to live here. It now has its own workflow, `.github/workflows/depcheck.yml`,
+  # triggered nightly and on `pom.xml` changes rather than on every push — the dependency set it scans
+  # only changes when that file does, while the NVD feed it scans against changes daily, so those are
+  # two different triggers and neither is "every push". That file carries the measurements and the
+  # reasoning. Removing it from here takes ~9 minutes off every unrelated push.
 
   # Stage 8 (spec §12.1) — the Python CLI's own gate. Deliberately needs no Docker: a
   # ruff or pyright failure should not cost a four-container stack to discover.
