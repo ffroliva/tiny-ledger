@@ -23,9 +23,33 @@ E2E_MODE=${E2E_MODE:-image}
 # jar stays usable as a dependency (benchmarks/ compiles against it). The runnable,
 # repackaged jar is the one with the classifier.
 JAR=${JAR:-target/tiny-ledger-0.1.0-SNAPSHOT-exec.jar}
-BASE_URL=${LEDGER_BASE_URL:-http://127.0.0.1:8080}
 APP_LOG=${APP_LOG:-app.log}
 READY_TIMEOUT=${READY_TIMEOUT:-120}
+
+# The two modes now differ in TRANSPORT as well as in artefact, and that is the honest topology
+# rather than a compromise:
+#
+#   image  -> through Traefik, over real HTTPS, against a certificate chaining to the dev CA. This
+#             is the deployed shape: an ingress terminates TLS and the application never sees it.
+#   jar    -> plaintext, straight to the process. This is what `java -jar` actually is (README,
+#             spec §1.5) — there is no proxy in that recipe, so pretending there is one would test
+#             a topology nobody runs.
+#
+# 127.0.0.1, never `localhost`, for the reason spelled out below — and the dev certificate carries
+# IP:127.0.0.1 in its SAN list precisely so this pinning does not break verification.
+HTTPS_PORT=${TINY_LEDGER_HTTPS_PORT:-8443}
+if [ "${E2E_MODE:-image}" = image ]; then
+  BASE_URL=${LEDGER_BASE_URL:-https://127.0.0.1:${HTTPS_PORT}}
+else
+  BASE_URL=${LEDGER_BASE_URL:-http://127.0.0.1:8080}
+fi
+# Hand the decision back to the CLI. Before TLS both sides could hardcode http://127.0.0.1:8080
+# and agree by accident; now the URL depends on E2E_MODE, so one of them has to own it and the
+# other has to follow. The runner owns it because the runner is what chooses the topology — and
+# ci.yml no longer sets LEDGER_BASE_URL at all, precisely so there is nothing to drift.
+# The ${LEDGER_BASE_URL:-...} above still honours an explicit override, so this only ever
+# re-exports a value the caller either supplied or did not care about.
+export LEDGER_BASE_URL="$BASE_URL"
 
 # uv is not used until the LAST line of this script, which is exactly why it is checked on the
 # FIRST. Without this guard a missing uv is discovered after the image is built, the app service
@@ -63,6 +87,27 @@ case "$E2E_MODE" in
       echo "::error::tiny-ledger:0.1.0-SNAPSHOT not found — build it first: ./mvnw -q spring-boot:build-image -DskipTests" >&2
       exit 1
     fi
+
+    # Generate the dev CA if it is not there. Idempotent, so a developer's existing certificate
+    # survives — and CI, which starts from a clean checkout, gets a fresh throwaway one every run
+    # and therefore needs NO certificate secret. Same principle that keeps the Grafana token out
+    # of CI entirely (docs/security-material.md).
+    scripts/tls/gen-dev-ca.sh
+
+    # The client that speaks to the application needs to trust that CA, and needs no code change
+    # to do it — this is the standard variable its TLS stack already reads:
+    #
+    # SSL_CERT_FILE is what the Python CLI's TLS stack reads. Measured on httpx 0.28.1: with this
+    # set, the client's store reports {'x509': 1, 'x509_ca': 1} — this CA and nothing else.
+    #
+    # It REPLACES the public trust store rather than adding to it, which is fine here: the only
+    # host the CLI talks to over TLS is this stack. If it were missing, the run would fail with a
+    # certificate-verification error — loudly, never a pass that skipped the check.
+    #
+    # CURL_CA_BUNDLE is deliberately NOT set alongside it. Nothing here uses curl over TLS any
+    # more (see the readiness step below), and a variable that configures nothing is a knob that
+    # lies about what is in effect.
+    export SSL_CERT_FILE="$PWD/docker/tls/ca.crt"
     ;;
   *)
     echo "::error::E2E_MODE must be 'image' or 'jar', got '$E2E_MODE'" >&2
@@ -112,12 +157,12 @@ cleanup() {
     # defeating the reason this trap exists (see the file header). There is no `|| echo` fallback
     # because `docker compose logs <service>` exits 0 even when no container exists, so the branch
     # could never fire; the header plus empty output is the honest signal instead.
-    $COMPOSE --profile app logs --no-color app 2>&1 || true
+    $COMPOSE --profile app logs --no-color app traefik 2>&1 || true
     # `rm -sf`, not `stop`: the guard above rejects any container that is not (healthy), and a
     # stopped app container would trip it on the NEXT run. The app is the only service this
     # script started, so it is the only one it removes — the four backing services stay up for
     # whoever brought them up.
-    $COMPOSE --profile app rm -sf app >/dev/null 2>&1 || true
+    $COMPOSE --profile app rm -sf app traefik >/dev/null 2>&1 || true
   else
     echo "--- application log ($APP_LOG) ---"
     cat "$APP_LOG" 2>/dev/null || echo "(no application log was produced)"
@@ -177,7 +222,7 @@ if [ "$E2E_MODE" = image ]; then
   # one), so `--wait` would return the moment the container starts. wait-for.sh below is the
   # real readiness gate, and it polls for a STATUS rather than a port for the reason that
   # script explains.
-  LEDGER_RATE_LIMIT_IP_BACKSTOP_CAPACITY=10000 $COMPOSE --profile app up -d app
+  LEDGER_RATE_LIMIT_IP_BACKSTOP_CAPACITY=10000 $COMPOSE --profile app up -d app traefik
 else
   java -jar "$JAR" \
     --spring.profiles.active=full \
@@ -189,8 +234,23 @@ else
   APP_PID=$!
 fi
 
-# 401 is the ready signal — see scripts/e2e/wait-for.sh for why a status and not a port.
-scripts/e2e/wait-for.sh "$BASE_URL/api/v1/accounts" 401 "$READY_TIMEOUT" "tiny-ledger (full)"
+if [ "$E2E_MODE" = image ]; then
+  # Readiness AND the proof that the transport is real TLS, in one step and in Python rather than
+  # curl. The reason is written out in scripts/e2e/https-check.py and is not a style preference:
+  # curl on the Windows development machine is a Schannel build that rejects a private CA passed
+  # with --cacert, so a curl-based check would have passed on the CI runner and failed here. It
+  # also runs through the CLI's own environment, so the stack being proven is the stack the
+  # scenarios below actually use.
+  echo "--- HTTPS readiness and TLS control ---"
+  # "$SSL_CERT_FILE", not "$PWD/docker/tls/ca.crt" — and that is a fix, not a preference. `$PWD` is
+  # expanded when the second command of the `&&` runs, which is AFTER the `cd`, so the relative
+  # form resolved against ledger-cli/ and the script died on FileNotFoundError. The exported
+  # variable is already absolute and is the single source of truth for this path.
+  (cd ledger-cli && uv run python ../scripts/e2e/https-check.py "$BASE_URL" "http://127.0.0.1:${TINY_LEDGER_HTTP_PORT:-8000}" "$READY_TIMEOUT" "$SSL_CERT_FILE")
+else
+  # 401 is the ready signal — see scripts/e2e/wait-for.sh for why a status and not a port.
+  scripts/e2e/wait-for.sh "$BASE_URL/api/v1/accounts" 401 "$READY_TIMEOUT" "tiny-ledger (full)"
+fi
 
 # A SUBSHELL, not a bare `cd`. The EXIT trap above cats "$APP_LOG", which is relative to the
 # repository root — a bare `cd ledger-cli` here leaks into the trap, so it looks for
