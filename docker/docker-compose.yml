@@ -206,6 +206,13 @@ services:
       # key set is fetched from moves in-network. Nothing is relaxed.
       LEDGER_ISSUER_URI: http://localhost:8081/realms/tiny-ledger
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/tiny-ledger/protocol/openid-connect/certs
+      # 300 is the PRODUCTION value (application.properties:42), restated here rather than defaulted
+      # to empty — an empty environment variable is a binding failure for an int, not an unset one.
+      # Only scripts/e2e/run-e2e.sh raises it, and only the backstop: the per-principal write bucket
+      # stays at 100 because that bucket is what test_rate_limit is under test. Raising both would
+      # make that test pass for the wrong reason, which its own comment calls the most expensive
+      # kind of green.
+      LEDGER_RATE_LIMIT_IP_BACKSTOP_CAPACITY: ${LEDGER_RATE_LIMIT_IP_BACKSTOP_CAPACITY:-300}
     ports:
       - "8080:8080"
       # Management, §6.6. Reachable as published because `full` pins no management.server.address —

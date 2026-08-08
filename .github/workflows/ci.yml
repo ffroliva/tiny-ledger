@@ -231,8 +231,16 @@ jobs:
       - name: Start the full stack (Postgres, Redis, Kafka, Keycloak)
         run: docker compose -f docker/docker-compose.yml up -d --wait
 
-      - name: Build the application jar
-        run: ./mvnw -q -DskipTests package
+      # Issue #11: the artefact under test is the IMAGE, so this job builds the image rather than
+      # the jar. `scripts/e2e/run-e2e.sh` defaults to E2E_MODE=image and brings the `app` compose
+      # profile up; E2E_MODE=jar still runs the host jar and is exercised locally.
+      #
+      # The `image` job below builds the image too, and that duplication is deliberate. The
+      # alternative is `docker save` into an artifact, and this image is ~800 MB — uploading and
+      # re-downloading it would cost far more than the ~90 s the buildpack takes, and would add a
+      # cross-job dependency for no correctness gain. Each job builds what it needs.
+      - name: Build the container image
+        run: ./mvnw -q spring-boot:build-image -DskipTests
 
       - name: Sync the CLI environment
         working-directory: ledger-cli

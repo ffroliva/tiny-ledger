@@ -445,6 +445,21 @@ bash scripts/e2e/run-e2e.sh 2>&1 | tail -30
 Expected: `5 passed`, **not** `5 deselected` — `ledger-cli/pyproject.toml`'s `addopts` excludes the
 `e2e` marker, so a run reporting `deselected` is green having tested nothing (AGENTS trap 4).
 
+**CORRECTED 2026-08-08: the suite is SEVEN scenarios, not five.** It grew after the number was
+written into this plan. The count itself was never the guard — `selected` vs `deselected` is — but a
+plan asserting "5 passed" would have made a correct 7 look wrong, and a checker written against it
+would fail a good run. Both modes measured:
+
+```
+E2E_MODE=image (default)  collected 59 items / 52 deselected / 7 selected   ->  7 passed, 52 deselected in 19.92s
+E2E_MODE=jar              collected 59 items / 52 deselected / 7 selected   ->  7 passed, 52 deselected
+E2E_MODE=nonsense         ::error::E2E_MODE must be 'image' or 'jar', got 'nonsense'
+```
+
+The `jar` run is not decoration: a preserved fallback nobody executes is dead flexibility, and it
+would rot silently. It is exercised here, and the third line shows the mode guard rejects a typo
+rather than falling through to a default.
+
 - [ ] **Step 3: Commit**
 
 ```bash
