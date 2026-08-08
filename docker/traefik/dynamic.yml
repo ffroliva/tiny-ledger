@@ -61,10 +61,11 @@ http:
       entryPoints: [websecure]
       middlewares: [security-headers]
       service: app
-      # The catch-all, and deliberately left as one. `https://127.0.0.1` has to keep reaching
-      # the ledger: the ZAP baseline targets it, and an IP literal carries no SNI and no useful
-      # Host header, so a `Host(`app.localhost`)` rule here would answer it with a 404.
-      priority: 1
+      # The catch-all, and deliberately left as one. `https://127.0.0.1` has to keep reaching the
+      # ledger: the ZAP baseline targets it, and an IP literal carries no SNI and no useful Host
+      # header, so a `Host(`app.localhost`)` rule here would answer it with a 404. No `priority`
+      # -- Traefik orders by rule length and this is the shortest rule in the file, so it already
+      # loses to every specific one. Only the router that must WIN states a priority.
       tls: {}
 
   middlewares:

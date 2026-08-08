@@ -152,6 +152,21 @@ if [ -n "$unhealthy" ]; then
   exit 1
 fi
 
+# START FROM A KNOWN RATE-LIMIT STATE. The buckets live in Redis (RateLimitConfig, `full` profile)
+# and `test_rate_limit` deliberately EXHAUSTS alice's 100/minute write bucket to prove the 429 and
+# its Retry-After are real. So a second run of this suite inside the same minute begins with that
+# bucket already empty and fails on its first write, for a reason nothing in the output names.
+#
+# That is not hypothetical: it is exactly how CI failed the first time both legs ran in one job —
+# stage 9 (image) passed, stage 9b (jar) ran seconds later against the same Redis, and
+# test_rate_limit came back `429 /errors/rate-limit-exceeded` before it had made a single
+# deliberate over-limit call.
+#
+# The flush targets the COMPOSE service by name, never a host or a URL, so it cannot reach anything
+# but this stack's throwaway Redis. What it clears is rate-limit buckets and the balance cache —
+# both derived, neither a system of record. The event store is Postgres.
+$COMPOSE exec -T redis redis-cli FLUSHALL >/dev/null 2>&1 || true
+
 APP_PID=""
 cleanup() {
   rc=$?

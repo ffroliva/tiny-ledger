@@ -24,8 +24,11 @@ set -euo pipefail
 # HANDOFF.md records for `docker run --entrypoint=/…`.
 export MSYS_NO_PATHCONV=1
 
+# TLS_DIR earned its keep: pointing it elsewhere is how the differential control was run
+# (verify the leaf against a CA it was NOT signed by). There is deliberately no knob for the
+# validity period -- nothing sets one, and 825 days outlives any stack this issues for.
 OUT=${TLS_DIR:-docker/tls}
-DAYS=${TLS_DAYS:-825}
+DAYS=825
 
 force=false
 if [ "${1:-}" = "--force" ]; then

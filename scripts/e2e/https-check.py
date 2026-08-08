@@ -88,11 +88,11 @@ def main() -> int:
     try:
         with httpx.Client(verify=_context(certifi.where()), timeout=5.0) as public:
             public.get(url)
-    except ssl.SSLError:
-        print("  public trust store        -> rejected, as it must be")
     except httpx.ConnectError as exc:
-        # httpx wraps the handshake failure; accept it only if the cause really is a certificate
-        # problem, never merely because the connection died for some unrelated reason.
+        # httpx WRAPS the handshake failure -- measured: it raises httpx.ConnectError and NOT
+        # ssl.SSLError. An earlier draft caught both; the ssl.SSLError arm never fired once.
+        # The message is checked so a connection that merely died for some unrelated reason cannot
+        # masquerade as proof that verification is on.
         if "CERTIFICATE_VERIFY_FAILED" not in str(exc):
             print(f"::error::expected a certificate verification failure, got: {exc}", file=sys.stderr)
             return 1
