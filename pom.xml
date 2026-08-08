@@ -279,7 +279,7 @@
                reporter, not a gate, and shipping it would be the THIRD check here that cannot fail
                (the deleted stage 6, then the Sonar job before -Dsonar.qualitygate.wait=true).
                7.0 is the bottom of CVSS v3 HIGH. -->
-          <failBuildOnCVSS>7</failBuildOnCVSS>
+          <failBuildOnCVSS>0</failBuildOnCVSS>
           <suppressionFiles>
             <suppressionFile>.github/owasp-suppressions.xml</suppressionFile>
           </suppressionFiles>
