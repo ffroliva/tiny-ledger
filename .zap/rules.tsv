@@ -34,10 +34,24 @@
 # surface and no hyperlinks, so the spider found exactly two URLs and both answered 401. **This job
 # checks the edge — TLS, redirect, headers, error shapes — and does NOT scan the API's routes.**
 #
-# The upgrade is `zap-api-scan.py` fed `docs/api/openapi.yaml`, which enumerates routes from the
-# contract instead of crawling for them. It is not wired, and would need a token minted for it.
 # Adding authentication to *this* baseline would not help: with or without a token the spider still
-# has no links to follow.
+# has no links to follow. That is why the ceiling is structural rather than a configuration miss.
+#
+# ── THE UPGRADE IS NOW WIRED, AND THESE TWO LINES USED TO DENY IT ───────────────────────────────
+# They read: "The upgrade is `zap-api-scan.py` fed `docs/api/openapi.yaml` … It is not wired, and
+# would need a token minted for it." Both halves became false the moment stage 11e landed, and this
+# file went on asserting them — a stale claim introduced by the very change that closed the gap.
+# Corrected here rather than in a follow-up, because the file that records a limit is the first
+# place a reader checks whether it still applies.
+#
+# **Stage 11e wires exactly that**, in this same `zap` job, after this scan: `zap-api-scan.py -S`
+# over the contract, with a token minted from Keycloak and proven live before ZAP is handed it.
+# Measured on the same stack in the same run — 14 URLs against this scan's 3, 119 passive rules
+# against its 66. Its dispositions live in `.zap/api-rules.tsv`, deliberately NOT here: that file
+# dispositions the ROUTES, read with a credential; this one dispositions the EDGE, read without.
+#
+# The count above is also restated: at the current target (443, not the 8443 this file was written
+# against) the baseline reaches `Total of 3 URLs`, not two.
 
 10049	IGNORE	Non-Storable Content, on two 401 responses. The rule flags content a cache cannot store, which is a caching observation rather than a weakness — and on an authenticated ledger API non-storable is the REQUIRED behaviour, not a defect. Making this rule pass would mean making 401s cacheable.
 
