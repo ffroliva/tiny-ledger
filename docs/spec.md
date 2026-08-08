@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.41
+**Version:** 3.42
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -23,7 +23,7 @@ codebase**:
 | Mode | Command | What runs | Purpose |
 |---|---|---|---|
 | **`standalone`** (default) | `./mvnw spring-boot:run` | In-memory event store, in-memory cache, no auth, no broker. Binds `127.0.0.1` only; the startup banner prints `AUTH DISABLED (standalone)`. **JDK 25** is the only prerequisite. | The brief's runtime in one command: clone, run, curl the APIs. The scope beyond the brief is a recorded, deliberate choice (`agentic-workflow.md` §6) — an accepted submission risk, not claimed compliance. |
-| **`full`** | `docker compose -f docker/docker-compose.yml up -d`, then `./mvnw spring-boot:run -Dspring-boot.run.profiles=full` — **two steps: the app is not a Compose service** (§12) | **Built:** PostgreSQL, Kafka (KRaft, no ZooKeeper), Redis — see `docker/docker-compose.yml`; the jar runs on the host against their published ports. **Keycloak is built as an integration but absent from Compose:** the realm, the resource server and role enforcement are delivered (§6.4, §14 step 8) and every IT runs against a real Keycloak container, but `docker-compose.yml` declares no Keycloak service — so a hand-run `full` boot must supply its own issuer via `LEDGER_ISSUER_URI` (`application-full.properties:15`), whose default `localhost:8081` nothing in this repository serves. **Observability, §14 step 9:** the Actuator probes and OTLP instrumentation ship inside the application, and the telemetry backend is an **opt-in** Compose profile carrying an OTel Collector *alone* — the default `up` is unchanged, and there is deliberately no Prometheus, Grafana, Tempo or Loki service (§6.6). | The production-shaped system. |
+| **`full`** | `./mvnw spring-boot:build-image -DskipTests`, then `docker compose -f docker/docker-compose.yml --profile app up -d` — **the app IS a Compose service** (§12, issue #11). The build step is separate on purpose: the image comes from buildpacks, never from a `Dockerfile` Compose could build, so there is one way to produce it | **Built:** PostgreSQL, Kafka (KRaft, no ZooKeeper), Redis and **Keycloak**, each with a healthcheck, plus the **application itself** behind `profiles: [app]` — see `docker/docker-compose.yml`. A plain `up` still starts exactly the four backing services; `--profile app` starts five. Keycloak serves the realm on `8081`, which is the issuer `application-full.properties` has always defaulted to, and `KC_HOSTNAME` pins that issuer so it does not vary with how the caller dialled in (§6.4). Running the jar on the host is still supported and still exercised — `scripts/e2e/run-e2e.sh` keeps it behind `E2E_MODE=jar`. **Observability, §14 step 9:** the Actuator probes and OTLP instrumentation ship inside the application, and the telemetry backend is an **opt-in** Compose profile carrying an OTel Collector *alone* — the default `up` is unchanged, and there is deliberately no Prometheus, Grafana, Tempo or Loki service (§6.6). | The production-shaped system. |
 
 Both modes run the **same domain code and the same core ledger API** — the two auditor operations
 are `full`-only (§7), a declared profile-gated exclusion from parity, not an adapter difference.
@@ -1793,38 +1793,55 @@ the management port in §6.6, each of which is different in a cluster than in on
 none of which can be quietly corrected once dashboards consume it. Everything below describes what is
 actually built.
 
-- **Container image: NOT BUILT.** Corrected at v3.36, having been false since v3.0. This bullet
-  described a multi-stage `Dockerfile` — `eclipse-temurin:25-jre`, non-root user, read-only root
-  filesystem, no shell in the final image — with "AOT, native (GraalVM 25) and CRaC variants carried
-  alongside" and closed with *"the assets already exist"*. **None of it existed.** There is no
-  `Dockerfile`, no Jib, no `build-image` configuration and no `native`, `aot` or `crac` profile; the
-  pom has exactly two profiles, `it` and `mutation`. Verified differentially per `AGENTS.md` trap 7 —
-  the identical search returns `docker/docker-compose.yml` and the Keycloak realm, so the zero is an
-  absence and not a broken search. CI has been honest about this the whole time
-  (`ci.yml:165`: *"no image scan: no image exists to scan"*); this document was the outlier.
+- **Container image: BUILT** (issue #11, v3.42). Produced by `spring-boot:build-image` — Paketo
+  buildpacks, **no `Dockerfile`**, layered by construction, so there is no base image for this
+  repository to patch and forget.
 
-  This was the worst live claim in the specification, because it asserted **hardening** — non-root,
-  read-only root filesystem, no shell — which is precisely what a reviewer takes on trust rather than
-  checks, and it named security properties of an artefact that does not exist.
+  **This bullet was retracted at v3.36 for asserting hardening on an image that had never existed —
+  non-root, read-only root filesystem, no shell — which is exactly the class of property a reviewer
+  takes on trust rather than checks. So every line below names the check that produced it, and the
+  one property that is still NOT true is stated as such rather than quietly restored.**
 
-  **The application is not containerised.** `full` is four infrastructure containers plus a host JVM:
-  `scripts/e2e/run-e2e.sh:82` runs `java -jar` directly. That part was always stated honestly (§1's
-  mode table, and the `docker-compose.yml` bullet below), which is why nothing was broken by the
-  absence — only misdescribed.
+  | Claim | How it was verified |
+  |---|---|
+  | Buildpacks, no `Dockerfile` | `git ls-files \| grep -i dockerfile` returns nothing — no such file is tracked. (A *content* grep for the word is **not** the check: it matches the comments in `pom.xml` and `docker-compose.yml` that explain why there is no Dockerfile, and would read as two hits.) `pom.xml` configures `<image>` under `spring-boot-maven-plugin` |
+  | Runs as a **non-root** user | `docker inspect --format '{{.Config.User}}'` → **`1002:1001`** |
+  | **No shell** in the final image | `--entrypoint=/bin/sh` → `stat /bin/sh: no such file or directory`; same for `/bin/bash` and `/bin/cat`. **Controlled**: the identical invocation against `alpine:3` returns `0`, so the absence is real and not a broken command. Corroborated independently — the buildpack launcher itself exits `failed to launch: bash exec: no such file or directory` |
+  | Base | `paketobuildpacks/ubuntu-noble-run-tiny:0.0.112`, read from the `io.buildpacks.lifecycle.metadata` label. "tiny" is *why* there is no shell |
+  | Size / layers | 804 MB, 17 layers (`docker inspect`) |
+  | **AOT cache** is built **and used** | build log `Training run will use this value as JAVA_TOOL_OPTIONS: -Dspring.profiles.active=standalone`; runtime log `JVM AOT Cache Enabled, contributing -XX:AOTCache=application.aot` |
+  | Startup improvement | **6.588 s → 3.011 s, −54%**, three runs each, same host. Not an estimate |
+  | An SBOM ships with it | lifecycle adds `buildpacksio/lifecycle:launch.sbom` |
+  | **Scanned in CI, by a gate that can fail** | `security` job, `aquasecurity/trivy-action`, `CRITICAL,HIGH`, `exit-code: 1`. It failed on its first honest run and found `CVE-2026-54291` (HIGH, pgjdbc) — fixed by upgrading, not suppressed |
+  | **NOT published** | `ci.yml` contains no `docker push`, no `docker/login-action` and no `packages: write` permission. The only lines matching those words are the comments stating that it does not publish, so read the file rather than a grep count. Publishing is stage 12 (§12.1) and stays a separate decision, so a fork's build passes |
 
-  **Decided, not yet built (issue #11): buildpacks via `spring-boot:build-image`, with CDS.** The
-  plugin is already in the pom; the image is layered by construction; `BP_JVM_CDS_ENABLED` performs a
-  training run and ships the archive. GraalVM native and CRaC are **deferred** — CDS is the startup
-  win that needs neither a JDK vendor change nor reflection metadata, and §14 step 12 says the JVM
-  assessment runs last for a reason. **The training run must use `standalone`**: it starts the
-  application, and under `full` it would block on Postgres, Redis, Kafka and Liquibase and hang the
-  build. The two run modes (§1) turn that trap into a profile flag.
-- **`docker-compose.yml`:** **Built:** Postgres, Kafka (KRaft, no ZooKeeper), Redis, each with a
-  healthcheck — see `docker/docker-compose.yml`. No `app` service; the jar runs on the host against
-  the published ports (§1). **No Keycloak service either, though Keycloak itself is built:** the realm
-  file `docker/keycloak/realm-tiny-ledger.json` exists and the integration suite imports it into a real
-  container (§6.4, §9.4) — what is missing is a Compose service for a hand-run `full` boot, which
-  therefore needs `LEDGER_ISSUER_URI` pointed at an issuer of the operator's own. **Observability
+  **NOT true, and deliberately not claimed: the root filesystem is not read-only.** Nothing in the
+  image or in `docker/docker-compose.yml` sets it. Making it true is a `read_only: true` on the
+  Compose service plus a writable `tmpfs` for `/tmp`, and it is not done here because it has not been
+  tested against a buildpack launcher that writes into its layer directories. **This is the property
+  v3.36 retracted; it is still false, and re-asserting it because the other two are now true would be
+  the same defect a second time.**
+
+  **The AOT-cache training run uses `standalone`** — it starts the application, and under `full` it
+  would block on Postgres, Redis, Kafka and Liquibase and hang the build. The two run modes (§1) turn
+  that trap into a profile flag, which is the duality earning its keep somewhere nobody planned.
+  The variables are **`BP_JVM_AOTCACHE_ENABLED`** and **`TRAINING_RUN_JAVA_TOOL_OPTIONS`**;
+  `BP_JVM_CDS_ENABLED` and `CDS_TRAINING_JAVA_TOOL_OPTIONS` are deprecated aliases, and a deprecated
+  name is silently ignored — indistinguishable from not setting it. Earlier revisions of this bullet
+  named the dead spelling.
+
+  **GraalVM native and CRaC remain DEFERRED**, with the reasons unchanged from v3.36: the AOT cache
+  needs neither a JDK vendor change nor reflection metadata, and a CRaC checkpoint is a memory image
+  on disk — the same artefact §6.6 refused to expose through `heapdump`.
+- **`docker-compose.yml`:** **Built:** Postgres, Kafka (KRaft, no ZooKeeper), Redis and **Keycloak**,
+  each with a healthcheck — see `docker/docker-compose.yml`. **The application is now a service too**
+  (issue #11), behind `profiles: [app]`, so the default `up` still starts exactly those four and
+  `--profile app` starts five. Proven differentially, which is the check that fails if `profiles:` is
+  ever dropped. **Keycloak's hostname is pinned** (`KC_HOSTNAME`): without it Keycloak derives `iss`
+  from the caller's `Host` header, so a token minted via `127.0.0.1:8081` and one minted via
+  `localhost:8081` carry different issuers and only one authenticates. The app validates the public
+  issuer while fetching the key set in-network (`jwk-set-uri` → `keycloak:8080`) — issuer **and**
+  audience validation stay fully enforced; nothing is relaxed. **Observability
   (§14 step 9):** one **opt-in** OTel Collector service behind `profiles: [observability]`, forwarding
   to Grafana Cloud over OTLP. The default `up` is unchanged. There is deliberately **no** Prometheus,
   Grafana, Tempo or Loki service — the backend is hosted, and §6.6 says why.
@@ -1846,9 +1863,9 @@ Active stages are ordered cheapest-and-most-informative first. The load stage is
 | 6 | ~~Documentation~~ — **removed 2026-08-06** | Was `scripts/ci/check_docs_governance.py`, wrapping a vendored ISO governance test. All five of its checks scanned the vendored skill's own directory rather than this repository, so it passed unconditionally (§8.4). Deleted, not repaired | — |
 | 7 | Integration | Testcontainers: Postgres, Kafka, Redis, Keycloak | every push |
 | 8 | **Python CLI** | `ruff`, `pyright` strict, and the `ledger-cli` unit tests. Deliberately needs no Docker — a lint failure should not cost a four-container stack to discover | every push |
-| 9 | **E2E** | `docker compose up`, then the five unmocked scenarios driven by `ledger-cli` against a running `full`-profile application (§9.6). The pytest-bdd binding over the *whole* catalogue, and the README `curl` extraction (§8.3), remain planned | every push |
+| 9 | **E2E** | `docker compose up`, then the **seven** unmocked scenarios driven by `ledger-cli` against a running `full`-profile application (§9.6) — since #11 that application is **the container image**, brought up as a Compose service, so what CI exercises is what would be deployed. The host-jar path is retained behind `E2E_MODE=jar` and is still run. The pytest-bdd binding over the *whole* catalogue, and the README `curl` extraction (§8.3), remain planned | every push |
 | 10 | **Load** | Gatling simulation and the JMH benchmarks; thresholds fail the build (§9.7) | `workflow_dispatch` only — a ramp on every push would pay for itself in queue time, not signal |
-| 11 | Security (partial) | `gitleaks` runs; `detect-secrets`, Trivy and `dependency-check` remain unwired | every push (`gitleaks` only) |
+| 11 | **Security** | `gitleaks`, then the image is **built and Trivy-scanned** (`CRITICAL,HIGH`, `exit-code: 1`, `ignore-unfixed: true`) and **OWASP Dependency-Check** runs the build tree at `failBuildOnCVSS=7`. Trivy scans the *image* — runtime jars and OS packages; Dependency-Check scans the *build*, so it also sees **test-scope** dependencies, which is the only real gap between them. All three live in the `security` job **because that job is a required check**: a scan in a non-required job is as unable to stop a merge as one that exits 0. `detect-secrets` stays unwired — same class of finding as `gitleaks`, so running both is redundant scanning, not extra safety. Trivy needs no credential and always runs; Dependency-Check is **skipped, not passed**, without `NVD_API_KEY`, so a fork stays green | every push |
 | 12 | Publish (planned) | Multi-arch image, CycloneDX SBOM, generated module diagrams to `docs/generated/` | not yet wired |
 | 13 | **SonarCloud** | Static analysis and coverage on `sonarcloud.io`, fed from both JaCoCo reports. **Reports; does not gate** — see below | every push, last: `needs: [unit, integration]` |
 

@@ -125,8 +125,20 @@ That duality is the design's central bet: a reviewer who wants the ledger from t
 one command; a reviewer who wants production concerns gets those too, without forking the code that
 holds the money.
 
-Compose brings up the infrastructure, including a Keycloak preloaded with the realm and its fixture
-users; the jar then runs on the host against it:
+Compose brings up the whole system — Postgres, Redis, Kafka, a Keycloak preloaded with the realm and
+its fixture users, and **the application itself**:
+
+```bash
+./mvnw spring-boot:build-image -DskipTests                                  # produces tiny-ledger:0.1.0-SNAPSHOT
+docker compose -f docker/docker-compose.yml --profile app up -d
+```
+
+The build is a separate step on purpose. The image is produced by **buildpacks**, not by a
+`Dockerfile` that Compose could build for you, so there is exactly one way to make it — see spec §12.
+If the tag is missing, `up` fails rather than quietly starting something else.
+
+`--profile app` is what adds the application. A plain `up` still starts exactly the four backing
+services, which is what you want when you would rather run the app from your IDE:
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
