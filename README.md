@@ -182,7 +182,7 @@ Compose brings up the whole system — Postgres, Redis, Kafka, a Keycloak preloa
 its fixture users, and **the application itself**:
 
 ```bash
-./mvnw spring-boot:build-image -DskipTests                                  # produces tiny-ledger:0.1.0-SNAPSHOT
+./mvnw spring-boot:build-image -DskipTests                                  # produces tiny-ledger:local
 scripts/tls/gen-dev-ca.sh                                                   # throwaway CA + certificate, gitignored
 docker compose -f docker/docker-compose.yml --profile app up -d
 ```

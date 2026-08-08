@@ -39,6 +39,43 @@ jobs:
         # "17 known, 0 new" whatever changed under docs/. See spec §8.4 and §12.1.
         run: ./mvnw -q spotless:check
 
+      # The application image tag is spelled in FOUR files — pom.xml builds it, and
+      # docker-compose.yml, scripts/e2e/run-e2e.sh and this workflow's Trivy step each name it.
+      # Only the pom's used to derive from ${project.version}, so a version bump moved the built
+      # image to a new tag while the other three kept naming the old one: compose started a STALE
+      # image and the e2e guard confirmed it was present, because it was. Taking the version out of
+      # the tag removes that by construction; this step is what keeps it out.
+      #
+      # It asserts the four sites agree, which is the property itself rather than a proxy for it —
+      # not "no version appears", which would pass just as happily if a site were deleted.
+      #
+      # DIFFERENTIAL BY CONSTRUCTION (AGENTS.md trap 7): the same pattern must score at least four
+      # hits and exactly one distinct value. A pattern that matched nothing fails on the count, so
+      # an empty result can never read as agreement — the failure mode that makes greps untrustworthy
+      # as evidence here.
+      - name: "Stage 1 — the app image tag agrees across every file that spells it"
+        run: |
+          set -uo pipefail
+          files="pom.xml docker/docker-compose.yml scripts/e2e/run-e2e.sh .github/workflows/ci.yml"
+          hits=$(grep -hoE 'tiny-ledger:[A-Za-z0-9._-]+' $files || true)
+          n=$(printf '%s\n' "$hits" | grep -c . || true)
+          distinct=$(printf '%s\n' "$hits" | sort -u | grep -c . || true)
+          echo "$hits" | sort | uniq -c
+          if [ "$n" -lt 4 ]; then
+            echo "::error::found $n image-tag mentions across $files, expected at least 4 — the search broke, or a site was deleted"
+            exit 1
+          fi
+          if [ "$distinct" -ne 1 ]; then
+            echo "::error::those $n mentions spell $distinct DIFFERENT tags; they must all name the same image"
+            printf '%s\n' "$hits" | sort -u
+            exit 1
+          fi
+          case "$(printf '%s\n' "$hits" | sort -u)" in
+            *[0-9].[0-9]*)
+              echo "::error::the tag carries a version again — pom.xml is the only place a version belongs"
+              exit 1 ;;
+          esac
+
   unit:
     needs: gate
     # No Docker required: `verify` starts zero containers **by construction** — surefire's *IT.java
@@ -179,7 +216,9 @@ jobs:
       - name: "Stage 11 — Trivy image scan"
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: tiny-ledger:0.1.0-SNAPSHOT
+          # No version in the tag, deliberately — see pom.xml's <image> block. A versioned tag
+          # here would have scanned an image the bump had already moved away from.
+          image-ref: tiny-ledger:local
           # Only inputs that DIFFER from the action's defaults are set here. `scan-type: image` and
           # `format: table` are already the defaults (action.yaml@v0.36.0), so stating them adds
           # lines that look like decisions and are not. `severity` (default: everything),
@@ -193,6 +232,68 @@ jobs:
           # which trains people to ignore it. THE CONSEQUENCE IS THAT THIS BUILD CAN BE GREEN WITH
           # KNOWN-UNFIXABLE CRITICALS PRESENT IN THE IMAGE. That is accepted, not overlooked.
           ignore-unfixed: true
+
+      # ---------------------------------------------------------------------------------------
+      # Stage 11d. The Compose images were the LAST uncovered surface in this repository, and the
+      # gap was structural rather than a configuration oversight: Dependabot's `docker` ecosystem
+      # matches only /dockerfile|containerfile/i (dependabot-core, docker/lib/dependabot/docker/
+      # file_fetcher.rb), there is no docker-compose ecosystem, and this repository has NO
+      # Dockerfile by design (buildpacks, spec §12). The step above scans only the application
+      # image. Nothing told anyone when postgres, redis, kafka, keycloak, traefik or the Collector
+      # grew a CVE.
+      #
+      # REPORT ONLY, AND THAT IS THE POINT OF THIS REVISION rather than a shortcut. Those tags are
+      # months old and this arrives with findings on its first run. A scanner that lands red for
+      # reasons nobody has triaged is how a gate gets ignored — the failure mode this pipeline has
+      # already shipped twice. Trivy's `--exit-code` is absent below, which is its default and
+      # means "report, do not fail". Tighten AFTER the first run's findings are triaged.
+      #
+      # docker/docker-compose.yml is the ONE authority for the list. Six image refs copied into
+      # this file would drift the first time one is bumped, and the drift would be invisible: the
+      # scan would stay green against versions that are no longer deployed.
+      #
+      # Pinned by tag, like every other version here. It is the trivy CONTAINER rather than
+      # trivy-action because an Action takes one `image-ref` and cannot loop; the binary install
+      # dance gitleaks does above would be a third mechanism for no gain, and Docker is already
+      # present in this job (build-image ran above).
+      - name: "Stage 11d — Trivy over the Compose images (report only)"
+        if: always()
+        run: |
+          set -uo pipefail
+          images=$(sed -n 's/^[[:space:]]*image:[[:space:]]*//p' docker/docker-compose.yml | grep -v '^tiny-ledger:' || true)
+          n=$(printf '%s\n' "$images" | grep -c . || true)
+          # THE CHECK THAT CAN FAIL, and the only one in this step (AGENTS.md trap 8). Without it a
+          # parse that matched nothing would scan nothing and print an empty, clean-looking table —
+          # a result IDENTICAL to six genuinely clean images. The differential is the count: this
+          # asserts the parse found the images, so a "no findings" summary means something.
+          if [ "$n" -lt 6 ]; then
+            echo "::error::parsed $n image refs from docker/docker-compose.yml, expected 6 — the PARSE broke; this is not a clean result"
+            exit 1
+          fi
+          {
+            echo "### Stage 11d — Compose images (report only, does NOT fail this job)"
+            echo ""
+            echo "| Image | CRITICAL/HIGH, fixable |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for ref in $images; do
+            f="trivy-$(printf '%s' "$ref" | tr -c 'A-Za-z0-9._-' '_').json"
+            # --scanners vuln: secret and misconfig scanning of third-party images is a different
+            # question and would report on their build choices, not on ours.
+            if docker run --rm -v trivy-cache:/root/.cache/trivy aquasec/trivy:0.73.0 \
+                 image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+                 --quiet --format json "$ref" > "$f"; then
+              c=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$f")
+              echo "| \`$ref\` | $c |" >> "$GITHUB_STEP_SUMMARY"
+              jq -r --arg r "$ref" '[.Results[]?.Vulnerabilities[]?][] | "\($r)  \(.Severity)  \(.VulnerabilityID)  \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)"' "$f"
+            else
+              # A pull or scan failure is NOT zero findings, and must not read as a clean row.
+              echo "::warning::trivy failed on $ref"
+              echo "| \`$ref\` | **scan failed** |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`ignore-unfixed: true\`, as above — a finding with no available fix is not counted here." >> "$GITHUB_STEP_SUMMARY"
 
       - name: "Stage 11 — what is covered, and what is not"
         if: always()
