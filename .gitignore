@@ -60,3 +60,10 @@ app.log
 # kill -9 and the log from after the restart answer different questions when it fails.
 app-before-kill.log
 app-after-restart.log
+
+# scripts/tls/gen-dev-ca.sh writes a THROWAWAY CA and leaf here for Traefik to terminate TLS
+# with, locally and in CI. Private key material, in a PUBLIC repository: it is generated on
+# demand and never committed, which is also why CI needs no certificate secret — it runs the
+# same generator in-run. Ignoring the directory rather than the file extensions is deliberate:
+# an extension list is a rule you have to remember to extend.
+docker/tls/

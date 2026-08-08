@@ -79,10 +79,9 @@ services:
       timeout: 5s
       retries: 10
 
-  # Published on 8081 because that is the port `application-full.properties:15` has always
-  # defaulted issuer-uri to. Until now nothing in this repository ever started a Keycloak there —
-  # it existed only under Testcontainers on a random port — so a `full` boot outside the IT suite
-  # had no issuer to talk to. The mapping is what makes that documented default true.
+  # BEHIND TRAEFIK, and published on no host port at all. It used to be on 8081 to match the
+  # issuer-uri default; since TLS landed the proxy fronts this too, so the issuer is
+  # https://auth.localhost and there is exactly one scheme and one certificate story in the stack.
   #
   # TEST FIXTURE realm: dev-only credentials, pinned user ids, never deploy.
   keycloak:
@@ -97,25 +96,43 @@ services:
       #   token minted via 127.0.0.1:8081  ->  iss = http://127.0.0.1:8081/realms/tiny-ledger  -> 401
       #   token minted via localhost:8081  ->  iss = http://localhost:8081/realms/tiny-ledger  -> 200
       #
-      # Same host, same realm, same user, two spellings of loopback, and only one of them
-      # authenticates. That is a live trap rather than a hypothetical: `scripts/e2e/run-e2e.sh`
-      # deliberately pins 127.0.0.1 everywhere (the IPv6 routing trap documented in that file), while
-      # `ledger-cli/src/ledger_cli/config.py` defaults issuer_uri to `localhost`. The suite passes
-      # today only because those two disagree — align them in the obvious direction and it breaks.
+      # (Those were the published-port days. The lesson is unchanged and is why the hostname is
+      # pinned below; only the value moved.)
       #
-      # Pinning the hostname makes `iss` a property of the DEPLOYMENT instead of a property of the
-      # request, so every caller gets the same issuer no matter how it dialled in. This is the fix
-      # the #11 plan names. The alternative — relaxing issuer validation — throws away the check that
-      # the token came from the issuer we trust, and is never acceptable to make a test pass.
-      KC_HOSTNAME: http://localhost:8081
+      # Same host, same realm, same user, two spellings of loopback, and only one authenticates.
+      # Pinning the hostname makes `iss` a property of the DEPLOYMENT rather than of the request, so
+      # every caller gets the same issuer no matter how it dialled in. The alternative — relaxing
+      # issuer validation — throws away the check that the token came from the issuer we trust, and
+      # is never acceptable to make a test pass.
+      #
+      # `ledger-cli/src/ledger_cli/config.py` now defaults to this SAME value; an earlier version of
+      # this comment said the two disagreed and that aligning them would break the suite. They are
+      # aligned and the suite passes.
+      #
+      # ONE variable for the auth origin, and docker-compose derives BOTH this and the application's
+      # LEDGER_ISSUER_URI from it, so the two can never drift apart — they are the pair whose
+      # disagreement produces a bare 401 that says nothing about which side is wrong.
+      #
+      # NO PORT in the default, because Traefik publishes 443. That is what a deployment's issuer
+      # looks like, and it keeps the port out of the eight places that spell this string.
+      # TINY_LEDGER_HTTPS_PORT and this variable MOVE TOGETHER: change the published port and this
+      # must become https://auth.localhost:<that port>, or every token is refused.
+      KC_HOSTNAME: ${TINY_LEDGER_AUTH_ORIGIN:-https://auth.localhost}
+      # Traefik terminates TLS and speaks plain HTTP to this container. Without xforwarded, Keycloak
+      # builds its URLs from that INTERNAL request and the issuer drifts back to http://keycloak:8080
+      # — a value no client can reach and no token can be validated against.
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: "true"
       # Serves /health/* on the management port (9000). Measured on 26.4: the image ships
       # neither curl nor wget, so the healthcheck below reaches it through bash's /dev/tcp,
       # which is present at /usr/bin/bash.
       KC_HEALTH_ENABLED: "true"
     volumes:
       - ./keycloak/realm-tiny-ledger.json:/opt/keycloak/data/import/realm-tiny-ledger.json:ro
-    ports:
-      - "8081:8080"
+    # NO `ports:` — 8081 is gone, and its removal is the point rather than tidiness. A published
+    # plaintext Keycloak would mint tokens whose `iss` is derived from whatever host the caller
+    # typed there, which is a DIFFERENT issuer from the one the application trusts: the exact
+    # 401-that-explains-nothing this stack has already measured once. One ingress, one issuer.
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"status\": \"UP\"' <&3"]
       interval: 5s
@@ -189,9 +206,9 @@ services:
       # THE ISSUER AND THE KEY SET ARE DELIBERATELY DIFFERENT URLS, and this is the one piece of this
       # file worth reading carefully.
       #
-      # A token is minted through the PUBLISHED port, so Keycloak stamps `iss` as
-      # http://localhost:8081/realms/tiny-ledger. The app cannot resolve `localhost:8081` — inside
-      # the network that is itself. The tempting fixes are both wrong: relaxing issuer validation
+      # A token is minted through TRAEFIK, so Keycloak stamps `iss` as
+      # https://auth.localhost/realms/tiny-ledger. The app cannot resolve that name usefully —
+      # inside the network it is loopback, meaning the app itself. The tempting fixes are both wrong: relaxing issuer validation
       # throws away the check that the token came from the issuer we trust, and rewriting `iss` to
       # `keycloak:8080` breaks every host-side caller instead.
       #
@@ -204,7 +221,7 @@ services:
       #
       # So issuer validation and audience validation both stay FULLY ENFORCED. Only the address the
       # key set is fetched from moves in-network. Nothing is relaxed.
-      LEDGER_ISSUER_URI: http://localhost:8081/realms/tiny-ledger
+      LEDGER_ISSUER_URI: ${TINY_LEDGER_AUTH_ORIGIN:-https://auth.localhost}/realms/tiny-ledger
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/tiny-ledger/protocol/openid-connect/certs
       # 300 is the PRODUCTION value (application.properties:42), restated here rather than defaulted
       # to empty — an empty environment variable is a binding failure for an int, not an unset one.
@@ -213,11 +230,163 @@ services:
       # make that test pass for the wrong reason, which its own comment calls the most expensive
       # kind of green.
       LEDGER_RATE_LIMIT_IP_BACKSTOP_CAPACITY: ${LEDGER_RATE_LIMIT_IP_BACKSTOP_CAPACITY:-300}
+      # The ONE address this application will honour X-Forwarded-For from — Traefik's, pinned
+      # below. Spec §6.1 row 4 rate-limits by client IP and IpBackstopFilter reads
+      # getRemoteAddr(), so behind a proxy every request's source address becomes the proxy's. If
+      # the application trusted the header from anywhere, any caller could mint a fresh 300/minute
+      # bucket per request and adding TLS would have quietly REMOVED a control.
+      #
+      # This is why the network below has an explicit subnet and Traefik a static address: Boot's
+      # DEFAULT internal-proxies list covers 172.16.0.0/12, which is the range Docker hands to
+      # Compose networks — the default would trust every container on this network.
+      LEDGER_TRUSTED_PROXIES: ${TINY_LEDGER_TRAEFIK_IP:-10.89.0.250}
+    # NO `ports:`, and its absence is the control rather than a tidy-up.
+    #
+    # Publishing 8080 would leave a plaintext route straight to the application that skips Traefik
+    # entirely — TLS you can walk around is decoration, and the forwarded-header trust above would
+    # be pointless if callers could simply arrive on the other port. Publishing 9090 falsified
+    # §6.6's own claim that the management endpoints "rely on the port not being published"; not
+    # publishing it makes that sentence true again.
+    #
+    # Both are still reachable from INSIDE the network (Traefik dials app:8080), which is all
+    # either of them needs.
+
+  # Terminates TLS for the application AND for Keycloak. Pinned by tag AND digest for the same
+  # reason the buildpack builder is: a mutable tag feeding a stack that a required check runs
+  # against is a base image to patch and forget (spec §12).
+  #
+  # `profiles: [app]` alongside the application, so a plain `docker compose up` still starts
+  # exactly the four backing services §6.6 and the README both assert.
+  #
+  # Keycloak IS routed through here (PR #25). One ingress, one certificate story, and no second
+  # scheme in the stack — and it publishes no host port, so there is no plaintext path left that
+  # could mint a token with a different `iss` from the one the application trusts. The routing
+  # itself lives once, in docker/traefik/dynamic.yml.
+  #
+  # An earlier draft of this comment said the opposite ("deliberately NOT routed through here") and
+  # survived the decision that reversed it. Replaced rather than amended: two accounts of the same
+  # fact in one file is how a reader ends up restoring the published port this file removed.
+  traefik:
+    image: traefik:v3.5@sha256:16acb89c6db341182970d6fdafece31303b0a380a8ed7aa51682e225229bf1d2
+    profiles: [app]
+    # NO depends_on. Traefik used to wait for `app`, which was harmless until E2E_MODE=jar needed
+    # the proxy WITHOUT the container -- the application runs on the host in that mode, while
+    # Keycloak stays behind this proxy because there is one ingress and one certificate story. The
+    # file provider needs no backend to start; an absent one is a 502 on that route and nothing more.
+    # THE WHOLE STATIC CONFIGURATION IS HERE, as flags, and there is deliberately no traefik.yml.
+    # An earlier draft had one, and it could not work: Traefik does NOT expand ${VARS} in its own
+    # config file, and — measured — when `--configFile` is given it IGNORES CLI flags entirely, so
+    # the override that was meant to repair that was silently discarded. The container kept
+    # answering `301 https://127.0.0.1/api/v1/accounts`, a redirect to a port nothing publishes,
+    # with the flag visibly present in `docker inspect`.
+    #
+    # Compose DOES interpolate, so the published port reaches Traefik only from here. Nine flags
+    # replaced a forty-five line file that had one job it could not do.
+    #
+    # The dynamic half (certificate, TLS floor, the route) stays in a file — it needs no host
+    # values, and YAML is the right shape for it.
+    command:
+      - "--entryPoints.web.address=:80"
+      # Plaintext exists ONLY to redirect, which is also the shape the ZAP baseline checks for.
+      # `to` takes a PORT rather than the `websecure` entrypoint name, and must: Traefik v3 has no
+      # `redirections.entryPoint.port` setting at all (checked against `traefik --help`), and
+      # naming the entrypoint makes Traefik build the Location from its container-side :443 —
+      # which is not the port the host published. `permanent` defaults to true.
+      # `websecure`, the entrypoint name, which is correct BECAUSE the published port is now 443:
+      # Traefik builds the Location from that entrypoint's :443 and omits the port, giving
+      # `https://host/...`. An earlier revision published 8443 and had to pass a literal port
+      # here, since Traefik v3 has no `redirections.entryPoint.port` setting at all (checked against
+      # `traefik --help`) — without it the redirect pointed at a port nothing published.
+      #
+      # The residual, stated rather than left to be found: if TINY_LEDGER_HTTPS_PORT is moved off
+      # 443, this Location still says 443. Dial the HTTPS port directly in that case; the redirect
+      # is a courtesy for humans typing http://, not a path anything depends on.
+      - "--entryPoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entryPoints.web.http.redirections.entryPoint.scheme=https"
+      - "--entryPoints.websecure.address=:443"
+      # THE DOCKER PROVIDER IS DELIBERATELY NOT USED, which is why there is no docker.sock in the
+      # volumes below. Every tutorial mounts it so routes can be discovered from service labels;
+      # that socket is root-equivalent on the host. Trading it away to avoid writing one router
+      # and one service by hand is a bad trade anywhere, and an absurd one in the change whose
+      # whole point is not to widen a trust boundary while adding TLS.
+      - "--providers.file.filename=/etc/traefik/dynamic.yml"
+      # The dashboard and API stay OFF (they default off; this says so out loud). An
+      # unauthenticated dashboard on the edge of a ledger would be a finding in its own right.
+      - "--api.dashboard=false"
+      - "--api.insecure=false"
+      # Access logs to stdout, so `docker compose logs traefik` answers "did the request reach the
+      # proxy at all" — the first question every routing failure asks.
+      - "--accesslog=true"
+      - "--log.level=INFO"
+    networks:
+      default:
+        # THE address LEDGER_TRUSTED_PROXIES names, and the reason this file declares a subnet at
+        # all. Without this pin Docker allocates from the BOTTOM of the range, Traefik lands on
+        # ~10.89.0.6, `internal-proxies` matches nothing, and RemoteIpValve silently no-ops — every
+        # caller in the world is then metered under Traefik's address and §6.1's per-IP backstop
+        # becomes one global bucket that any single client can exhaust for everyone.
+        #
+        # THIS BLOCK WAS DELETED ONCE, by a rewrite of the `command:` list above that spanned the
+        # lines between `command:` and `volumes:`. Nothing caught it: both unit tests supply their
+        # own `internal-proxies`, run-e2e.sh raises the backstop to 10000, and the by-hand spoof
+        # check scores 401,401,429,429 whether the trust works or not — it is not differential.
+        # `ProxyAddressPinTest` is the gate that fails now if it goes missing again.
+        ipv4_address: ${TINY_LEDGER_TRAEFIK_IP:-10.89.0.250}
+    volumes:
+      # Read-only, both. NOTE what is NOT here: /var/run/docker.sock — see the provider flag above.
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      # Generated by scripts/tls/gen-dev-ca.sh, gitignored.
+      #
+      # `up` does NOT fail if it was never run, and an earlier version of this comment claimed it
+      # did. Compose CREATES A DIRECTORY for a missing bind-mount source, so Traefik starts and
+      # serves its own `CN=TRAEFIK DEFAULT CERT` while every request succeeds end to end — a silent
+      # downgrade that only scripts/e2e/https-check.py's two-trust-store control catches, and that
+      # control does not run on the plain `docker compose up` path a human follows. Run the
+      # generator first; docs/pitfalls.md carries the symptom.
+      - ./tls:/etc/traefik/tls:ro
     ports:
-      - "8080:8080"
-      # Management, §6.6. Reachable as published because `full` pins no management.server.address —
-      # `standalone` pins loopback and would not be, which is deliberate and profile-specific.
-      - "9090:9090"
+      # THE PRIVILEGED PAIR, on purpose. Keycloak sits behind this proxy now, so the published port
+      # ends up inside `iss` — and 443 is the one port that does not, because it is the scheme
+      # default and drops out of the URL. That keeps the issuer as `https://auth.localhost`, which
+      # is what a real deployment's issuer looks like, and keeps a port number out of the eight
+      # places that have to spell it identically.
+      #
+      # Still overridable, because a port clash here is the same silent failure TINY_LEDGER_PG_PORT
+      # exists to teach. But it is NOT a free knob: move it and TINY_LEDGER_AUTH_ORIGIN must move
+      # with it, exactly like the subnet/address pair below.
+      - "${TINY_LEDGER_HTTPS_PORT:-443}:443"
+      # Plaintext, and it only ever answers a 301 to https. Published so the redirect is something
+      # a test and the ZAP baseline can actually observe rather than a claim about a config file.
+      - "${TINY_LEDGER_HTTP_PORT:-80}:80"
 
 volumes:
   postgres-data:
+
+# An EXPLICIT subnet, which is a security control here rather than housekeeping. The application
+# trusts X-Forwarded-For only from LEDGER_TRUSTED_PROXIES, and that has to name an address that
+# does not move between `up` runs. Docker's own allocation would hand Traefik a different address
+# per network, and the fallback — trusting the whole subnet — would extend the trust to Postgres,
+# Redis, Kafka, Keycloak and the Collector for no gain.
+#
+# OVERRIDABLE, because the first value chosen here collided on the very first `up`. 172.28.0.0/16
+# was already held by an unrelated project on this machine and Compose refused with
+# "invalid pool request: Pool overlaps with other one on this address space" — which is the same
+# class of failure TINY_LEDGER_PG_PORT exists for, and the reason a hardcoded value would have been
+# a bug shipped to the next reader rather than a tidy default.
+#
+# 10.89.0.0/24 sits outside Docker's default bridge pool (the /16s it carves out of 172.17.0.0/12),
+# so it does not compete with anything Docker allocates on its own, and a /24 asks for 254
+# addresses rather than 65 534.
+#
+# Traefik takes .250, NOT .2, and that is a fix rather than a preference. Docker allocates DYNAMIC
+# addresses from the bottom of the range, so the four backing services take .2 through .5 as they
+# start — and a static .2 then failed with
+#   failed to set up container networking: Address already in use
+# on a stack that was already up. A high address stays clear of the dynamic run for the life of
+# this stack. Both values are overridable together: change one and the other must move with it,
+# which is why they share a comment.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${TINY_LEDGER_SUBNET:-10.89.0.0/24}

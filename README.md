@@ -70,9 +70,9 @@ split is stated per task:
 |---|---|---|
 | **Quick start** (`standalone`) and `./mvnw verify` | **JDK 25** | In-memory event store and cache; `verify` starts **zero containers by construction** (ADR 0003) |
 | `./mvnw verify -Pit` — the integration suite | JDK 25 + **Docker** | Testcontainers starts its own Postgres, Redis, Kafka and Keycloak on random ports |
-| **`full` mode** — the Compose stack ([`docs/docker.md`](docs/docker.md)) | JDK 25 + **Docker**, Compose v2 | The image is produced by buildpacks, which is a daemon build; the four backing services are containers. `curl` and `jq` for the runbook's commands |
+| **`full` mode** — the Compose stack ([`docs/docker.md`](docs/docker.md)) | JDK 25 + **Docker**, Compose v2 + **`openssl`** | The image is produced by buildpacks, which is a daemon build; the four backing services are containers. `openssl` generates the dev certificate Traefik terminates TLS with — it is bundled with Git for Windows and present on every Linux and macOS install. `curl` and `jq` for the runbook's commands |
 | `ledger-cli` — `ruff`, `pyright`, its unit tests | **uv** | The Python CLI in `ledger-cli/` is a real component with its own CI gate. Needs no Docker and no running app — [runbook](docs/ledger-cli.md) |
-| **The e2e scenarios** (`scripts/e2e/run-e2e.sh`) | JDK 25 + **Docker** + **uv** + `bash` | The seven unmocked scenarios are `pytest` driving the Python CLI over HTTP against the containerised application — every toolchain in the repository, in one command |
+| **The e2e scenarios** (`scripts/e2e/run-e2e.sh`) | JDK 25 + **Docker** + **uv** + `bash` + `openssl` | The seven unmocked scenarios are `pytest` driving the Python CLI **over HTTPS** against the containerised application, behind Traefik — every toolchain in the repository, in one command. The script generates the certificate itself if it is missing |
 
 **Versions.** Java **25** (Corretto in CI). Python **3.11, 3.12 or 3.13** — but installing Python is
 not a separate step: `uv` uses a matching interpreter if the machine has one and downloads one if it
@@ -83,6 +83,13 @@ dependency: `./mvnw` needs only a JDK, and `uv.lock` is committed and installed 
 
 `bash` is listed because `scripts/e2e/*.sh` are shell scripts; on Windows that means Git Bash or WSL.
 The Java and Python paths are cross-platform — see the `curl.exe` note under the Quick start.
+
+**One Windows caveat that only bites in `full` mode.** Git for Windows ships a **Schannel**-backed
+`curl`, which resolves certificate chains through the Windows store and therefore refuses the private
+dev CA even when it is passed with `--cacert`. The `curl` recipes in
+[`docs/docker.md`](docs/docker.md) are correct on Linux and macOS; on Windows use the repository's
+Python probe, which that document names. **Do not reach for `-k`** — it deletes the check rather than
+satisfying it. Nothing in `standalone` is affected: it is plaintext on loopback.
 
 **No gate enforces this table** — nothing in CI checks documentation here (`docs/INDEX.md` says so,
 and spec §8.4 records why). Its evidence is `.github/workflows/ci.yml`, whose jobs are split along
@@ -176,12 +183,23 @@ its fixture users, and **the application itself**:
 
 ```bash
 ./mvnw spring-boot:build-image -DskipTests                                  # produces tiny-ledger:0.1.0-SNAPSHOT
+scripts/tls/gen-dev-ca.sh                                                   # throwaway CA + certificate, gitignored
 docker compose -f docker/docker-compose.yml --profile app up -d
 ```
 
 The build is a separate step on purpose. The image is produced by **buildpacks**, not by a
 `Dockerfile` that Compose could build for you, so there is exactly one way to make it — see spec §12.
 If the tag is missing, `up` fails rather than quietly starting something else.
+
+**In `full`, everything arrives over HTTPS on 443** — the API at `https://app.localhost` and
+**Keycloak at `https://auth.localhost`**, split by hostname. Traefik terminates TLS and **nothing
+else publishes a port**: not the application, not the management endpoints, not the identity
+provider. A published `8080` would leave a plaintext route straight past the terminator, and a
+published Keycloak would mint tokens with a different `iss` from the one the app trusts. The
+plaintext entrypoint on `80` answers a `301` and serves nothing.
+The certificate is generated on demand, never committed, and **CI holds no certificate secret**: it
+runs that same script inside the run. TLS stops at Traefik — the backing services and Keycloak are
+still plaintext, which spec §6.4a names as a gap rather than leaving implied.
 
 **Full runbook: [`docs/docker.md`](docs/docker.md)** — getting a token, moving money, proving the
 Kafka hop landed, and a symptom→cause table for the things that look broken and are not.
@@ -190,9 +208,17 @@ Kafka hop landed, and a symptom→cause table for the things that look broken an
 services, which is what you want when you would rather run the app from your IDE:
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d
-./mvnw spring-boot:run -Dspring-boot.run.profiles=full
+docker compose -f docker/docker-compose.yml --profile app up -d --wait
+./mvnw -q -DskipTests package
+E2E_MODE=jar ./scripts/e2e/run-e2e.sh
 ```
+
+The **application** binds `8080` on your host with no proxy and no TLS, which is what running a jar
+actually is; CI exercises this as stage 9b. But `--profile app` is still required, because
+**Keycloak is behind Traefik and publishes no port of its own** — and the JVM needs the dev CA in a
+truststore to fetch its signing keys, which `run-e2e.sh` passes for you and a bare
+`spring-boot:run` does not. [`docs/urls-and-tls.md`](docs/urls-and-tls.md) is the full map;
+[`docs/pitfalls.md`](docs/pitfalls.md) has the symptom if you skip a step.
 
 Every route then requires a bearer token, so `full` is the mode to read if you care about the
 authorisation model (spec §6.4) rather than the ledger mechanics.
