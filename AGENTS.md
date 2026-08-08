@@ -116,6 +116,30 @@ until they bite.
    and one that must score zero. Zero containers under `verify` is evidenced that way — 0 there, 18
    under `-Pit` — which proves both that the pattern matches and that the zero is an absence.
 
+8. **A check that scores the same under both configurations is not a check — and this applies to
+   POSITIVE claims, not just to claims of absence.** Trap 7 above is about proving a zero is real.
+   Its mirror image cost a whole TLS session: a control was written, a by-hand probe was run, the
+   result was recorded in a commit message as evidence — and the probe returned the identical answer
+   whether the control worked or not. The control was in fact **inert**, and the "proof" could never
+   have said so.
+
+   Before writing a result down as evidence, run the check against the case that must **fail**. If
+   you cannot construct that case, you have not built a check; you have built an observation.
+   Two shapes recur here:
+
+   - **The proof is downstream of a second mechanism.** The spoofed-header probe could not fail
+     because the *proxy* strips forwarded headers before the application ever sees them — so the
+     application's own trust setting was invisible to it either way. The differential that worked
+     used a different observable entirely.
+   - **The gate tests the mechanism, not the deployed value.** Two tests supplied their own
+     configuration and proved the machinery worked; neither could notice that the value actually
+     shipped pointed at an address nothing held. `ProxyAddressPinTest` exists for exactly that gap.
+
+   **A related mechanical hazard, because it is how the deletion happened:** an edit that replaces a
+   *span* of a file — "everything from `command:` to `volumes:`" — silently deletes anything sitting
+   in the middle of that span. Nothing was wrong with the replacement text; the loss was a block
+   nobody was thinking about. After a span-replacing edit, diff the file rather than the intent.
+
 ## Configuration
 
 `application.properties` is the base and holds **only what is true in both run modes**;
