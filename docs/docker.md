@@ -18,9 +18,10 @@ want to see the ledger work, use the README. Read this when you want the product
 
 - Docker with Compose v2 (`docker compose`, not `docker-compose`). Verified on Docker **28.3.0**.
 - JDK 25 and the Maven wrapper in this repository.
-- **`uv`** — for §6 only, the e2e suite. `scripts/e2e/run-e2e.sh` ends in `uv run pytest -m e2e`, so
-  without it the runbook fails at its last step having built and started everything. uv provisions
-  the Python interpreter itself (3.11+), so Python is not a separate install.
+- **`uv`** — for §6 only, the e2e suite. `scripts/e2e/run-e2e.sh` ends in `uv run pytest -m e2e`; it
+  now checks for uv on its first line rather than at that last one, so a missing install costs you
+  the error and nothing else. uv provisions the Python interpreter itself (3.11+), so Python is not
+  a separate install.
 - `curl` and `jq` — every verification command below is written with them. On Windows use
   `curl.exe`; PowerShell aliases bare `curl` to `Invoke-WebRequest`, which does not take these flags.
 - `bash`, for the `scripts/e2e/*.sh` helpers. Git Bash or WSL on Windows.
@@ -309,7 +310,7 @@ ledger's system of record.
 | `docker exec ... cat` → `executable file not found` | the run image has no shell or coreutils | read `docker compose logs app` instead |
 | e2e aborts: "the full stack is not healthy" | a backing service really is unhealthy | `docker compose ps -a`; a container in `Created` usually means a taken host port |
 | `7 deselected` instead of `7 passed` | the `e2e` marker override did not take | run through `scripts/e2e/run-e2e.sh`, not bare `pytest` |
-| e2e ends `uv: command not found` | uv is not installed — §6 needs it, §§1–5 do not | install uv; the script does not check for it up front, and its EXIT trap dumps the application log *after* the error, so the cause scrolls past |
+| e2e aborts `::error::uv not found` | uv is not installed — §6 needs it, §§1–5 do not | install uv. The check is the script's first, before the image guard, so nothing was built or started and there is no application log to read past |
 | App can't reach Kafka in-network | advertised listener | containers use `kafka:29092`; the host uses `localhost:9092` |
 
 ## What this stack is not
