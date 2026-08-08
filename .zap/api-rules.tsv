@@ -1,0 +1,48 @@
+# OWASP ZAP API scan (stage 11e) — per-rule dispositions. TAB-separated:
+#   <rule id>	<IGNORE|WARN|FAIL>	<comment>
+#
+# SEPARATE FROM rules.tsv ON PURPOSE. That file dispositions findings against the EDGE — what a
+# spider reaches without a credential: TLS, the redirect, headers on two 401s. This one
+# dispositions findings against the ROUTES, read with a live bearer token. The two scans see
+# different responses from the same deployment, so a rule can legitimately be tolerable in one and
+# a defect in the other; a shared file would force one answer onto both questions and hide which
+# scan a line was written for.
+#
+# ── WHAT THIS SCAN IS, PRECISELY ────────────────────────────────────────────────────────────────
+# `zap-api-scan.py -S`, fed `docs/api/openapi.yaml`. It enumerates the nine operations from the
+# CONTRACT rather than crawling for links, which is what lifts stage 11c's structural ceiling: a
+# baseline spider on a bearer-token API with no hyperlinks reached `Total of 3 URLs` and visited no
+# route at all.
+#
+# `-S` is safe mode: it SKIPS THE ACTIVE SCAN and reads passively. zap-api-scan.py active-scans by
+# default, and this repository's rule is a baseline and never an active scan — no attack payload
+# against a ledger. Losing that quietly in exchange for coverage would be a worse trade than the
+# gap it closes.
+#
+# "Passive" still oversells it, so: importing the definition sends ONE REQUEST PER OPERATION, and
+# three of those are writes (POST an account, PUT a deposit, PUT a withdrawal). This scan therefore
+# WRITES TO THE LEDGER, using the contract's own example values rather than attack payloads. That
+# is harmless against a stack the `zap` job creates and destroys in the same run, and it is why
+# stage 11e runs AFTER the baseline rather than before it.
+#
+# ── THE CHECK THAT MAKES A CLEAN REPORT MEAN ANYTHING ───────────────────────────────────────────
+# An inert token is invisible here: every route answers 401, the passive rules read nine error
+# bodies, and the scan reports clean — which looks exactly like a clean API (AGENTS.md trap 8). Two
+# gates exist for that, and both are differential rather than declarative:
+#
+#   1. The token is proven live BEFORE ZAP is handed it — the same URL requested twice, once with
+#      the bearer and once without, requiring 200 and 401. Non-empty is not proof: an expired or
+#      wrong-audience token 401s just as silently as no token at all.
+#   2. The scan must report MORE URLs than the baseline's 3. That number is the control, measured
+#      on the same run rather than assumed. A scan that enumerated nothing fails here instead of
+#      passing quietly.
+#
+# ── STATUS ──────────────────────────────────────────────────────────────────────────────────────
+# NO DISPOSITIONS YET, and the file is committed empty of them on purpose. Findings do not gate on
+# this landing (`|| true` in ci.yml, alongside the reason). The first run's report is the input to
+# triage; each accepted finding then arrives here with its rule id and a reason, where it is
+# visible in a diff, and the `|| true` goes.
+#
+# IGNORE means "this does not apply to this system", never "we could not be bothered". A rule that
+# genuinely applies gets fixed — headers on the terminator in docker/traefik/dynamic.yml, response
+# shapes in the application — rather than a line here.
