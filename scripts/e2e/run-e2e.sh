@@ -90,8 +90,15 @@ case "$E2E_MODE" in
     # not an overridable variable. An $APP_IMAGE knob would move only this check while compose
     # still started the hardcoded tag — a guard that passes on one image while another runs is
     # worse than no guard.
-    if ! docker image inspect tiny-ledger:0.1.0-SNAPSHOT >/dev/null 2>&1; then
-      echo "::error::tiny-ledger:0.1.0-SNAPSHOT not found — build it first: ./mvnw -q spring-boot:build-image -DskipTests" >&2
+    #
+    # It carries NO VERSION, and that is what makes the sentence above true. It used to spell the
+    # version, matching a pom that derived its own from ${project.version} — so bumping the version
+    # pointed the build at a new tag while this guard, compose and ci.yml all kept naming the old
+    # one. This check would then pass against a STALE image, correctly reporting that it exists.
+    # The version lives in pom.xml and nowhere else; `gate` asserts every site spells the identical
+    # tag, which is also why no comment here quotes the old versioned one.
+    if ! docker image inspect tiny-ledger:local >/dev/null 2>&1; then
+      echo "::error::tiny-ledger:local not found — build it first: ./mvnw -q spring-boot:build-image -DskipTests" >&2
       exit 1
     fi
 

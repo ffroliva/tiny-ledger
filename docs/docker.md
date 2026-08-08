@@ -79,7 +79,7 @@ network and is unaffected — which is one of the things containerising it bough
 ```
 
 ```
-Successfully built image 'docker.io/library/tiny-ledger:0.1.0-SNAPSHOT'
+Successfully built image 'docker.io/library/tiny-ledger:local'
 ```
 
 **The build is a separate step on purpose, and Compose will not do it for you.** The image is
@@ -87,13 +87,23 @@ produced by [Paketo buildpacks](https://paketo.io) — there is no `Dockerfile`,
 for Compose to build, and the `app` service deliberately has no `build:` key. One way to produce the
 artefact. If the tag is missing, `up` fails with a pull error rather than starting something else.
 
+**The tag carries no version, and that is deliberate.** It is spelled in four files — `pom.xml`
+builds it, `docker-compose.yml` runs it, `scripts/e2e/run-e2e.sh` guards on it and `ci.yml` scans
+it — and only the pom's used to derive from `${project.version}`. So bumping the version moved the
+built image to a new tag while the other three kept naming the old one: Compose started a **stale**
+image and the e2e guard confirmed it was present, because it was. Taking the version out removes
+that by construction, and the `gate` job asserts the four still agree. The cost is that two
+versions' images cannot sit side by side locally; nothing here does that, and publishing (stage 12)
+tags for the registry from `${project.version}` at that point, which is where a version belongs.
+Each build **replaces** `tiny-ledger:local`, so what Compose starts is always the last thing built.
+
 The first run pulls the builder and takes several minutes; after that it is about 90 seconds.
 
 ```bash
 docker images tiny-ledger --format '{{.Repository}}:{{.Tag}}\t{{.Size}}'
 ```
 ```
-tiny-ledger:0.1.0-SNAPSHOT      804MB
+tiny-ledger:local       804MB
 ```
 
 **The JVM AOT cache is on**, trained during the build under the `standalone` profile. Measured over
@@ -436,7 +446,7 @@ ledger's system of record.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Bind for 0.0.0.0:5432 failed: port is already allocated` | another Postgres | `export TINY_LEDGER_PG_PORT=55432` |
-| `up` fails with a pull error on `tiny-ledger:0.1.0-SNAPSHOT` | the image was never built | `./mvnw spring-boot:build-image -DskipTests` |
+| `up` fails with a pull error on `tiny-ledger:local` | the image was never built | `./mvnw spring-boot:build-image -DskipTests` |
 | `app:9090/actuator/health` returns **403** | correct — the root is `denyAll` | use `/actuator/health/readiness` |
 | `127.0.0.1:8080` or `:9090` refuse the connection | correct — neither is published any more | go through `https://127.0.0.1`; for the probes use a container on the network (§3) |
 | curl reports `CERT_TRUST_IS_UNTRUSTED_ROOT`, or `000` | Windows curl is Schannel-backed and will not accept a private CA | use the Python probe in §0. **Not `-k`** |

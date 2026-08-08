@@ -39,6 +39,43 @@ jobs:
         # "17 known, 0 new" whatever changed under docs/. See spec §8.4 and §12.1.
         run: ./mvnw -q spotless:check
 
+      # The application image tag is spelled in FOUR files — pom.xml builds it, and
+      # docker-compose.yml, scripts/e2e/run-e2e.sh and this workflow's Trivy step each name it.
+      # Only the pom's used to derive from ${project.version}, so a version bump moved the built
+      # image to a new tag while the other three kept naming the old one: compose started a STALE
+      # image and the e2e guard confirmed it was present, because it was. Taking the version out of
+      # the tag removes that by construction; this step is what keeps it out.
+      #
+      # It asserts the four sites agree, which is the property itself rather than a proxy for it —
+      # not "no version appears", which would pass just as happily if a site were deleted.
+      #
+      # DIFFERENTIAL BY CONSTRUCTION (AGENTS.md trap 7): the same pattern must score at least four
+      # hits and exactly one distinct value. A pattern that matched nothing fails on the count, so
+      # an empty result can never read as agreement — the failure mode that makes greps untrustworthy
+      # as evidence here.
+      - name: "Stage 1 — the app image tag agrees across every file that spells it"
+        run: |
+          set -uo pipefail
+          files="pom.xml docker/docker-compose.yml scripts/e2e/run-e2e.sh .github/workflows/ci.yml"
+          hits=$(grep -hoE 'tiny-ledger:[A-Za-z0-9._-]+' $files || true)
+          n=$(printf '%s\n' "$hits" | grep -c . || true)
+          distinct=$(printf '%s\n' "$hits" | sort -u | grep -c . || true)
+          echo "$hits" | sort | uniq -c
+          if [ "$n" -lt 4 ]; then
+            echo "::error::found $n image-tag mentions across $files, expected at least 4 — the search broke, or a site was deleted"
+            exit 1
+          fi
+          if [ "$distinct" -ne 1 ]; then
+            echo "::error::those $n mentions spell $distinct DIFFERENT tags; they must all name the same image"
+            printf '%s\n' "$hits" | sort -u
+            exit 1
+          fi
+          case "$(printf '%s\n' "$hits" | sort -u)" in
+            *[0-9].[0-9]*)
+              echo "::error::the tag carries a version again — pom.xml is the only place a version belongs"
+              exit 1 ;;
+          esac
+
   unit:
     needs: gate
     # No Docker required: `verify` starts zero containers **by construction** — surefire's *IT.java
@@ -179,7 +216,9 @@ jobs:
       - name: "Stage 11 — Trivy image scan"
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: tiny-ledger:0.1.0-SNAPSHOT
+          # No version in the tag, deliberately — see pom.xml's <image> block. A versioned tag
+          # here would have scanned an image the bump had already moved away from.
+          image-ref: tiny-ledger:local
           # Only inputs that DIFFER from the action's defaults are set here. `scan-type: image` and
           # `format: table` are already the defaults (action.yaml@v0.36.0), so stating them adds
           # lines that look like decisions and are not. `severity` (default: everything),
