@@ -15,6 +15,7 @@ Quadrants are Diátaxis, per spec §8.1.
 | **`../AGENTS.md`** | **Always, first.** The gates, the enforced rules, the traps already paid for | — |
 | `../README.md` | Running it for the first time — `standalone`, one command, no Docker | Tutorial |
 | **`docker.md`** | **Running the `full` profile: build the image, start the stack, get a token, move money, tear down.** A runbook of verified commands, plus a symptom→cause table for the responses that look like faults and are not (`403` on the health root, `404` on 8080, `401` from an issuer mismatch) | Tutorial / How-to |
+| **`ledger-cli.md`** | **Using the Python CLI** — installing it with `uv`, how it gets a token in `full` (Direct Access Grants, and the fixture users with their roles), worked deposit/withdraw/balance examples, the seven `scenario run` sequences and what each proves, and a symptom→cause table. Also the honest list of what it does *not* do: `--json` parses and is ignored, there is no `ledger-cli` service account, nothing is seeded | Tutorial / How-to |
 | **`security-material.md`** | **Adding or looking for any credential, key or certificate.** What exists today and where each is injected, why the Keycloak fixture password is public on purpose, the one key still in git history and why no rotation is owed — and that **TLS does not exist yet**, with the agreed design recorded so it is not re-opened | Explanation / Reference |
 | `spec.md` (v3.42) | Any question about *contract* — API shape, errors (§6.5), security model (§6.4), idempotency (§6.3), observability and health (§6.6), the pipeline and what actually gates (§12.1), the two run modes (§1), module boundaries (§3/§4) | Explanation |
 | `architecture.md` | You need the shape of the system before the detail | Explanation |
@@ -28,9 +29,11 @@ Quadrants are Diátaxis, per spec §8.1.
 | `_archive/reviews/` | Checking that the review claims in `agentic-workflow.md` are real — the council reports and assessments as they were written | Reference |
 | `_archive/` (start at its `README.md`) | Tracing *why* a decision was taken, or auditing what an agent was actually instructed to do. **Working artifacts, not documentation** — the README states which paths inside them are stale | — |
 
-The Diátaxis quadrants above (spec §8.1) are the ones that have documents. `docs/` has no `how-to/`
-or `tutorial/` tree: the README is the tutorial, and the operational how-tos are not written. Both
-directories held a `.gitkeep` and nothing else, and were removed rather than left as a promise.
+The Diátaxis quadrants above (spec §8.1) are the ones that have documents. `docs/` still has no
+`how-to/` or `tutorial/` tree — both directories held a `.gitkeep` and nothing else, and were removed
+rather than left as a promise. The quadrant is not empty any more, though: the README is the
+tutorial, and `docker.md` and `ledger-cli.md` are the two operational runbooks, kept as flat files
+rather than reinstating a tree for two documents.
 
 ## Archived plans, newest first
 

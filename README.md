@@ -47,6 +47,8 @@ Postgres, Redis and Kafka, from one codebase.
 - [Two run modes](#two-run-modes)
 - **[Running with Docker](docs/docker.md)** — the `full` profile end to end: image, stack, token,
   a real deposit, teardown. Verified commands, and the responses that look like faults but are not
+- **[The `ledger-cli` operator tool](docs/ledger-cli.md)** — installing the Python CLI, how it gets
+  a token in `full`, worked deposit/withdraw/balance examples, and the seven scenario sequences
 - **[Security material](docs/security-material.md)** — where keys and credentials live, and what
   does not exist yet
 - [The engineering, briefly](#the-engineering-briefly)
@@ -69,7 +71,7 @@ split is stated per task:
 | **Quick start** (`standalone`) and `./mvnw verify` | **JDK 25** | In-memory event store and cache; `verify` starts **zero containers by construction** (ADR 0003) |
 | `./mvnw verify -Pit` — the integration suite | JDK 25 + **Docker** | Testcontainers starts its own Postgres, Redis, Kafka and Keycloak on random ports |
 | **`full` mode** — the Compose stack ([`docs/docker.md`](docs/docker.md)) | JDK 25 + **Docker**, Compose v2 | The image is produced by buildpacks, which is a daemon build; the four backing services are containers. `curl` and `jq` for the runbook's commands |
-| `ledger-cli` — `ruff`, `pyright`, its unit tests | **uv** | The Python CLI in `ledger-cli/` is a real component with its own CI gate. Needs no Docker and no running app |
+| `ledger-cli` — `ruff`, `pyright`, its unit tests | **uv** | The Python CLI in `ledger-cli/` is a real component with its own CI gate. Needs no Docker and no running app — [runbook](docs/ledger-cli.md) |
 | **The e2e scenarios** (`scripts/e2e/run-e2e.sh`) | JDK 25 + **Docker** + **uv** + `bash` | The seven unmocked scenarios are `pytest` driving the Python CLI over HTTP against the containerised application — every toolchain in the repository, in one command |
 
 **Versions.** Java **25** (Corretto in CI). Python **3.11, 3.12 or 3.13** — but installing Python is
