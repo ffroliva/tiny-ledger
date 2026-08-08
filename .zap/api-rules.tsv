@@ -61,3 +61,19 @@
 # genuinely applies gets fixed — headers on the terminator in docker/traefik/dynamic.yml, response
 # shapes in the application — rather than a line here. The first finding this scan ever produced
 # was resolved that way, which is the precedent this line is asking the next reader to follow.
+#
+# ── THE SECOND ENTRY BELOW IS THIS GATE PROVING ITSELF, AND IT IS WORTH READING AS THAT ─────────
+# It arrived RED, on the run that fixed a real defect. HSTS had been recorded in five documents as
+# deliberately not sent while the APPLICATION sent it — the claim was written against Traefik, where
+# it truly was never configured, and nobody checked the origin. When `SecurityConfig#hstsOff()`
+# finally made the documents true, this scan immediately reported the header missing on all NINE
+# routes and failed the job.
+#
+# That is the differential the unit test cannot give: `SecurityConfigTest` proves one chain's
+# response in isolation, while this reports the DEPLOYED stack, through the proxy, on every route.
+# The same scan reported `PASS: Strict-Transport-Security Header [10035]` before the fix and
+# `WARN-NEW: … x 9` after it. One variable changed.
+#
+# A scanner that goes red the moment a control changes is the only kind worth having.
+
+10035	IGNORE	Strict-Transport-Security Header Not Set, on all nine contract routes. The header is deliberately not sent, and unlike this file's other entries that is now ENFORCED rather than asserted: SecurityConfig#hstsOff() disables it on all three filter chains and SecurityConfigTest#hstsIsNotSentOnASecureRequest fails if it comes back (red proof measured: "Response should not contain header Strict-Transport-Security"). The reason is unchanged and is the same one .zap/rules.tsv carries: the app router is a catch-all, so a browser dialling https://localhost receives a pin on the BARE HOST, and HSTS is host-scoped and PORT-INDEPENDENT -- a one-year pin there force-upgrades http://localhost:3000 and every other local development server on the machine, clearable only through chrome://net-internals/#hsts. This is the one entry in this file that tolerates a genuine weakness rather than a non-applicable rule. A REAL DEPLOYMENT ON A REAL DOMAIN MUST SEND IT, from its own terminator, with the hostname it actually serves -- and this line must not travel with it.

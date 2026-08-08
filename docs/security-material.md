@@ -150,7 +150,7 @@ resolves to `::1` first on the development machine and the IPv6 path does not ro
 | **Routed to** | `app:8080` **and `keycloak:8080`** by service name, in-network, plaintext |
 | **NOT terminated for** | every backing service — Postgres, Redis, Kafka |
 | **Minimum version** | TLS 1.2, set as the default TLS option |
-| **Headers set at the edge** | `X-Content-Type-Options`, `X-Frame-Options`. **HSTS deliberately not sent** — a pin on bare `localhost` is port-independent and would break every other local dev server for a year ([`pitfalls.md`](pitfalls.md)) |
+| **Headers set at the edge** | `X-Content-Type-Options`, `X-Frame-Options`, `Cross-Origin-Resource-Policy: same-origin`. **HSTS deliberately not sent — and from 2026-08-08 that is actually true.** It was sent by the *application* (Spring Security's default writer + `forward-headers-strategy=native`) while this row and four other documents said otherwise; `SecurityConfig#hstsOff()` now disables it and `SecurityConfigTest#hstsIsNotSentOnASecureRequest` is the gate — a pin on bare `localhost` is port-independent and would break every other local dev server for a year ([`pitfalls.md`](pitfalls.md)) |
 
 **The application-to-Traefik hop is plaintext, and so is every backing-service hop.** That is the
 named gap this design chose to leave open, not an oversight — a service mesh is the tool for it, and

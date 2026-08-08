@@ -2,6 +2,7 @@ package com.ffroliva.tinyledger.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -40,6 +41,31 @@ class SecurityConfigTest {
     @Test // the brief: standalone is unauthenticated, and stays so once Security is on the classpath
     void standalonePermitsAnUnauthenticatedRead() throws Exception {
         mvc().perform(get("/api/v1/accounts")).andExpect(status().isOk());
+    }
+
+    /**
+     * Five documents recorded HSTS as deliberately not sent. <strong>Nothing implemented it</strong> — the
+     * reasoning was written against Traefik, where the header was never configured, while this application
+     * sent it itself from Spring Security's default {@code HstsHeaderWriter}. This test is what makes the
+     * claim true rather than aspirational.
+     *
+     * <p><strong>{@code .secure(true)} is the whole test.</strong> MockMvc requests are insecure by default
+     * and the writer only runs on a secure request, so the identical assertion without it passes with
+     * {@code hstsOff()} deleted from {@code SecurityConfig} — a check that scores the same under both
+     * configurations, which {@code AGENTS.md} trap 8 says is not a check at all. Red proof, run with
+     * {@code hstsOff()} removed: {@code Response header 'Strict-Transport-Security' exists}.
+     *
+     * <p>The second assertion is the <strong>control</strong>. Were the headers chain disabled wholesale, the
+     * first assertion would pass for entirely the wrong reason. {@code X-Content-Type-Options} is another
+     * Spring Security default and must survive, which proves the writer ran and that HSTS <em>specifically</em>
+     * was turned off.
+     */
+    @Test
+    void hstsIsNotSentOnASecureRequest() throws Exception {
+        mvc().perform(get("/api/v1/accounts").secure(true))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Strict-Transport-Security"))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"));
     }
 
     /**
