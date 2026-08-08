@@ -85,9 +85,11 @@
   which is **not** a required check — inside `security` it did not finish within 80 minutes, and a
   required check that slow is one people route around. So a CVSS ≥ 7 finding fails the workflow and
   is visible on the PR, but does **not** block the merge button until `depcheck` is added to branch
-  protection. Whether it also covers **test-scope** dependencies is **unproven**: the plugin defaults
-  `skipTestScope` to true (now set to false) and its `check` goal resolves only `compile+runtime`, so
-  that claim waits on a run actually reporting a test-scope jar.
+  protection. It does cover **test-scope** dependencies — but only after `skipTestScope` was set to
+  `false`, because the plugin defaults it to `true`; for two runs this job closed a gap of exactly
+  zero while the docs said otherwise. The proof is `android-json` and `httpcore5`, two jars that
+  reach the build via `spring-boot-starter-test` and Testcontainers and are never packaged into the
+  image, so Trivy cannot see them.
   **The Trivy gate found a real HIGH on its first honest run** —
   `CVE-2026-54291` in `org.postgresql:postgresql` — which was **fixed by upgrading to 42.7.13, not
   suppressed**. The image is built and scanned but **never published**; that stays stage 12.

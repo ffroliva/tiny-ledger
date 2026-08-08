@@ -118,4 +118,79 @@
     <cve>CVE-2026-39883</cve>
   </suppress>
 
+  <!--
+    ================================================================================================
+    SECOND ROUND, 2026-08-08. These appeared only AFTER `skipTestScope=false` was set, and their
+    appearance is the evidence that the flag works: android-json arrives via
+    spring-boot-starter-test and httpcore5 via Testcontainers' docker-java. Both are TEST SCOPE.
+
+    That is worth stating plainly, because it converts this job's justification from a hypothesis
+    into a measured fact: these two jars are exactly the class of dependency Trivy can never see,
+    because they never enter the image. `depcheck` earns its place on these two lines.
+
+    The test-scope entries below have a STRONGER reason than the netty/kotlin ones above — not
+    merely "nothing to upgrade to", but "this code is never deployed". A vulnerability in a test
+    harness is a build-machine concern, not a production one, and this repository's threat model
+    does not treat CI runners as trusted-data processors.
+    ================================================================================================
+  -->
+
+  <suppress until="2027-02-08Z">
+    <notes>
+      android-json 0.0.20131108.vaadin1, TEST SCOPE ONLY (transitive via
+      spring-boot-starter-test → json-path). Two independent reasons, either sufficient:
+      (a) it is never packaged into the image, so it cannot be reached by any deployed code path;
+      (b) CVE-2008-0986 is a 2008 vulnerability in the GOOGLE ANDROID SDK, reached here through
+      `cpe:2.3:a:google:android_sdk`, matched to a repackaged JSON parser Vaadin vendored. A
+      product-level CPE for a mobile SDK applied to a JSON jar is a name collision, not a finding.
+      Longer expiry than the netty entries because reason (a) does not depend on any release.
+    </notes>
+    <packageUrl regex="true">^pkg:maven/com\.vaadin\.external\.google/android-json@.*$</packageUrl>
+    <cve>CVE-2008-0986</cve>
+  </suppress>
+
+  <suppress until="2027-02-08Z">
+    <notes>
+      httpcore5 5.0.2, TEST SCOPE ONLY. It is not a declared dependency at all — it is a POM
+      embedded inside docker-java-transport-zerodep-3.4.1.jar, which Testcontainers uses to talk to
+      the Docker daemon during the integration suite. It is never packaged into the image and never
+      runs outside a CI runner or a developer laptop. The version cannot be bumped from this pom
+      either: it is shaded inside another artifact, so the fix is a Testcontainers upgrade, not a
+      dependencyManagement entry. Re-check when the testcontainers BOM moves past 1.20.5.
+    </notes>
+    <packageUrl regex="true">^pkg:maven/org\.apache\.httpcomponents\.core5/httpcore5@5\.0\.2$</packageUrl>
+    <cve>CVE-2026-54399</cve>
+    <cve>CVE-2026-54428</cve>
+  </suppress>
+
+  <suppress until="2026-11-08Z">
+    <notes>
+      netty-transport 4.2.15.Final, the remaining two. Same reason as the block above: no stable
+      upgrade exists (next release is 5.0.0.Alpha2, Maven Central 2026-08-08).
+
+      WORTH RECORDING because it is confusing: the report prints these as CVE-2026-59898(6.3) and
+      CVE-2026-59899(6.9), BOTH BELOW the failBuildOnCVSS threshold of 7.0 — and they still failed
+      the build. The printed figure is not the figure the gate compares. Dependency-Check falls back
+      to another score (CVSS v2, or the highest available across scoring systems) when deciding, so
+      "the number shown is under the threshold" is not a safe reason to leave something unsuppressed.
+      The first round left these two out on exactly that reasoning and the build stayed red.
+    </notes>
+    <packageUrl regex="true">^pkg:maven/io\.netty/netty-.*@4\.2\.15\.Final$</packageUrl>
+    <cve>CVE-2026-59898</cve>
+    <cve>CVE-2026-59899</cve>
+  </suppress>
+
+  <suppress until="2026-11-08Z">
+    <notes>
+      tomcat-embed-core 11.0.24. The bump from 11.0.22 to 11.0.24 cleared FIVE of the six findings
+      against this artefact — CVE-2026-55276, CVE-2026-53434, CVE-2026-59083, CVE-2026-59084 and
+      CVE-2026-53404 are gone, which is the upgrade doing real work rather than a version number
+      moving. CVE-2026-66299 survives it, and 11.0.24 is the current release (Maven Central,
+      2026-08-08), so there is nothing further to upgrade to. Re-check at expiry: Tomcat patches
+      often, and this is the entry most likely to be removable rather than renewed.
+    </notes>
+    <packageUrl regex="true">^pkg:maven/org\.apache\.tomcat\.embed/tomcat-embed-core@11\.0\.24$</packageUrl>
+    <cve>CVE-2026-66299</cve>
+  </suppress>
+
 </suppressions>
