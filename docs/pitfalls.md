@@ -150,7 +150,28 @@ internal-proxies = <anything else>      -> app sees Traefik         -> not    ->
 ## HSTS is deliberately **not** sent
 
 The obvious thing to do at a TLS terminator is set `Strict-Transport-Security`, and this repository
-did for one revision. It is removed, and the reason is worth keeping.
+did for one revision. It was removed *from the terminator* — and **for the next several revisions it
+was still being sent, by the application, while this page and four others said it was not.**
+
+`SecurityConfig` carried no `headers` configuration, so Spring Security's default `HstsHeaderWriter`
+applied; `server.forward-headers-strategy=native` makes `RemoteIpValve` mark proxied requests secure,
+which is that writer's only condition. So the pin described below was real, and reaching anyone who
+opened `https://localhost`.
+
+**What now enforces the absence:** `SecurityConfig#hstsOff()` on all three filter chains, gated by
+`SecurityConfigTest#hstsIsNotSentOnASecureRequest`. Red proof measured — with `hstsOff()` removed the
+test fails *"Response should not contain header 'Strict-Transport-Security'"*. The `.secure(true)` in
+that test is load-bearing: MockMvc requests are insecure by default, and the writer only runs on a
+secure request, so the same assertion without it passes with the fix deleted.
+
+**The transferable lesson is about where a control is asserted.** A claim written against the
+terminator cannot describe behaviour the origin produces, and no amount of re-reading the Traefik
+config would have found this. The reason it survived is that the scanner *did* report it — ZAP rule
+10035 passed on every run, which for that rule means the header was present — and nobody read a PASS
+as evidence of anything.
+
+The reason not to send it stands unchanged, and is why the fix was to stop sending it rather than to
+document it:
 
 The application's router is a catch-all, so a browser dialling `https://localhost` would receive the
 pin. **HSTS is host-scoped and port-independent**, so a one-year pin on the bare host `localhost`

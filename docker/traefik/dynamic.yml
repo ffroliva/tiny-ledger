@@ -78,7 +78,23 @@ http:
     # report is about this application rather than about a missing default.
     security-headers:
       headers:
-        # HSTS IS DELIBERATELY NOT SET, and that is a correction rather than an omission.
+        # HSTS IS DELIBERATELY NOT SET *HERE*, AND UNTIL 2026-08-08 THAT SENTENCE WAS TRUE AND
+        # USELESS. It described this file, where the header was never configured — while the
+        # APPLICATION sent it, so the hazard the paragraph below spends twenty lines avoiding was
+        # shipping the whole time. `SecurityConfig` carried no `headers` configuration at all, so
+        # Spring Security's default `HstsHeaderWriter` applied, and `application.properties`'
+        # `server.forward-headers-strategy=native` makes `RemoteIpValve` mark proxied requests
+        # secure — the writer's only condition.
+        #
+        # Measured, not argued: with `SecurityConfig#hstsOff()` removed,
+        # `SecurityConfigTest#hstsIsNotSentOnASecureRequest` fails with "Response should not contain
+        # header 'Strict-Transport-Security'". That test is the gate now, and `.secure(true)` is the
+        # load-bearing part of it — MockMvc requests are insecure by default, where the writer never
+        # runs and the assertion would pass with the fix deleted.
+        #
+        # THE LESSON IS ABOUT WHERE A CONTROL IS ASSERTED, not about HSTS: a claim written against
+        # the terminator cannot describe behaviour the origin produces. Four other documents
+        # repeated it from here.
         #
         # An earlier revision sent `max-age=31536000` from this middleware. The `app` router is a
         # catch-all, so a browser that dialled `https://localhost` — which the README invites — would
