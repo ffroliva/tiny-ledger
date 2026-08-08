@@ -4,6 +4,28 @@ Built against `docs/api/openapi.yaml` (the contract authority) and `docs/spec.md
 command surface), for implementation-order step 10. This file is the design record the task brief
 asked for — not a scratch file, committed alongside the code it describes.
 
+> ## Correction header — read before trusting anything below (2026-08-08)
+>
+> **This is a design record written at build time, and the environment it describes no longer
+> exists.** It is kept rather than rewritten because it is the honest account of what was and was not
+> known when the CLI was built — but several passages read as statements about the repository today,
+> and as such they are now false. Corrected here, at the top, rather than left to be found:
+>
+> | This file says | Today |
+> |---|---|
+> | "`docker/docker-compose.yml` has no Keycloak service" | **It has one**, with a healthcheck, behind Traefik at `https://auth.localhost`. It also has an `app` service and a `traefik` service under `profiles: [app]` |
+> | "§12.1 stage 9 is one of the specified-but-missing stages" / "stage 9 is unbuilt" | **Stage 9 is built and runs on every push**, in two legs — the container image over HTTPS and the host jar as stage 9b |
+> | "there is no running instance in this environment and no e2e CI job to borrow one from" | Both exist. `scripts/e2e/run-e2e.sh` starts the stack and runs the suite |
+> | "the six fixture principals (`alice`, `bob`, `carol`, `dave`, `mallory`, `nobody`)" | **Seven** — `trent` (`ledger:admin`) was added by the on-behalf-of work, and the realm declares four roles |
+> | "`uv run pytest` → 48 passed, 5 deselected" | **52 passed, 7 deselected** (measured 2026-08-08) |
+> | The base URL and issuer implied throughout are plaintext on `127.0.0.1:8080` / port 8081 | `full` is HTTPS through Traefik; the issuer is `https://auth.localhost/realms/tiny-ledger` and Keycloak publishes no host port |
+>
+> **What still holds:** everything about *why* the CLI is shaped the way it is — the command-surface
+> mapping, the three places §11 and `openapi.yaml` disagree, the Direct Access Grants decision, the
+> rate-limit posture, and the scenario designs. Those are the reasons this file is worth keeping.
+> **The operator-facing runbook is [`../docs/ledger-cli.md`](../docs/ledger-cli.md)**, which is
+> maintained against the current stack; prefer it for anything you intend to run.
+
 ## Command surface -> `openapi.yaml` operations
 
 Nine operations in the contract; nine commands (grouped into five verbs plus two groups) map onto
@@ -67,6 +89,12 @@ such client.** It defines exactly two clients, `ledger-test` and `ledger-other`,
 fixture principals (`alice`, `bob`, `carol`, `dave`, `mallory`, `nobody`) are *users* with password
 credentials, not service accounts. There is no confidential client anywhere in the file, so
 client-credentials — which needs one — is not an available grant.
+
+**Since corrected in the authority itself**: §6.4's `ledger-cli` service-account row was struck at
+spec v3.43, and §11's `Auth` row at v3.45. This section was right, and for two revisions it was the
+only place that said so — which is the failure mode `docs/INDEX.md` warns about, the truth living in
+a secondary file while the contract says otherwise. (The realm now seeds **seven** users, not six:
+`trent` carries `ledger:admin`.)
 
 The CLI therefore authenticates via **Resource Owner Password Credentials** (`grant_type=password`)
 against `ledger-test`, using `--user`/`--password` (or `LEDGER_USERNAME`/`LEDGER_PASSWORD`) for one
@@ -183,7 +211,8 @@ implementations to bind.
 uv run ruff format .     # 16 files unchanged (clean)
 uv run ruff check .      # All checks passed!
 uv run pyright           # 0 errors, 0 warnings, 0 informations (strict on src/ledger_cli)
-uv run pytest            # 48 passed, 5 deselected (the e2e file), exit 0
+uv run pytest            # 52 passed, 7 deselected (the e2e file), exit 0
+                         #   (48 passed / 5 deselected at build time; re-measured 2026-08-08)
 uv lock --check          # lock is current
 uv run ledger-cli --help # entry point resolves and runs
 ```

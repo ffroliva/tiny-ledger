@@ -176,10 +176,11 @@ Process discipline that does not rely on anyone being careful:
 |---|---|---|
 | Architecture cannot drift | `ApplicationModules.verify()` + ArchUnit in the build | A domain class importing Spring, JPA, Kafka or Redis |
 | API cannot drift | Controllers implement interfaces generated from `openapi.yaml` | An endpoint that no longer matches its contract |
-| CLI cannot drift *(planned, not enforced)* | The Python CLI and its Pydantic generation are not built | — |
+| CLI cannot drift *(still planned, not enforced)* | The Python CLI **is** built (`ledger-cli/`, CI stage 8), but its Pydantic models are **hand-mirrored** from `openapi.yaml` rather than generated, so nothing mechanically couples them to the contract | — |
 | Committed specification evidence executes | `@standalone` Gherkin runs in Cucumber/JVM; full auth/admin acceptance runs as JUnit integration tests | A covered behaviour everyone agreed to and nobody implemented |
-| Full-catalogue E2E *(planned, not enforced)* | Stage 9's Python CLI and pytest-bdd binding are not built | — |
-| Performance cannot regress *(planned, not enforced)* | Gatling is not wired into CI | — |
+| E2E scenarios run against the real stack | **CI stage 9** — seven unmocked scenarios driven by `ledger-cli` against the containerised app over HTTPS, plus stage 9b against the host jar | A green unit suite over a stack that does not actually work end to end |
+| Full-*catalogue* E2E *(planned, not enforced)* | Stage 9 exists; the **pytest-bdd binding of the whole Gherkin catalogue** through the CLI is the piece that is not built | — |
+| Performance cannot regress *(built, but not on the push path)* | Gatling and JMH run in the `load` job, thresholds as assertions — **`workflow_dispatch`-only**, so no push is gated on them | — |
 | Current-tree secrets scan | `gitleaks` in CI | A matching secret in the checked-out revision |
 
 Rows with an active mechanism fail the **build**; rows explicitly marked planned do not. The
@@ -231,9 +232,12 @@ I overrode it. The reasoning:
 
 **The hedge that makes it safe:** the repository runs in two modes from one codebase.
 `./mvnw spring-boot:run` is in-memory, unauthenticated and dependency-free — the brief, satisfied
-exactly. `docker compose -f docker/docker-compose.yml up -d` plus the jar on the host is the `full`
-mode — Compose carries the infrastructure (Postgres, Redis, Kafka) and nothing else: no Keycloak
-service, no app service. Same domain code, different adapters. A reviewer who
+exactly. `docker compose -f docker/docker-compose.yml --profile app up -d` is the `full` mode, and
+today that is the *whole* system in one command: four backing services (Postgres, Redis, Kafka and
+**Keycloak**) plus **the application and Traefik**. (This paragraph described Compose as carrying
+"the infrastructure and nothing else: no Keycloak service, no app service" — true when written, and
+false since the realm work and issue #11 respectively. Corrected 2026-08-08.) The jar on the host is
+still supported and still exercised, as CI stage 9b. Same domain code, different adapters. A reviewer who
 wants the tiny ledger gets the tiny ledger in one command; a reviewer who wants the depth has it.
 That the hedge is *possible at all* is the argument for the hexagonal boundaries in `spec.md` §4 —
 the architecture is what buys the option.
@@ -439,5 +443,5 @@ had both on deposit and one on withdrawal.
 | What was decided, and why? | `docs/spec.md` and `docs/adr/` |
 | In what order was it built? | `docs/_archive/plans/*.md`, and the commit history — one commit per task, each landing only after its review was accepted |
 | Was each step reviewed? | The council reports and assessments are committed under `docs/_archive/reviews/`. The per-task ledger and review packages that produced them are session-local working state and are not — what survives in the repo is those reports, §7 above, the commit messages, and this document |
-| Does it do what it claims? | `./mvnw verify` — unit, architecture, BDD, use-case (starts no containers); `./mvnw verify -Pit` — the integration suite against real Postgres, Redis, Kafka **and Keycloak**. No fixed count is quoted here on purpose: count `<testcase ` in that run's own `target/failsafe-reports/*.xml` and read it beside that run's exit code (§5, AGENTS trap 3) — a number carried in prose goes stale the next time a test is added. `docker compose -f docker/docker-compose.yml up -d` then starts the `full` profile's **infrastructure only** — Postgres, Redis, Kafka; there is no Keycloak service and no app service in that file — and the jar runs on the host against the published ports |
+| Does it do what it claims? | `./mvnw verify` — unit, architecture, BDD, use-case (starts no containers); `./mvnw verify -Pit` — the integration suite against real Postgres, Redis, Kafka **and Keycloak**. No fixed count is quoted here on purpose: count `<testcase ` in that run's own `target/failsafe-reports/*.xml` and read it beside that run's exit code (§5, AGENTS trap 3) — a number carried in prose goes stale the next time a test is added. `docker compose -f docker/docker-compose.yml up -d` then starts the `full` profile's four backing services — Postgres, Redis, Kafka **and Keycloak**, each with a healthcheck — and `--profile app` adds **the application itself and Traefik**, so `full` is one `up` away rather than a jar you run by hand. (This row read "there is no Keycloak service and no app service in that file" until 2026-08-08; both have existed since the roles/realm work and issue #11 respectively.) The host jar is still supported and still exercised, as `E2E_MODE=jar` — see [`docker.md`](docker.md) |
 | What was left out on purpose? | `docs/spec.md` §13 non-goals and §15 assumptions |
