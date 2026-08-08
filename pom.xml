@@ -214,7 +214,28 @@
             containers (ADR 0003) and build-image drives a Docker daemon build.
           -->
           <image>
-            <name>tiny-ledger:${project.version}</name>
+            <!--
+              `local`, NOT ${project.version}, and that is a correctness fix rather than a
+              simplification. This tag is spelled in four places — here, docker-compose.yml,
+              scripts/e2e/run-e2e.sh's guard and ci.yml's Trivy step — and only THIS one derived
+              from the version. So a version bump moved the produced image to a new tag while the
+              other three kept naming the old one: compose would start a STALE image and the e2e
+              guard would confirm it was present, because it was. A guard that goes green against
+              the wrong artefact is worse than no guard.
+
+              The rejected alternative was a generated value all four read. It works, and it is
+              four times the diff plus a prerequisite: `docker compose up` would then need a Maven
+              build to have written the file first, turning a clear "image not built" error into an
+              unset-variable one. Taking the version OUT of the tag removes the same defect by
+              construction — nothing is derived, so nothing can desync. An $APP_IMAGE knob was
+              rejected earlier for the same family of reason (#18).
+
+              WHAT THIS COSTS, stated rather than left to be found: two versions' images can no
+              longer sit side by side locally, and `docker images` no longer shows the version.
+              Nothing here does either. Publishing is stage 12 and tags for the registry at that
+              point, from ${project.version}, which is where a version-bearing tag belongs.
+            -->
+            <name>tiny-ledger:local</name>
             <!--
               PINNED BY DIGEST, and this was a real defect found in review. Without these two
               elements the plugin defaults to `paketobuildpacks/builder-noble-java-tiny:latest` —

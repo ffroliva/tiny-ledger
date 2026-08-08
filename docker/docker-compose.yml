@@ -185,8 +185,18 @@ services:
   #
   # `profiles: [app]` keeps the default `up` at exactly the four backing services, exactly as the
   # `observability` profile above does. §6.6 and the README both assert that four-container default.
+  #
+  # The tag carries NO VERSION, and that is a correctness property rather than a shortcut. It used
+  # to spell the version here while the pom derived its own from ${project.version}, so a bump
+  # moved the built image to a new tag while this file, run-e2e.sh's guard and ci.yml's Trivy step
+  # all kept naming the old one — compose would start a STALE image and the guard would confirm it
+  # was there, because it was. pom.xml's <image> block carries the full reasoning and what it costs.
+  #
+  # The `gate` job asserts all four spell the same tag and that no version has crept back. That
+  # check is why no comment in these files quotes the old versioned tag: a literal in prose would
+  # be indistinguishable from a site that had drifted.
   app:
-    image: tiny-ledger:0.1.0-SNAPSHOT
+    image: tiny-ledger:local
     profiles: [app]
     depends_on:
       postgres: { condition: service_healthy }
