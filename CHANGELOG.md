@@ -202,6 +202,16 @@
   `docs/agentic-workflow.md` deliberately stays — it is the readable account of how this was built.
 
 ### Security
+- **HSTS was being sent while five documents said it was not** (#32). The claim was written against
+  `docker/traefik/dynamic.yml`, where the header genuinely was never configured — but the
+  **application** sent it: `SecurityConfig` carried no `headers` configuration, so Spring Security's
+  default `HstsHeaderWriter` applied, and `server.forward-headers-strategy=native` makes
+  `RemoteIpValve` mark proxied requests secure, which is that writer's only condition. So the
+  bare-`localhost` pin those twenty lines of reasoning existed to avoid was shipping the whole time.
+  `SecurityConfig#hstsOff()` turns it off and `SecurityConfigTest#hstsIsNotSentOnASecureRequest` is
+  the gate — with `.secure(true)` as the load-bearing part, since MockMvc requests are insecure by
+  default and the assertion would pass with the fix deleted. **The lesson is about where a control is
+  asserted**: a claim written against the terminator cannot describe behaviour the origin produces.
 - **Rate limiting (§6.1) exists.** Token buckets per principal and per IP, whichever is more
   restrictive; Bucket4j over Redis in `full`, Caffeine in `standalone`; `429` with `Retry-After` and
   the catalogued problem type. The per-IP backstop runs **ahead of authentication**, so a flood of
@@ -285,7 +295,12 @@
   listed observability as "not yet built" below the section explaining how to turn it on; and
   `agentic-workflow.md` told an auditor the Compose file has no Keycloak service. **No gate was
   added** — nothing in CI checks documentation here (§8.4), so the mechanism that let these
-  accumulate is unchanged.
+  accumulate is unchanged. **Demonstrated while the pass was open:** three PRs merged in that
+  window — #28, #30 and #32 — and **none of them touched this file**, which is why it had stopped at
+  #18 in the first place. Their entries were written here rather than left as a fourth, fifth and
+  sixth gap in the change this one exists to close. #32 is the sharper evidence: it found HSTS being
+  sent while five documents said it was not — the same failure mode, found independently, in the
+  same week.
 - **Spec v3.8 — truth alignment.** The spec and `docs/architecture.md` still promised the mechanism
   ADR 0001 replaced: Kafka routing is programmatic, not `@Externalized`, and the in-process legs are
   plain synchronous `@EventListener` in **both** run modes rather than becoming
