@@ -1,3 +1,7 @@
 {
-  "enabledMcpjsonServers": ["grafana"]
+  "enabledMcpjsonServers": ["grafana"],
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  }
 }
