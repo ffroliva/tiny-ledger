@@ -1,0 +1,17 @@
+# OWASP ZAP baseline — per-rule dispositions. Tab-separated: <rule id>\t<WARN|IGNORE|FAIL>\t<comment>
+#
+# THIS FILE IS THE ONLY PLACE A FINDING IS TOLERATED, and that is deliberate. `ci.yml` sets
+# `fail_action: true`, so the job goes red on anything at WARN or above — which means every
+# accepted finding has to be written down here, with its rule id and a reason, where it shows up
+# in a diff. The alternative the action offers by default (`fail_action: false`) is a scan that
+# reports findings and exits 0: the same defect as the Sonar step that submitted an analysis and
+# never read the verdict, and as the deleted stage 6.
+#
+# IGNORE means "this does not apply to this system", never "we could not be bothered". If a rule
+# genuinely applies, fix it in `docker/traefik/dynamic.yml` — headers belong on the terminator —
+# rather than adding a line here.
+#
+# Empty on purpose right now. The first CI run against the TLS entrypoint is what says which rules
+# actually fire; filling this in beforehand would be guessing, and a pre-emptive IGNORE would
+# suppress a real finding before anyone had seen it. Entries get added from an observed report,
+# each one naming what was seen.
