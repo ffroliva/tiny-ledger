@@ -169,6 +169,18 @@ public class SecurityConfig {
     }
 
     /** The brief as written: in-memory, unauthenticated, dependency-free. */
+    /**
+     * {@code java:S4502} is a review prompt, not a defect claim, and the answer is the CSRF paragraph in
+     * this class's javadoc: CSRF defends against the browser attaching <em>ambient</em> credentials, and
+     * this system has no cookie, no session and no browser surface at all. A bearer token in an
+     * {@code Authorization} header is not ambient. {@code managementChain} has carried this same
+     * suppression since it was written; these two had the identical argument and not the annotation, which
+     * is why adding one unrelated line to each surfaced them as <em>new</em> findings.
+     *
+     * <p><strong>What invalidates it:</strong> the {@code sessionManagement} line below. If cookie
+     * authentication or a UI ever appears here, delete this annotation and answer the rule again.
+     */
+    @SuppressWarnings("java:S4502")
     @Bean
     @Profile("standalone")
     SecurityFilterChain standaloneChain(
@@ -214,6 +226,18 @@ public class SecurityConfig {
      * only duplicate what the framework already builds, and would fork the single Spring context
      * {@code AbstractIntegrationTest} relies on (ADR 0003) for no gain.
      */
+    /**
+     * {@code java:S4502} is a review prompt, not a defect claim, and the answer is the CSRF paragraph in
+     * this class's javadoc: CSRF defends against the browser attaching <em>ambient</em> credentials, and
+     * this system has no cookie, no session and no browser surface at all. A bearer token in an
+     * {@code Authorization} header is not ambient. {@code managementChain} has carried this same
+     * suppression since it was written; these two had the identical argument and not the annotation, which
+     * is why adding one unrelated line to each surfaced them as <em>new</em> findings.
+     *
+     * <p><strong>What invalidates it:</strong> the {@code sessionManagement} line below. If cookie
+     * authentication or a UI ever appears here, delete this annotation and answer the rule again.
+     */
+    @SuppressWarnings("java:S4502")
     @Bean
     @Profile("full")
     SecurityFilterChain fullChain(
