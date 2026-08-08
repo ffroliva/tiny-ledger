@@ -295,10 +295,14 @@ on an account they do not own, but may not read its balance or transactions, and
 Every event records the acting principal as `actor`, so the audit trail carries who acted alongside
 who owns (spec §6.4, §2.3).
 
-**Not yet built:** tracing, OTLP export, JSON logs and the Collector — the rest of observability, and
-the FAPI/DPoP work. Health probes and the outbox-lag gauge *are* built: `/actuator/health/liveness`
-and `/actuator/health/readiness` answer unauthenticated on management port `9090`, and nothing else
-under `/actuator` is reachable at all (spec §6.6). The auditor endpoints
+**Observability is built in full** (spec §14 step 9, v3.41) — health probes, the outbox-lag gauge,
+distributed tracing, OTLP export, JSON logs in `full`, and the opt-in Collector described above.
+`/actuator/health/liveness` and `/actuator/health/readiness` answer unauthenticated on management
+port `9090`, and nothing else under `/actuator` is reachable at all (spec §6.6).
+
+**Not yet built:** the FAPI/DPoP work (spec §7.2), the seed script for the `ACC-00x` fixture
+accounts (§6.4), stage 9's pytest-bdd binding of the whole Gherkin catalogue (§9.6), image
+publishing (§12.1 stage 12), and Kubernetes manifests (ADR 0005). The auditor endpoints
 `GET /api/v1/accounts/{id}/events` and `GET /api/v1/audit/entries` are `full`-only; in `standalone`
 both answer `501` with a problem detail rather than pretending (spec §6.5, §7).
 
