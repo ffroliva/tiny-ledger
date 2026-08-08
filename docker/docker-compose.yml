@@ -318,6 +318,20 @@ services:
       # proxy at all" — the first question every routing failure asks.
       - "--accesslog=true"
       - "--log.level=INFO"
+    networks:
+      default:
+        # THE address LEDGER_TRUSTED_PROXIES names, and the reason this file declares a subnet at
+        # all. Without this pin Docker allocates from the BOTTOM of the range, Traefik lands on
+        # ~10.89.0.6, `internal-proxies` matches nothing, and RemoteIpValve silently no-ops — every
+        # caller in the world is then metered under Traefik's address and §6.1's per-IP backstop
+        # becomes one global bucket that any single client can exhaust for everyone.
+        #
+        # THIS BLOCK WAS DELETED ONCE, by a rewrite of the `command:` list above that spanned the
+        # lines between `command:` and `volumes:`. Nothing caught it: both unit tests supply their
+        # own `internal-proxies`, run-e2e.sh raises the backstop to 10000, and the by-hand spoof
+        # check scores 401,401,429,429 whether the trust works or not — it is not differential.
+        # `ProxyAddressPinTest` is the gate that fails now if it goes missing again.
+        ipv4_address: ${TINY_LEDGER_TRAEFIK_IP:-10.89.0.250}
     volumes:
       # Read-only, both. NOTE what is NOT here: /var/run/docker.sock — see the provider flag above.
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
