@@ -350,6 +350,68 @@ docker compose -f docker/docker-compose.yml --profile app down
 make Keycloak's hostname identical on both sides (`KC_HOSTNAME`) rather than to relax issuer
 validation — **never** disable the issuer check to make a test pass.
 
+### Executed 2026-08-08. TWO problems this step did not predict, and the issuer one was worse than described.
+
+**1. Kafka's advertised listener made the app unreachable from inside its own network.** The broker
+advertised `PLAINTEXT://localhost:9092`, which was correct while only the host ever spoke to it. A
+Kafka client bootstraps, is handed the ADVERTISED address, and reconnects to *that* — so the app
+container dialled `localhost:9092`, meaning itself. The bootstrap address being right is exactly what
+makes the failure confusing. Fixed with two listeners: `kafka:29092` advertised to containers,
+`localhost:9092` to the host. Not a security change — both are PLAINTEXT, and backing-service TLS
+remains a named gap.
+
+**2. The issuer problem is not `localhost` vs `keycloak`. It is that `iss` is whatever the caller
+TYPED.** Keycloak derives it from the request's Host header, so with nothing pinned:
+
+```
+token minted via 127.0.0.1:8081  ->  iss = http://127.0.0.1:8081/realms/tiny-ledger  -> 401
+token minted via localhost:8081  ->  iss = http://localhost:8081/realms/tiny-ledger  -> 200
+```
+
+Same host, same realm, same user, two spellings of loopback, one authenticates. **That is live, not
+hypothetical:** `scripts/e2e/run-e2e.sh` pins `127.0.0.1` everywhere for the documented IPv6 routing
+trap, while `ledger-cli/src/ledger_cli/config.py` defaults `issuer_uri` to `localhost`. The e2e suite
+passes today *because those two disagree* — align them in the obvious direction and it breaks.
+
+`KC_HOSTNAME: http://localhost:8081` makes `iss` a property of the deployment rather than of the
+request. Verified after the change: both spellings mint the identical issuer.
+
+**And the app still cannot resolve `localhost:8081`.** The answer is that "what is `iss`?" and "where
+do I fetch the signing keys?" are two different questions, and Boot answers them separately —
+`LEDGER_ISSUER_URI` stays public, `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI` points at
+`http://keycloak:8080/...`. **Nothing is relaxed**, and that was confirmed in the shipped bytecode
+rather than assumed from docs (`spring-boot-security-oauth2-resource-server-4.1.0`,
+`JwtDecoderConfiguration`): `buildJwkSetUriJwtDecoder` calls `setJwtValidator(getValidator())`, and
+`getValidator()` reads `getIssuerUri()` to construct `new JwtIssuerValidator(...)` next to the `aud`
+validator from `getAudiences()`. Issuer **and** audience validation both stay fully enforced.
+
+**3. The app service gets NO `healthcheck:`, deliberately.** The run image is
+`ubuntu-noble-run-tiny` — no shell, no curl, no wget, no coreutils, so every `CMD`/`CMD-SHELL` form
+would fail. `docker compose up --wait` therefore returns as soon as the app container *starts*, not
+when it is ready. Do not read that as readiness. `scripts/e2e/wait-for.sh` already polls for a status
+and is the right waiter; Task 4 uses it.
+
+**Measured end to end through the image — a real money path, not just a health check:**
+
+```
+POST /api/v1/accounts                 -> 201
+PUT  /api/v1/accounts/{id}/deposits/{uid} -> 201  SETTLED, balanceAfter EUR 10000 minor
+GET  /api/v1/accounts/{id}/balance    -> 200  streamVersion 2
+GET  /api/v1/accounts/{id}/transactions -> 200  the deposit
+GET  /api/v1/audit/entries (as dave)  -> 200  non-empty
+9090 /actuator/health/{liveness,readiness} -> 200 UP
+8080 /api/v1/accounts with no token   -> 401
+```
+
+The audit entry is the load-bearing one: it can only be there if the Kafka relay published over
+`kafka:29092` and the consumer read it back. Postgres, Redis and Kafka were all reached by service
+name, and `host.docker.internal` appears nowhere.
+
+**Host port 5432 collision, again.** `up` failed with `Bind for 0.0.0.0:5432 failed: port is already
+allocated` — the trap `run-e2e.sh` already guards. `TINY_LEDGER_PG_PORT=55432` clears it, and note the
+app is indifferent: it dials `postgres:5432` inside the network, so the host publication only matters
+to host-side tools.
+
 - [ ] **Step 4: Commit**
 
 ```bash
