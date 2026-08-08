@@ -91,7 +91,9 @@ http:
         # The reasoning that survived the previous revision worried about `includeSubDomains`
         # spreading the pin across sibling `.localhost` names and missed the bare-host case, which is
         # strictly worse. A real deployment on a real domain sets `stsSeconds` and
-        # `stsIncludeSubdomains` and means it; `docs/security.md` records that as a named gap.
+        # `stsIncludeSubdomains` and means it; `docs/security-material.md` records that as a named
+        # gap and `docs/pitfalls.md` carries the reasoning above. (Until 2026-08-08 this pointed at
+        # `docs/security.md`, a file that has never existed here.)
         #
         # These two are unconditionally correct for a JSON API and cost nothing:
         contentTypeNosniff: true

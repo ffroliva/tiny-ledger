@@ -85,8 +85,11 @@ jobs:
       - uses: actions/setup-java@v5
         with: { distribution: corretto, java-version: '25', cache: maven }
       - name: "Stage 7 — integration suite against real Postgres/Redis/Kafka"
-        # Named for what it runs. Stages 8, 9, 10 and 12 (Python CLI, e2e, load, publish) are
-        # specified in spec §12.1 and do NOT exist yet — the old "Stages 7-12" label claimed them.
+        # Named for what it runs, and ONLY what it runs. The old "Stages 7-12" label claimed stages
+        # this job never had; the replacement comment then went stale the other way, still saying
+        # 8, 9 and 10 "do NOT exist yet" after they landed in this same file. They are jobs below:
+        # `cli` (stage 8), `e2e` (stages 9 and 9b), `load` (stage 10, workflow_dispatch-only).
+        # Stage 12 (publish) is genuinely unbuilt. Stage 11 (security) is the `security` job.
         # Stage 11 (security): the `security` job below runs gitleaks and now Trivy against the built
         # image (issue #11). `detect-secrets` is deliberately not wired — see that job's summary step.
         run: ./mvnw -q verify -Pit
@@ -531,10 +534,12 @@ jobs:
   # SonarCloud. Deliberately LAST and dependent on both test jobs, because its whole value is the
   # coverage those jobs produce — running it early would publish a number measured from nothing.
   #
-  # Not a gate. It reports; it does not fail the build on quality-gate status. That is the same
-  # posture §6 of docs/performance-findings.md took for mutation coverage: measure first, decide the
-  # threshold against a real baseline, and never gate on a number nobody has seen yet. Turn it into a
-  # gate later by adding `-Dsonar.qualitygate.wait=true`, once the baseline is known to be sane.
+  # IT IS A GATE, via `-Dsonar.qualitygate.wait=true` on the run step below — see the long comment
+  # there for why the flag was added and what went wrong without it. This header said the opposite
+  # ("Not a gate... turn it into a gate later by adding -Dsonar.qualitygate.wait=true") until
+  # 2026-08-08, contradicting the step it introduces; spec §12.1 carried the same stale claim.
+  # The measure-first posture §6 of docs/performance-findings.md takes for mutation coverage was
+  # right before a baseline existed. One exists, so this gates.
   sonar:
     needs: [unit, integration]
     runs-on: ubuntu-latest
