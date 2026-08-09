@@ -237,66 +237,89 @@ jobs:
           ignore-unfixed: true
 
       # ---------------------------------------------------------------------------------------
-      # Stage 11d. The Compose images were the LAST uncovered surface in this repository, and the
-      # gap was structural rather than a configuration oversight: Dependabot's `docker` ecosystem
-      # matches only /dockerfile|containerfile/i (dependabot-core, docker/lib/dependabot/docker/
-      # file_fetcher.rb), there is no docker-compose ecosystem, and this repository has NO
-      # Dockerfile by design (buildpacks, spec §12). The step above scans only the application
-      # image. Nothing told anyone when postgres, redis, kafka, keycloak, traefik or the Collector
-      # grew a CVE.
+      # Stage 11d. The Compose images are the surface nothing else covers: Dependabot has no
+      # docker-compose ecosystem (its `docker` one matches only /dockerfile|containerfile/i) and
+      # this repository has no Dockerfile by design (buildpacks, spec §12). The step above scans
+      # the application image only.
       #
-      # REPORT ONLY, AND THAT IS THE POINT OF THIS REVISION rather than a shortcut. Those tags are
-      # months old and this arrives with findings on its first run. A scanner that lands red for
-      # reasons nobody has triaged is how a gate gets ignored — the failure mode this pipeline has
-      # already shipped twice. Trivy's `--exit-code` is absent below, which is its default and
-      # means "report, do not fail". Tighten AFTER the first run's findings are triaged.
+      # A CEILING PINS DRIFT; IT DOES NOT REDUCE RISK. kafka stays at 134 and keycloak at 63 —
+      # frozen, not fixed. Lowering either is an image bump, one PR and one e2e run each. This
+      # step spent its first revision report-only: it published counts on every push and could
+      # fail nothing, which is how Traefik's 56 went unactioned until a human forwarded a notice.
       #
-      # docker/docker-compose.yml is the ONE authority for the list. Six image refs copied into
-      # this file would drift the first time one is bumped, and the drift would be invisible: the
-      # scan would stay green against versions that are no longer deployed.
-      #
-      # Pinned by tag, like every other version here. It is the trivy CONTAINER rather than
-      # trivy-action because an Action takes one `image-ref` and cannot loop; the binary install
-      # dance gitleaks does above would be a third mechanism for no gain, and Docker is already
-      # present in this job (build-image ran above).
-      - name: "Stage 11d — Trivy over the Compose images (report only)"
+      # docker/docker-compose.yml is the ONE authority for the list — six refs copied into this
+      # file would go stale the first time one is bumped, and the scan would stay green against
+      # versions no longer deployed. It is the trivy CONTAINER rather than trivy-action because an
+      # Action takes one `image-ref` and cannot loop; Docker is already present in this job.
+      - name: "Stage 11d — Trivy over the Compose images"
         if: always()
         run: |
           set -uo pipefail
           images=$(sed -n 's/^[[:space:]]*image:[[:space:]]*//p' docker/docker-compose.yml | grep -v '^tiny-ledger:' || true)
           n=$(printf '%s\n' "$images" | grep -c . || true)
-          # THE CHECK THAT CAN FAIL, and the only one in this step (AGENTS.md trap 8). Without it a
-          # parse that matched nothing would scan nothing and print an empty, clean-looking table —
-          # a result IDENTICAL to six genuinely clean images. The differential is the count: this
-          # asserts the parse found the images, so a "no findings" summary means something.
+          # THE PARSE CHECK (AGENTS.md trap 8). Without it a parse that matched nothing would scan
+          # nothing and pass every ceiling — a result IDENTICAL to six genuinely clean images.
           if [ "$n" -lt 6 ]; then
             echo "::error::parsed $n image refs from docker/docker-compose.yml, expected 6 — the PARSE broke; this is not a clean result"
             exit 1
           fi
+          # Each pinned at what that image actually reported on run 31332049703 (bee8d34), keyed on
+          # the exact ref so a bump has to re-measure. An UNKNOWN ref scores -1 and fails rather
+          # than defaulting to 0, or a newly added service would escape this gate on arrival.
+          ceiling() {
+            case "$1" in
+              confluentinc/cp-kafka:7.6.0)                  echo 134 ;;
+              quay.io/keycloak/keycloak:26.4)               echo  63 ;;
+              postgres:16-alpine)                           echo  15 ;;
+              redis:7-alpine)                               echo   0 ;;
+              otel/opentelemetry-collector-contrib:0.158.0) echo   0 ;;
+              traefik:v3.7.10@sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac) echo 0 ;;
+              *)                                            echo  -1 ;;
+            esac
+          }
           {
-            echo "### Stage 11d — Compose images (report only, does NOT fail this job)"
+            echo "### Stage 11d — Compose images (fixable CRITICAL/HIGH, gated per image)"
             echo ""
-            echo "| Image | CRITICAL/HIGH, fixable |"
-            echo "|---|---|"
+            echo "| Image | Found | Ceiling | Status |"
+            echo "|---|---|---|---|"
           } >> "$GITHUB_STEP_SUMMARY"
+          fail=0
           for ref in $images; do
             f="trivy-$(printf '%s' "$ref" | tr -c 'A-Za-z0-9._-' '_').json"
-            # --scanners vuln: secret and misconfig scanning of third-party images is a different
-            # question and would report on their build choices, not on ours.
-            if docker run --rm -v trivy-cache:/root/.cache/trivy aquasec/trivy:0.73.0 \
-                 image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
-                 --quiet --format json "$ref" > "$f"; then
-              c=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$f")
-              echo "| \`$ref\` | $c |" >> "$GITHUB_STEP_SUMMARY"
-              jq -r --arg r "$ref" '[.Results[]?.Vulnerabilities[]?][] | "\($r)  \(.Severity)  \(.VulnerabilityID)  \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)"' "$f"
+            # --scanners vuln: secret and misconfig findings in a third-party image report on their
+            # build choices, not on ours.
+            docker run --rm -v trivy-cache:/root/.cache/trivy aquasec/trivy:0.73.0 \
+              image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+              --quiet --format json "$ref" > "$f" || echo "::warning::trivy failed on $ref"
+            # `|| echo -1`, exactly as stage 11e reads its ZAP count: a missing, empty or truncated
+            # report must not read as zero findings. jq exits non-zero on unparsable input; an empty
+            # file leaves `$c` empty, which the default below turns into -1 rather than 0.
+            c=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$f" 2>/dev/null || echo -1)
+            c=${c:--1}
+            max=$(ceiling "$ref")
+            if [ "$c" -lt 0 ]; then
+              echo "::error::$ref — no readable Trivy report; that is not zero findings"
+              echo "| \`$ref\` | **unreadable** | $max | **FAIL** |" >> "$GITHUB_STEP_SUMMARY"
+              fail=1
+            elif [ "$max" -lt 0 ]; then
+              echo "::error::$ref has no pinned ceiling — add one, measured on the run that adds the image"
+              echo "| \`$ref\` | $c | **unpinned** | **FAIL** |" >> "$GITHUB_STEP_SUMMARY"
+              fail=1
+            elif [ "$c" -gt "$max" ]; then
+              echo "::error::$ref: $c fixable CRITICAL/HIGH against a ceiling of $max — bump the image, or re-pin with the run that measures the new number"
+              echo "| \`$ref\` | $c | $max | **FAIL** |" >> "$GITHUB_STEP_SUMMARY"
+              fail=1
             else
-              # A pull or scan failure is NOT zero findings, and must not read as a clean row.
-              echo "::warning::trivy failed on $ref"
-              echo "| \`$ref\` | **scan failed** |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| \`$ref\` | $c | $max | ok |" >> "$GITHUB_STEP_SUMMARY"
             fi
+            # To STDOUT as well as the summary: the summary file is not in the job log, so a value
+            # written only there cannot be read back from a finished run.
+            echo "Stage 11d — $ref: $c fixable CRITICAL/HIGH (ceiling $max)"
+            jq -r --arg r "$ref" '[.Results[]?.Vulnerabilities[]?][] | "\($r)  \(.Severity)  \(.VulnerabilityID)  \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)"' "$f" 2>/dev/null || true
           done
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`ignore-unfixed: true\`, as above — a finding with no available fix is not counted here." >> "$GITHUB_STEP_SUMMARY"
+          echo "A ceiling pins drift; it does not reduce risk. \`ignore-unfixed: true\`, as above — a finding with no available fix is not counted here." >> "$GITHUB_STEP_SUMMARY"
+          exit "$fail"
 
       - name: "Stage 11 — what is covered, and what is not"
         if: always()
@@ -307,6 +330,9 @@ jobs:
             echo "- Trivy: scans the built IMAGE for CRITICAL/HIGH, **exit-code 1**, so it FAILS this"
             echo "  required check. \`ignore-unfixed: true\` means a known-unfixable critical does not"
             echo "  fail the build — the build can be green with such a finding present."
+            echo "- Stage 11d: the same scan over the **Compose** images, each gated at a per-image"
+            echo "  ceiling measured on the run that pinned it. A ceiling pins drift; it does not"
+            echo "  reduce risk — kafka and keycloak are frozen where they are, not made safer."
             echo "- Dependency-Check runs in its **own workflow** (\`depcheck.yml\`), nightly and on"
             echo "  \`pom.xml\` changes — not on every push, and not here. It scans the BUILD at"
             echo "  **failBuildOnCVSS=7** including **test-scope** dependencies, the only real gap it"
