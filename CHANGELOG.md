@@ -174,6 +174,21 @@
   exits 0 is the defect the deleted stage 6 had. First report: `FAIL-NEW: 0, WARN-NEW: 1, PASS: 66`.
 - **`docs/urls-and-tls.md` and `docs/pitfalls.md`** — which URLs exist and where the encryption
   stops, and the runtime failures that cost hours, grouped by the symptom you actually see.
+- **Trivy over the Compose images, CI stage 11d** (#28). The last uncovered scanning surface:
+  Dependabot's `docker` ecosystem matches only `/dockerfile|containerfile/i` and this repository has
+  no Dockerfile by design, so no configuration could ever have reached postgres, redis, kafka,
+  keycloak, traefik or the Collector. Reports rather than gates — first run found 269 fixable
+  CRITICAL/HIGH — but it **does** fail if it parses fewer than six image refs, because a parse that
+  matched nothing would print a clean-looking empty table.
+- **ZAP API scan over the OpenAPI contract, CI stage 11e** (#30). `zap-api-scan.py -S` enumerates the
+  nine operations from the contract instead of crawling for links, lifting the baseline's structural
+  ceiling: 14 URLs and 119 passive rules against the baseline's 3 and 66, on the same stack in the
+  same run. `-S` is load-bearing — the script active-scans by default, and a baseline and never an
+  active scan is this repository's rule. Two differential gates: the token is proven live before ZAP
+  is handed it (`200` with the bearer, `401` without), and the scan must beat the baseline's URL count.
+- **`PropertiesAreAsciiTest`** (#32). The four `application*.properties` files must contain no byte
+  above `0x7F`. `java.util.Properties#load(InputStream)` is specified as ISO-8859-1 and editors
+  disagree, so UTF-8 punctuation rendered as `â€"` for some readers and correctly for others.
 
 ### Removed
 - **CI stage 6 and the vendored ISO-compliance skill, deleted rather than repaired.** The script
@@ -276,6 +291,19 @@
   work. The use case now runs in one transaction so the publication row is written with the event.
 
 ### Fixed
+- **HSTS was being sent while five documents said it was not** (#32). The claim was asserted against
+  the terminator, where the header genuinely was never configured; the *application* sent it, because
+  `SecurityConfig` had no `headers` configuration and `server.forward-headers-strategy=native` makes
+  proxied requests secure — the only condition Spring Security's default `HstsHeaderWriter` needs. A
+  browser opening `https://localhost` therefore received a one-year, port-independent pin on the bare
+  host. `SecurityConfig#hstsOff()` on all three chains, gated by
+  `SecurityConfigTest#hstsIsNotSentOnASecureRequest`; `.secure(true)` is what makes that test able to
+  fail. ZAP had reported it every run — rule 10035 `PASS` means the header is *present* — and
+  `.zap/rules.tsv` dispositioned that rule `IGNORE` on the premise it was absent.
+- **The application image tag no longer carries a version** (#28). It was spelled in four files and
+  only `pom.xml` derived it from `${project.version}`, so a version bump left Compose starting a
+  **stale** image while the e2e guard confirmed the image it named was present. The build now produces
+  `tiny-ledger:local`, and the `gate` job asserts all four sites spell the identical tag.
 - `standalone` no longer fails to boot on the JDBC driver the `full` profile put on the classpath,
   and the Liquibase changelog actually runs (Boot 4 ships that auto-configuration separately).
 - The two run modes now order and filter history identically (spec §9.2b), which they did not: the
