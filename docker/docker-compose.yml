@@ -205,6 +205,11 @@ services:
       keycloak: { condition: service_healthy }
     environment:
       SPRING_PROFILES_ACTIVE: full
+      # SS6.5: the per-owner account cap, passed through so CI's e2e legs can turn it off with -1 --
+      # they open ~7 accounts per run as `alice` and run TWICE against this same stack. The default
+      # below DUPLICATES application.properties, which Compose gives no way to avoid: an unset var
+      # here becomes an empty string and fails int binding at startup. Move the two together.
+      LEDGER_ACCOUNTS_MAX_PER_OWNER: ${LEDGER_ACCOUNTS_MAX_PER_OWNER:-2}
       # Service names, not localhost: inside the network the app resolves its peers by name, and the
       # published host ports are irrelevant to it. Postgres is 5432 here — the CONTAINER port, which
       # TINY_LEDGER_PG_PORT never changes; that variable only moves the host-side publication.

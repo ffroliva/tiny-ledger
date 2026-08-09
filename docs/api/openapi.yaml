@@ -56,8 +56,9 @@ paths:
         Requires `ledger:writer`. The `accountUid` is server-generated (§6.3). Ownership *is* enforced.
 
         `ledger:writer` is permission to write, **not an unlimited entitlement to create**: a caller
-        may self-open at most `ledger.accounts.max-per-owner` accounts (10 by default) and the next
-        one is a `409`. How many accounts a customer may hold is a bank decision, not a caller's.
+        may self-open at most `ledger.accounts.max-per-owner` accounts, and the next one is a `409`.
+        How many a customer may hold is a bank decision, not a caller's. The `standalone` profile
+        turns the rule off — it runs as one principal, where a per-owner cap caps everything.
       requestBody:
         required: true
         content:
@@ -93,7 +94,6 @@ paths:
                 type: /errors/account-limit-reached
                 title: Account limit reached
                 status: 409
-                detail: owner already holds the maximum of 10 accounts
                 traceId: 7c6f2e1a9b4d5c30
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/EventStoreUnavailable' }

@@ -213,6 +213,14 @@ public abstract class AbstractIntegrationTest {
                 "spring.security.oauth2.resourceserver.jwt.issuer-uri",
                 () -> "http://" + KEYCLOAK.getHost() + ":" + KEYCLOAK.getMappedPort(8080) + "/realms/tiny-ledger");
 
+        // §6.5: the per-owner account cap is OFF in this context, and that is a property of the SUITE,
+        // not a softening of the rule. One shared Postgres and one shared context mean account counts
+        // accumulate across every *IT class, and they all open as the same handful of fixture users —
+        // `RateLimitIT` alone opens LOWERED_WRITE_LIMIT accounts as one principal to reach the 429 it
+        // exists to prove. A cap per OWNER is therefore a cap on the whole suite here, exactly as it is
+        // in `standalone`. Set in this shared base, so nothing forks the context (ADR 0003, trap 5).
+        registry.add("ledger.accounts.max-per-owner", () -> "-1");
+
         registry.add("ledger.rate-limit.write-per-principal.capacity", () -> String.valueOf(LOWERED_WRITE_LIMIT));
         registry.add("ledger.rate-limit.write-per-principal.burst", () -> "0");
         // Derived, not chosen: period / capacity = 5400s / LOWERED_WRITE_LIMIT (150) = 36 seconds per
