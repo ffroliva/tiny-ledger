@@ -4,9 +4,12 @@ import com.ffroliva.tinyledger.shared.error.ErrorCode;
 import com.ffroliva.tinyledger.shared.error.TinyLedgerException;
 import jakarta.validation.ConstraintViolationException;
 import java.net.URI;
+import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.context.MessageSource;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -38,6 +41,17 @@ public class ErrorHandlingAdvice {
     private static final Logger log = LoggerFactory.getLogger(ErrorHandlingAdvice.class);
 
     /**
+     * SS6.5's human-readable half. {@code ErrorCode.messageKey()} had existed since the catalogue was
+     * written with no bundle behind it and no caller, so every problem detail went out WITHOUT a
+     * {@code detail} -- including examples in the contract that promised one. This is that hook, wired.
+     */
+    private final MessageSource messages;
+
+    public ErrorHandlingAdvice(MessageSource messages) {
+        this.messages = messages;
+    }
+
+    /**
      * §6.5's one 400. {@code ConstraintViolationException} is the request-parameter case: the generated
      * interfaces are {@code @Validated}, so an implementing controller is method-validation proxied and its
      * {@code @Min}/{@code @Max} parameter bounds fail through AOP rather than through Spring MVC's own
@@ -51,14 +65,13 @@ public class ErrorHandlingAdvice {
         ConstraintViolationException.class
     })
     ResponseEntity<ProblemDetail> malformed() {
-        return problem(HttpStatus.BAD_REQUEST, "/errors/invalid-amount", "Invalid amount");
+        return problem(ErrorCode.INVALID_AMOUNT);
     }
 
     /** §6.5: one catalogue, one translation. The code carries status, type and title. */
     @ExceptionHandler(TinyLedgerException.class)
     ResponseEntity<ProblemDetail> catalogued(TinyLedgerException exception) {
-        ErrorCode code = exception.code();
-        return problem(HttpStatus.valueOf(code.status()), code.type(), code.title());
+        return problem(exception.code(), exception.args());
     }
 
     /**
@@ -82,11 +95,21 @@ public class ErrorHandlingAdvice {
                 HttpStatus.INTERNAL_SERVER_ERROR, traced(ProblemDetail.forStatus(HttpStatus.INTERNAL_SERVER_ERROR)));
     }
 
-    private static ResponseEntity<ProblemDetail> problem(HttpStatus status, String type, String title) {
+    private ResponseEntity<ProblemDetail> problem(ErrorCode code, Object... args) {
+        HttpStatus status = HttpStatus.valueOf(code.status());
         ProblemDetail body = ProblemDetail.forStatus(status);
-        body.setType(URI.create(type));
-        body.setTitle(title);
+        body.setType(URI.create(code.type()));
+        body.setTitle(code.title());
+        // Null default rather than the throwing overload: a missing key must not turn an error
+        // response into a 500. It degrades to no `detail`, exactly as before this was wired, and
+        // ErrorCodeTest is what stops it degrading unnoticed.
+        String detail = messages.getMessage(code.messageKey(), args, null, locale());
+        if (detail != null) body.setDetail(detail);
         return respond(status, traced(body));
+    }
+
+    private static Locale locale() {
+        return LocaleContextHolder.getLocale();
     }
 
     private static ResponseEntity<ProblemDetail> respond(HttpStatusCode status, ProblemDetail body) {

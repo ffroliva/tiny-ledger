@@ -251,7 +251,21 @@ class LedgerControllerTest {
                                 {"name":"ACC-011","currency":"GBP"}"""))
                 .andExpect(status().isConflict())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-                .andExpect(jsonPath("$.type").value("/errors/account-limit-reached"));
+                .andExpect(jsonPath("$.type").value("/errors/account-limit-reached"))
+                // §6.5: `detail` is the half that was documented and never sent. The limit is
+                // interpolated from the exception's args, so this also proves the args reach the bundle.
+                .andExpect(jsonPath("$.detail").value("You already hold the maximum of 10 accounts."));
+    }
+
+    @Test // §6.5: a catalogued error with NO args still gets its detail, from the same bundle
+    void aMalformedRequestCarriesADetailToo() throws Exception {
+        mvc.perform(post("/api/v1/accounts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"ACC-001","currency":"pounds"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.type").value("/errors/invalid-amount"))
+                .andExpect(jsonPath("$.detail").exists());
     }
 
     @Test // §6.5: a malformed open request is a 400 before the use case runs
