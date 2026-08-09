@@ -29,11 +29,8 @@ public class UseCaseConfig { // profile-independent — the whole trick of spec 
 
     // Concrete return types: the `full` profile wraps these in a transactional decorator
     // (ADR 0001) and needs to inject the undecorated service unambiguously.
-    /**
-     * §6.5: the account limit is composed here rather than inside {@code ledger}, because the count
-     * lives in {@code balance}'s projection and this class is the one place allowed to know both.
-     * One wiring, so {@code standalone} and {@code full} enforce the identical rule (§9.2b).
-     */
+    // §6.5: the account cap is composed here because the count lives in `balance`. One wiring, so
+    // both run modes enforce the identical rule (§9.2b) rather than a constraint only Postgres has.
     @Bean
     OpenAccountService openAccount(
             EventStorePort store,

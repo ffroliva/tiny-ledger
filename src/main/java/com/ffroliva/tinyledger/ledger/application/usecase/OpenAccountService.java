@@ -39,12 +39,10 @@ public class OpenAccountService implements OpenAccountUseCase {
 
     @Override
     public OpenedAccount open(OpenAccount cmd) {
-        // §6.5: holding `ledger:writer` is permission to write, not an unlimited entitlement to create.
-        // ponytail: read-then-append, so two concurrent opens by one owner can both pass at the boundary
-        // and land one account over. Bounded by the per-principal write budget and self-correcting on the
-        // next open; a unique/count constraint in the projection is the upgrade if exactness is needed.
-        // A negative limit turns the rule off, which is how `standalone` runs: it authenticates nobody
-        // and every caller is one fixed principal, so a per-OWNER cap there would cap the whole system.
+        // §6.5: `ledger:writer` is permission to write, not unlimited entitlement to create. Negative
+        // turns it off — `standalone` runs as one principal, where a per-OWNER cap caps everything.
+        // ponytail: read-then-append, so concurrent opens can land one over. Write budget bounds it;
+        // a count constraint in the (synchronous) projection is the upgrade if exactness is needed.
         if (maxAccountsPerOwner >= 0 && ownedAccounts.countOwnedBy(cmd.caller()) >= maxAccountsPerOwner) {
             throw new AccountLimitReachedException(maxAccountsPerOwner);
         }
