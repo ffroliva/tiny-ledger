@@ -19,7 +19,7 @@ Quadrants are Diátaxis, per spec §8.1.
 | **`urls-and-tls.md`** | **Which URLs exist, which are public, which are internal-only, what is encrypted and where the encryption stops — and how to run WITHOUT TLS.** One place for a map that was previously spread across a Compose file, two runbooks and a properties file, which is how five of its facts ended up disagreeing. Also the port variables that are not free knobs | Explanation / Reference |
 | **`pitfalls.md`** | **The runtime failures that cost hours, grouped by the symptom you actually see** — every 401 whose real cause is a certificate, the Windows curl that cannot take a private CA, Traefik serving a certificate you did not generate, rate limits that fire for no reason, and the things that look broken and are correct. `AGENTS.md` covers the build-and-test equivalents; this is the runtime half | How-to / Reference |
 | **`security-material.md`** | **Adding or looking for any credential, key or certificate.** What exists today and where each is injected, why the Keycloak fixture password is public on purpose, the one key still in git history and why no rotation is owed — and **how TLS actually works here** — Traefik terminating at the edge, a dev CA generated on demand and never committed, the `X-Forwarded-For` trust that keeps §6.1's per-IP backstop from being bypassed, and the hops that are still plaintext | Explanation / Reference |
-| `spec.md` (v3.44) | Any question about *contract* — API shape, errors (§6.5), security model (§6.4), idempotency (§6.3), observability and health (§6.6), the pipeline and what actually gates (§12.1), the two run modes (§1), module boundaries (§3/§4) | Explanation |
+| `spec.md` (v3.45) | Any question about *contract* — API shape, errors (§6.5), security model (§6.4), idempotency (§6.3), observability and health (§6.6), the pipeline and what actually gates (§12.1), the two run modes (§1), module boundaries (§3/§4) | Explanation |
 | `architecture.md` | You need the shape of the system before the detail | Explanation |
 | `api/openapi.yaml` | Changing a request/response, a status code, or a validation constraint. **The generated server interfaces come from here** — edit the contract, not the generated code | Reference |
 | `adr/0001-kafka-delivery-path.md` | Touching event publication, the outbox, Kafka, or the transaction boundary around publishing | Explanation |
@@ -30,6 +30,7 @@ Quadrants are Diátaxis, per spec §8.1.
 | `agentic-workflow.md` | Understanding how this was built — including §5, where the agents were wrong, and §7, the per-phase gate record | Explanation |
 | `_archive/reviews/` | Checking that the review claims in `agentic-workflow.md` are real — the council reports and assessments as they were written | Reference |
 | `_archive/` (start at its `README.md`) | Tracing *why* a decision was taken, or auditing what an agent was actually instructed to do. **Working artifacts, not documentation** — the README states which paths inside them are stale | — |
+| `superpowers/plans/` and `superpowers/specs/` | The same kind of artifact as `_archive/plans/`, for the **five most recent** pieces of work — step 9's probes and tracing, step 10's e2e runtime, the buildpack image, and the TLS/Traefik pass. **All delivered; none archived yet.** Added to this table 2026-08-08, having been absent while the directory held five files | — |
 
 The Diátaxis quadrants above (spec §8.1) are the ones that have documents. `docs/` still has no
 `how-to/` or `tutorial/` tree — both directories held a `.gitkeep` and nothing else, and were removed
@@ -46,8 +47,17 @@ the record of *why* each change was made survives, and so a reviewer can check t
 `agentic-workflow.md` against the instructions that actually produced the code. **Nothing here is
 current contract.** Where a plan and `spec.md` disagree, `spec.md` wins.
 
-Everything under `_archive/` is delivered or superseded. There is no "in flight" plan directory; what
-is being built next is §14 of `spec.md`, and what is known-open is its *Open issues* section.
+Everything under `_archive/` is delivered or superseded, and so is everything under
+`superpowers/` — **there is still no "in flight" plan directory**, but that sentence was doing more
+work than it could carry until 2026-08-08: `docs/superpowers/plans/` was recreated after the
+2026-08-06 move and has held five delivered plans since, unlisted by this table and described by
+`_archive/README.md` as a path that no longer exists. Both are now accurate. What is being built next
+is §14 of `spec.md`; what is known-open is its *Open issues* section.
+
+The two directories should be merged — five delivered plans in a second location is exactly the
+"two sources of truth" shape `AGENTS.md` opens by warning about. That is named here rather than done,
+because moving them rewrites paths cited from `agentic-workflow.md` and the commit history, and a
+rename is only proven by asserting the old name is gone (`AGENTS.md`, trap 2).
 
 | Plan | State |
 |---|---|

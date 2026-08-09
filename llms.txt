@@ -40,6 +40,10 @@ where an archived plan and the spec disagree, the spec wins.
   why the system of record is a database, reversing the author's own prior design
 - [ADR 0003 — Test topology and CI parallelisation](docs/adr/0003-test-topology-and-ci-parallelisation.md):
   one Spring context per profile, and why CI splits by infrastructure need
+- [ADR 0004 — Readiness does not gate on lag](docs/adr/0004-readiness-does-not-gate-on-lag.md): the
+  health probes and the outbox-lag gauge, and why `E9` was rewritten rather than implemented as specified
+- [ADR 0005 — Kubernetes is the production target](docs/adr/0005-kubernetes-is-the-production-target.md):
+  where this deploys, why Compose is not it, and why there are no manifests
 
 ## How it was built
 

@@ -139,6 +139,56 @@
 - **`E9` closed, and the §9.3 catalogue now has no open cases for the first time.** `AuditLagIT`
   pauses the broker, watches the gauge cross §6.6's 5 s threshold, reads the balance back exactly, and
   asserts readiness stays `UP`.
+- **A Docker runbook and a security-material page** (`docs/docker.md`, `docs/security-material.md`) —
+  the `full` profile end to end as verified commands, and one place that says where every credential,
+  key and certificate lives and where each is injected.
+- **A `ledger-cli` runbook** (`docs/ledger-cli.md`) and real per-task prerequisites in the README:
+  the toolchain split is JDK-only for the Java gate, JDK + Docker for `-Pit`, uv for the CLI, and all
+  three for e2e. `run-e2e.sh` gained a `uv` guard on its **first** line, so a missing install costs
+  the error and not a ~90 s image build first.
+- **TLS at the edge** (spec §6.4a, v3.44). Traefik terminates HTTPS for the application **and for
+  Keycloak** — one ingress, one certificate story, no second scheme in the stack. The certificate is
+  generated on demand by `scripts/tls/gen-dev-ca.sh` into a gitignored directory, and **CI holds no
+  certificate secret**: it runs the same generator in-run, so a fork's build goes green holding
+  nothing. Three findings the work produced about itself, each caught by a control rather than by
+  review: Traefik served its own `CN=TRAEFIK DEFAULT CERT` while every request succeeded end to end,
+  because certificate selection is by SNI and RFC 6066 forbids an IP literal there; a `traefik.yml`
+  static config was written and deleted, because Traefik does not expand `${VARS}` in its own file
+  and — measured — ignores CLI flags entirely when `--configFile` is given; and the plaintext
+  redirect pointed at a port nothing published.
+- **The `X-Forwarded-For` trust boundary, which is the part of the TLS work that is a security
+  control.** A proxy in front makes every request arrive from the proxy's address, and §6.1 row 4
+  meters on it — so `forward-headers-strategy=native` (Tomcat's `RemoteIpValve`, which has a
+  trusted-proxy concept) with `internal-proxies` naming the ingress and nothing else. **Boot's
+  default is exploitable on this stack and that is measured, not argued**: it covers `172.16.0.0/12`,
+  the range Docker hands to Compose networks. `ForwardedHeaderSpoofingTest` and
+  `ForwardedHeaderTrustedProxyTest` are differential — the identical pair of requests scores opposite
+  outcomes either side of one property — and `ProxyAddressPinTest` guards the pinned address, after
+  a span-replacing edit deleted the Compose block holding it and nothing noticed.
+- **`E2E_MODE=jar` is now RUN, as CI stage 9b.** It had been kept to avoid silent coverage loss for
+  `java -jar` and, as wired, *was* that loss — a branch nobody executed, described in comments as
+  exercised. It only became conflict-free once the app container stopped publishing 8080.
+- **OWASP ZAP baseline as stage 11c**, deferred to the TLS commit on purpose so its first report is
+  about this application rather than about the defaults the same work was configuring.
+  `fail_action: true`, because the action defaults it to `false` — a scan that reports findings and
+  exits 0 is the defect the deleted stage 6 had. First report: `FAIL-NEW: 0, WARN-NEW: 1, PASS: 66`.
+- **`docs/urls-and-tls.md` and `docs/pitfalls.md`** — which URLs exist and where the encryption
+  stops, and the runtime failures that cost hours, grouped by the symptom you actually see.
+- **Trivy over the Compose images, CI stage 11d** (#28). The last uncovered scanning surface:
+  Dependabot's `docker` ecosystem matches only `/dockerfile|containerfile/i` and this repository has
+  no Dockerfile by design, so no configuration could ever have reached postgres, redis, kafka,
+  keycloak, traefik or the Collector. Reports rather than gates — first run found 269 fixable
+  CRITICAL/HIGH — but it **does** fail if it parses fewer than six image refs, because a parse that
+  matched nothing would print a clean-looking empty table.
+- **ZAP API scan over the OpenAPI contract, CI stage 11e** (#30). `zap-api-scan.py -S` enumerates the
+  nine operations from the contract instead of crawling for links, lifting the baseline's structural
+  ceiling: 14 URLs and 119 passive rules against the baseline's 3 and 66, on the same stack in the
+  same run. `-S` is load-bearing — the script active-scans by default, and a baseline and never an
+  active scan is this repository's rule. Two differential gates: the token is proven live before ZAP
+  is handed it (`200` with the bearer, `401` without), and the scan must beat the baseline's URL count.
+- **`PropertiesAreAsciiTest`** (#32). The four `application*.properties` files must contain no byte
+  above `0x7F`. `java.util.Properties#load(InputStream)` is specified as ISO-8859-1 and editors
+  disagree, so UTF-8 punctuation rendered as `â€"` for some readers and correctly for others.
 
 ### Removed
 - **CI stage 6 and the vendored ISO-compliance skill, deleted rather than repaired.** The script
@@ -207,6 +257,28 @@
   unauthenticated `GET /logout` with a 302 to a page this API does not serve.
 
 ### Changed
+- **Keycloak stopped publishing `8081` entirely**, which made the TLS change a *rename* rather than a
+  toggle: `iss` moved to `https://auth.localhost/realms/tiny-ledger` in eight places at once. A
+  published plaintext Keycloak mints tokens whose issuer is derived from whatever the caller typed,
+  which is a different issuer from the one the application trusts. Traefik publishes **443**, not
+  8443, because the published port lands inside `iss` and 443 is the one that drops out of the URL.
+- **The application publishes no host port at all** — neither `8080` nor `9090`. A published 8080
+  would leave a plaintext route straight past the terminator, and publishing 9090 had falsified
+  §6.6's own claim that the management endpoints "rely on the port not being published".
+- **The Sonar job became a gate that can actually fail** (`8eb84db`). It had reported success on
+  2026-08-07 while the project's quality gate was ERROR and the README badge read
+  `quality gate failed`. `-Dsonar.qualitygate.wait=true` makes the scanner poll for the verdict and
+  exit non-zero on ERROR.
+- **A repository-wide documentation accuracy pass** (spec v3.45). Ten documents were cross-checked
+  against the code, the Compose stack and the workflow that actually runs; every correction is a
+  document having described a system different from the one that shipped, and nothing in the
+  application changed. Spec §9.6 called stage 9 unbuilt sixty lines from the §12.1 row describing it
+  as running; §11's convention table specified eight properties the CLI does not have; §1.5 named a
+  PostgreSQL and a Testcontainers version nothing runs; §1 still had Keycloak on 8081; the README
+  listed observability as "not yet built" below the section explaining how to turn it on; and
+  `agentic-workflow.md` told an auditor the Compose file has no Keycloak service. **No gate was
+  added** — nothing in CI checks documentation here (§8.4), so the mechanism that let these
+  accumulate is unchanged.
 - **Spec v3.8 — truth alignment.** The spec and `docs/architecture.md` still promised the mechanism
   ADR 0001 replaced: Kafka routing is programmatic, not `@Externalized`, and the in-process legs are
   plain synchronous `@EventListener` in **both** run modes rather than becoming
@@ -219,6 +291,19 @@
   work. The use case now runs in one transaction so the publication row is written with the event.
 
 ### Fixed
+- **HSTS was being sent while five documents said it was not** (#32). The claim was asserted against
+  the terminator, where the header genuinely was never configured; the *application* sent it, because
+  `SecurityConfig` had no `headers` configuration and `server.forward-headers-strategy=native` makes
+  proxied requests secure — the only condition Spring Security's default `HstsHeaderWriter` needs. A
+  browser opening `https://localhost` therefore received a one-year, port-independent pin on the bare
+  host. `SecurityConfig#hstsOff()` on all three chains, gated by
+  `SecurityConfigTest#hstsIsNotSentOnASecureRequest`; `.secure(true)` is what makes that test able to
+  fail. ZAP had reported it every run — rule 10035 `PASS` means the header is *present* — and
+  `.zap/rules.tsv` dispositioned that rule `IGNORE` on the premise it was absent.
+- **The application image tag no longer carries a version** (#28). It was spelled in four files and
+  only `pom.xml` derived it from `${project.version}`, so a version bump left Compose starting a
+  **stale** image while the e2e guard confirmed the image it named was present. The build now produces
+  `tiny-ledger:local`, and the `gate` job asserts all four sites spell the identical tag.
 - `standalone` no longer fails to boot on the JDBC driver the `full` profile put on the classpath,
   and the Liquibase changelog actually runs (Boot 4 ships that auto-configuration separately).
 - The two run modes now order and filter history identically (spec §9.2b), which they did not: the

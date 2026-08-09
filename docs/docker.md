@@ -285,8 +285,24 @@ iss = https://auth.localhost/realms/tiny-ledger
 ```
 
 **No port**, because Traefik publishes 443 and the scheme default drops out of the URL. That string
-appears in eight places — Compose, the app's properties, the CLI's default, `.env.example`, `ci.yml`
-and three documents — and they agree or nothing authenticates. Measured on the running stack:
+appears in **nine operational files**, and they agree or nothing authenticates:
+
+```bash
+# The list, and the check. A bare count goes stale silently; this one cannot.
+grep -rl 'auth\.localhost' --exclude-dir={.git,target,_archive,.venv,__pycache__} . \
+  | grep -vE '\.md$|HANDOFF|CHANGELOG|docs/'
+```
+
+`.env.example`, `.github/workflows/ci.yml`, `docker/docker-compose.yml`, `docker/traefik/dynamic.yml`,
+`ledger-cli/src/ledger_cli/config.py`, `loadtest/…/LedgerSimulation.java`,
+`scripts/e2e/restart-replay.sh`, `scripts/tls/gen-dev-ca.sh`,
+`src/main/resources/application-full.properties`. Documents describe it besides, in six more.
+
+**This sentence used to say "eight places — Compose, the app's properties, the CLI's default,
+`.env.example`, `ci.yml` and three documents".** It undercounted on both halves: four operational
+files it never named had come to spell the string, and the documents were six rather than three.
+Nothing was wrong when it was written; it rotted as the string spread, which is exactly what a bare
+count does. Hence the command above rather than a new number. Measured on the running stack:
 
 ```
 POST https://auth.localhost/realms/tiny-ledger/protocol/openid-connect/token  ->  200
