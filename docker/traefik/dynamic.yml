@@ -124,12 +124,20 @@ http:
         # dispositioned in `.zap/api-rules.tsv` because that file's rule is that a finding which
         # genuinely applies gets fixed on the terminator, and this one does.
         #
-        # WHY THE BASELINE NEVER SAW IT, which is the interesting part and the justification for
-        # stage 11e existing: rule 90004 fires on a response a browser could embed. The baseline only
-        # ever reached 401s, and there is nothing to protect in an error body. The API scan reads
-        # nine routes with live 200 JSON responses — account balances among them — and the rule
-        # applies immediately. A whole class of finding was invisible to the edge scan, not tolerated
-        # by it.
+        # WHY THE BASELINE NEVER SAW IT: rule 90004 fires on a response a browser could embed, and
+        # the baseline only ever reached 401s on two URLs. Stage 11e reaches nine, so the rule had
+        # something to evaluate for the first time.
+        #
+        # CORRECTED — this comment used to say the API scan "reads nine routes with live 200 JSON
+        # responses, account balances among them". IT DOES NOT, and the artifact says so: ZAP's
+        # OpenAPI import substitutes no path parameters, so the requests go out as
+        # `/api/v1/accounts/{accountUid}/balance` verbatim and EIGHT OF NINE operations return 4xx
+        # (alert `100000` x8, run 31278543144). No balance was ever read. The claim was written
+        # from what the contract describes rather than from what the scan did.
+        #
+        # The header coverage is real regardless, which is the part worth keeping: passive header
+        # rules do not care that a body is an error, so all nine responses are evaluated — proven
+        # when rule 10035 fired `x 9` the moment HSTS was genuinely removed.
         #
         # `same-origin` is safe for a future browser client, which is worth stating because the name
         # suggests otherwise: CORP governs NO-CORS cross-origin loads (`<img>`, `<script>`). A
