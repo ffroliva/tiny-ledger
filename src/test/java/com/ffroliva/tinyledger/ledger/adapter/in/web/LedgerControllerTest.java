@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ffroliva.tinyledger.ledger.application.error.AccountLimitReachedException;
 import com.ffroliva.tinyledger.ledger.application.error.AccountNotFoundException;
 import com.ffroliva.tinyledger.ledger.application.error.ConcurrencyConflictException;
 import com.ffroliva.tinyledger.ledger.application.error.IdempotencyConflictException;
@@ -238,6 +239,19 @@ class LedgerControllerTest {
                 // §6.4: echoed from the resolved caller, so a hardcoded literal in openAccount fails here
                 .andExpect(jsonPath("$.owner").value("captain-nemo"))
                 .andExpect(jsonPath("$.createdAt").exists());
+    }
+
+    @Test // §6.5: the contract says openAccount can answer 409; this is the only thing that makes it true
+    void openingBeyondTheAccountLimitIsConflict() throws Exception {
+        given(openAccount.open(any())).willThrow(new AccountLimitReachedException(10));
+
+        mvc.perform(post("/api/v1/accounts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"ACC-011","currency":"GBP"}"""))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value("/errors/account-limit-reached"));
     }
 
     @Test // §6.5: a malformed open request is a 400 before the use case runs

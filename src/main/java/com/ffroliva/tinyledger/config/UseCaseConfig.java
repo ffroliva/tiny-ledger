@@ -12,6 +12,7 @@ import com.ffroliva.tinyledger.notification.application.NotificationRules;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.tracing.Tracer;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
@@ -28,10 +29,24 @@ public class UseCaseConfig { // profile-independent — the whole trick of spec 
 
     // Concrete return types: the `full` profile wraps these in a transactional decorator
     // (ADR 0001) and needs to inject the undecorated service unambiguously.
+    // §6.5: the account cap is composed here because the count lives in `balance`. One CODE PATH in
+    // both run modes — not one rule: `standalone` and the test contexts set a negative limit and the
+    // check does nothing there, so the only automated proof of a refusal is OpenAccountServiceTest.
     @Bean
     OpenAccountService openAccount(
-            EventStorePort store, EventPublisherPort publisher, ClockPort clock, IdGeneratorPort ids) {
-        return new OpenAccountService(store, publisher, clock, ids);
+            EventStorePort store,
+            EventPublisherPort publisher,
+            ClockPort clock,
+            IdGeneratorPort ids,
+            QueryAccountsUseCase accounts,
+            @Value("${ledger.accounts.max-per-owner}") int maxAccountsPerOwner) {
+        return new OpenAccountService(
+                store,
+                publisher,
+                clock,
+                ids,
+                owner -> accounts.accountsOwnedBy(owner).size(),
+                maxAccountsPerOwner);
     }
 
     @Bean
