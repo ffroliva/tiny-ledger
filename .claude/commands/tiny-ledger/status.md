@@ -6,7 +6,7 @@ allowed-tools: PowerShell
 Run and show the output verbatim:
 
 ```powershell
-.\scripts\dev.ps1 status
+./scripts/dev.sh status
 ```
 
 Read it for the user:

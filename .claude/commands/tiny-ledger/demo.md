@@ -4,10 +4,10 @@ allowed-tools: PowerShell
 ---
 
 ```powershell
-.\scripts\dev.ps1 demo
+./scripts/dev.sh demo
 ```
 
-Auto-detects whichever mode is up. Add `-User dave` for the auditor, `-User carol` for a
+Auto-detects whichever mode is up. Add `--user dave` for the auditor, `--user carol` for a
 reader-only principal.
 
 **Step 4 is the one worth narrating.** The same `movementUid` is sent twice; the second returns

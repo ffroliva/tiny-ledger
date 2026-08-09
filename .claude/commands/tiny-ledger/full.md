@@ -4,10 +4,10 @@ allowed-tools: PowerShell
 ---
 
 ```powershell
-.\scripts\dev.ps1 full
+./scripts/dev.sh full
 ```
 
-Add `-Rebuild` to force the container image build (~90s+); otherwise an existing
+Add `--rebuild` to force the container image build (~90s+); otherwise an existing
 `tiny-ledger:local` is reused.
 
 Expect `https://app.localhost` to answer **401** — that is auth being enforced, not a failure.

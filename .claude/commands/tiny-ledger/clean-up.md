@@ -4,7 +4,7 @@ allowed-tools: PowerShell
 ---
 
 ```powershell
-.\scripts\dev.ps1 clean-up
+./scripts/dev.sh clean-up
 ```
 
 **This deletes the event store** (`down -v` removes the `postgres-data` volume). That is the point;
