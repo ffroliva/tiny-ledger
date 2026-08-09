@@ -12,11 +12,20 @@
 # rather than adding a line here.
 #
 # ── Observed report, run 31257068048, against https://127.0.0.1:8443 ────────────────────────────
-# NOTE: that run predates the move to the privileged pair. The job now targets `https://127.0.0.1`
-# (port 443). The counts below have not been re-measured at the new target — the entry they justify
-# is about a response body rather than an origin, so it is expected to hold, but treat the tally as
-# the record of a superseded configuration until a run at 443 replaces it.
-#   FAIL-NEW: 0   WARN-NEW: 1   PASS: 66
+# NOTE: that run predates the move to the privileged pair, and this block asked for a run at 443 to
+# replace it. THAT RUN EXISTS NOW -- `31301914764`, the first on the pinned engine, at 443:
+#
+#   FAIL-NEW: 0   WARN-NEW: 0   IGNORE: 2   PASS: 65
+#
+# The superseded tally is kept below for comparison because the DIFFERENCE is the informative part.
+# It read `WARN-NEW: 1, PASS: 66`; one rule moved out of PASS and into IGNORE, and it is 10035.
+# v3.49 removed HSTS for real, so the rule that used to PASS -- meaning the header was PRESENT --
+# now fires and is dispositioned below. `PASS: Strict-Transport-Security` appears 0 times in the new
+# log and appeared in every run before the fix.
+#
+# A tally measures a configuration, not the tool. Pinning the image changed none of it.
+#
+#   superseded, run 31257068048 at :8443 -- FAIL-NEW: 0   WARN-NEW: 1   PASS: 66
 # At that run the TLS work's headers all passed on their own merits and needed no entry:
 # Strict-Transport-Security, X-Content-Type-Options, X-Frame-Options, Content Security Policy,
 # Permissions Policy, Cross-Domain Misconfiguration, Private IP Disclosure and Application Error
