@@ -584,11 +584,35 @@ jobs:
       # scan — no attack payload against a ledger — is the posture stage 11c was chosen for, and
       # dropping it silently while "upgrading" the coverage would be a worse trade than the gap.
       #
-      # WHAT IT DOES STILL DO, stated because "passive" oversells it: importing the definition
-      # sends one request per operation, and two of those are PUT deposits/withdrawals and one is
-      # POST an account. The scan therefore WRITES to the ledger — with the contract's own example
-      # values, not attack payloads. Harmless against a stack this job creates and destroys, and it
-      # is why this runs AFTER the baseline rather than before it.
+      # WHAT IT ACTUALLY REACHES — MEASURED FROM THE REPORT, AND NARROWER THAN THIS COMMENT USED TO
+      # CLAIM. It said the scan "WRITES to the ledger … with the contract's own example values".
+      # That was wrong in all three parts, and wrong in the direction that flatters the gate. From
+      # the `zap-api-scan` artifact of run 31278543144:
+      #
+      #   /api/v1/accounts/{accountUid}/balance?consistency=strong
+      #   /api/v1/accounts/{accountUid}/deposits/{depositUid}
+      #
+      # The path templates go out VERBATIM. ZAP's OpenAPI import substitutes nothing, because
+      # docs/api/openapi.yaml declares `AccountUid` as `type: string, format: uuid` with no
+      # `example:`, and no importer can chain a POST response into a later path parameter anyway.
+      # Query values are placeholder strings for the same reason (`cursor=cursor`, `limit=50`).
+      #
+      # So: alert `100000-1`, "A Client Error response code was returned by the server", x8. EIGHT
+      # OF NINE OPERATIONS 4xx. Nothing is written — the two PUTs never resolve to an account — and
+      # no balance is ever read. Two of the nine would 403 regardless of paths, because the token is
+      # minted for `alice`, who holds `ledger:writer` and `ledger:reader`; `ledger:auditor` belongs
+      # to `dave`, and `/audit/entries` and `/accounts/*/events` require it.
+      #
+      # WHAT THAT LEAVES, WHICH IS STILL WORTH THE JOB: passive rules run on all nine responses,
+      # and header rules do not care that the body is an error. That is not a consolation — it is
+      # the coverage this stage was added for, and it is proven rather than asserted: rule 10035
+      # fired `x 9` the moment HSTS was genuinely removed, on nine routes the baseline never saw.
+      # What the scan does NOT do is exercise the API's data paths, and the step below now gates on
+      # that error count so this cannot quietly get worse.
+      #
+      # Running AFTER the baseline is now belt-and-braces rather than necessary, since nothing is
+      # written. It stays: the ordering costs nothing and the reason to revisit it would be a fix
+      # that makes these requests succeed.
       #
       # `-O` because the contract's `servers:` is `/` — a relative URL, deliberately: the contract
       # does not name a deployment. The host has to come from the runner.
@@ -638,9 +662,50 @@ jobs:
           set -uo pipefail
           n=$(grep -oE 'Total of [0-9]+ URLs' zap-api.log | grep -oE '[0-9]+' | tail -1)
           n=${n:-0}
+          echo "Stage 11e — ZAP API scan reached $n URLs (baseline reaches 3)"
           echo "### Stage 11e — ZAP API scan reached $n URLs (baseline reaches 3)" >> "$GITHUB_STEP_SUMMARY"
           if [ "$n" -le 3 ]; then
             echo "::error::the API scan reached $n URLs, no more than the baseline's 3 — the contract was not enumerated, so a clean report proves nothing"
+            exit 1
+          fi
+
+          # THE SECOND ASSERTION, AND IT EXISTS BECAUSE THE FIRST ONE IS NOT ENOUGH. `Total of N
+          # URLs` counts what ZAP IMPORTED, not what answered usefully — it read 14 on a run where
+          # eight of the nine operations returned 4xx. So the URL count alone cannot tell a healthy
+          # scan from one where every request breaks, which is the same blind spot AGENTS.md trap 8
+          # describes, sitting inside the step written to close it.
+          #
+          # ZAP records those as `100000` — "A Client Error response code was returned by the
+          # server" — at INFORMATIONAL risk, and `zap_common.py` skips Informational when it decides
+          # the exit code. They therefore cannot fail the job through the scanner. They are read
+          # here instead, straight out of the JSON report.
+          #
+          # EIGHT IS THE MEASURED BASELINE, not a guess: run 31278543144's artifact, with the path
+          # templates unsubstituted (`/accounts/{accountUid}/balance`) and two routes 403 because
+          # the token is alice's and `ledger:auditor` is dave's. It is pinned as a CEILING so the
+          # number cannot grow unnoticed — a ninth client error means a route that used to answer
+          # has stopped, and this is the only place that would say so.
+          #
+          # If someone fixes the substitution (examples in openapi.yaml, or a ZAP context), this
+          # number should DROP and this line should be lowered with the run that proves it.
+          # jq, matching stage 11d, rather than a python one-liner: it is already a dependency of
+          # this workflow and it is the same tool a reader can run against the published artifact.
+          # `// -1` covers a missing or unparsable report — an absent count must not read as zero.
+          errs=$(jq '[.site[]?.alerts[]? | select(.pluginid == "100000") | .instances | length] | add // 0' zap-api-report.json 2>/dev/null || echo -1)
+          errs=${errs:--1}
+          # To STDOUT as well as the summary, and that is not duplication. The summary file is not
+          # in the job log, so a value written only there cannot be read back from a finished run —
+          # which made the first green run of this very assertion unverifiable: it passed, and
+          # nothing recorded whether it had computed 8 or 0. An assertion whose value cannot be
+          # observed afterwards is weaker than one that can, whatever it does to the exit code.
+          echo "Stage 11e — client-error responses: $errs (ceiling 8)"
+          echo "### Stage 11e — client-error responses: $errs (ceiling 8)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$errs" -lt 0 ]; then
+            echo "::error::could not read zap-api-report.json — the scan produced no parsable report, so neither assertion here means anything"
+            exit 1
+          fi
+          if [ "$errs" -gt 8 ]; then
+            echo "::error::$errs client-error responses, ceiling is 8 — a route that used to answer has stopped, or the scan degraded further"
             exit 1
           fi
           grep -E 'FAIL-NEW|WARN-NEW|PASS:' zap-api.log | tail -3 >> "$GITHUB_STEP_SUMMARY" || true

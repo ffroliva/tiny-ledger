@@ -19,11 +19,32 @@
 # against a ledger. Losing that quietly in exchange for coverage would be a worse trade than the
 # gap it closes.
 #
-# "Passive" still oversells it, so: importing the definition sends ONE REQUEST PER OPERATION, and
-# three of those are writes (POST an account, PUT a deposit, PUT a withdrawal). This scan therefore
-# WRITES TO THE LEDGER, using the contract's own example values rather than attack payloads. That
-# is harmless against a stack the `zap` job creates and destroys in the same run, and it is why
-# stage 11e runs AFTER the baseline rather than before it.
+# WHAT IT ACTUALLY REACHES, MEASURED FROM THE REPORT RATHER THAN FROM THE CONTRACT. These lines
+# used to say the scan "WRITES TO THE LEDGER, using the contract's own example values". All three
+# parts were false, and false in the direction that flatters the gate.
+#
+# ZAP's OpenAPI import substitutes NO path parameters -- `AccountUid` is declared `type: string,
+# format: uuid` with no `example:`, and no importer can chain a POST response into a later path
+# parameter anyway. So the requests go out verbatim:
+#
+#   /api/v1/accounts/{accountUid}/balance?consistency=strong
+#   /api/v1/accounts/{accountUid}/deposits/{depositUid}
+#
+# Measured on run 31278543144: alert `100000`, "A Client Error response code was returned by the
+# server", x8. EIGHT OF NINE OPERATIONS 4xx. Nothing is written -- the two PUTs never resolve to an
+# account -- and no balance is ever read. Two of the nine would 403 regardless, since the token is
+# minted for `alice` (`ledger:writer`, `ledger:reader`) while `/audit/entries` and
+# `/accounts/*/events` need `ledger:auditor`, which belongs to `dave`.
+#
+# WHAT SURVIVES THAT, and it is why this stage is still worth its minutes: passive header rules do
+# not care that a body is an error, so all nine responses ARE evaluated. Proven rather than
+# asserted -- rule 10035 fired x9 the moment HSTS was genuinely removed, on nine routes the
+# baseline never saw. What this scan does NOT do is exercise the API's data paths.
+#
+# ci.yml now gates on that client-error count with a ceiling of 8, because ZAP records those at
+# INFORMATIONAL risk and `zap_common.py` skips Informational when it sets the exit code -- so they
+# could never fail the job through the scanner. If the substitution is ever fixed, that number
+# drops and the ceiling should drop with the run that proves it.
 #
 # ── THE CHECK THAT MAKES A CLEAN REPORT MEAN ANYTHING ───────────────────────────────────────────
 # An inert token is invisible here: every route answers 401, the passive rules read nine error
@@ -49,9 +70,11 @@
 # looked. Findings gate from the next run on.
 #
 # THE FINDING IS ALSO THE ARGUMENT FOR STAGE 11e EXISTING. Rule 90004 fires on a response a browser
-# could embed; the baseline only ever reached 401s, and an error body has nothing to protect. Nine
-# routes with live 200 JSON responses — account balances among them — made the rule apply at once.
-# That class of finding was INVISIBLE to the edge scan, not tolerated by it.
+# could embed; the baseline only ever reached 401s on two URLs, so it had almost nothing to
+# evaluate. Nine routes gave the rule something to look at for the first time -- NOT, as this file
+# first claimed, nine live 200 JSON responses with account balances among them. See the corrected
+# paragraph above: eight of the nine are client errors. The coverage that found this is header
+# coverage, which does not depend on the body being useful.
 #
 # The red half of the gate's proof is that same run: with the header absent it reported WARN-NEW: 1
 # and zap-api-scan.py exited non-zero, so with the gate in place it would have failed. One variable
