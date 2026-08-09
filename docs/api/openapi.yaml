@@ -25,8 +25,13 @@ info:
     name: MIT
     identifier: MIT
 servers:
-  - url: /
-    description: The deployable itself — path versioning lives in the paths (§7.1).
+  # Path versioning lives in the paths (§7.1), so these carry an origin and nothing else. They are
+  # here because a client generated from this file needs somewhere to send: `url: /` gave Postman a
+  # `baseUrl` of `/`, which resolves to nothing and made every imported request unrunnable.
+  - url: https://app.localhost
+    description: The `full` profile, behind Traefik. Requires a token (§6.4).
+  - url: http://localhost:8080
+    description: The `standalone` profile — in-memory, no Docker, and unauthenticated (§1).
 tags:
   - name: accounts
     description: Opening accounts and reading account metadata.
@@ -362,12 +367,19 @@ paths:
 components:
   securitySchemes:
     bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
+      type: oauth2
       description: |
-        OIDC access token from Keycloak, validated as a resource server (§6.4). Enforcement arrives
-        with the `full` profile; the `standalone` profile runs with a fixed local principal.
+        **The API requires only a valid JWT** — it is a resource server and does not care how the
+        token was obtained (§6.4). The flow below is declared so a generated client can fetch one
+        without being told out of band, and it names this repository's **dev fixture**: Direct
+        Access Grants against the Keycloak realm the Compose stack starts. A real deployment
+        replaces `tokenUrl` and the client. The `standalone` profile needs none of this — it is
+        unauthenticated and runs with a fixed local principal (§1).
+      flows:
+        password:
+          tokenUrl: https://auth.localhost/realms/tiny-ledger/protocol/openid-connect/token
+          refreshUrl: https://auth.localhost/realms/tiny-ledger/protocol/openid-connect/token
+          scopes: {}
 
   parameters:
     AccountUid:
