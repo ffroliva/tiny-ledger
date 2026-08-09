@@ -4,7 +4,7 @@ allowed-tools: PowerShell
 ---
 
 ```powershell
-.\scripts\dev.ps1 doctor
+./scripts/dev.sh doctor
 ```
 
 **Run this before a demo, and first when anything behaves oddly.**

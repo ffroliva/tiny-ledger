@@ -4,7 +4,7 @@ allowed-tools: PowerShell
 ---
 
 ```powershell
-.\scripts\dev.ps1 run-e2e
+./scripts/dev.sh run-e2e
 ```
 
 **Report the count, not the exit code.** `ledger-cli/pyproject.toml` deselects the `e2e` marker by
