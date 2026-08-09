@@ -282,7 +282,7 @@ services:
   # survived the decision that reversed it. Replaced rather than amended: two accounts of the same
   # fact in one file is how a reader ends up restoring the published port this file removed.
   traefik:
-    image: traefik:v3.5@sha256:16acb89c6db341182970d6fdafece31303b0a380a8ed7aa51682e225229bf1d2
+    image: traefik:v3.7.10@sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac
     profiles: [app]
     # NO depends_on. Traefik used to wait for `app`, which was harmless until E2E_MODE=jar needed
     # the proxy WITHOUT the container -- the application runs on the host in that mode, while

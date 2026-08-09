@@ -305,7 +305,7 @@ verified in `dependabot-core`'s `docker/lib/dependabot/docker/file_fetcher.rb` โ
 from buildpacks (spec ยง12). So adding `package-ecosystem: docker` here would match nothing.
 
 Those images are pinned (`postgres:16-alpine`, `redis:7-alpine`, `confluentinc/cp-kafka:7.6.0`,
-`quay.io/keycloak/keycloak:26.4`, `traefik:v3.5` by digest,
+`quay.io/keycloak/keycloak:26.4`, `traefik:v3.7.10` by digest,
 `otel/opentelemetry-collector-contrib:0.158.0`), which is the right posture for reproducibility and
 the wrong one for staleness. **Stage 11d is what now tells someone when one of them grows a CVE**: a
 shell loop in the required `security` job over the image refs parsed out of
