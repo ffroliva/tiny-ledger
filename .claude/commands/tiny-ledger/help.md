@@ -4,7 +4,7 @@ allowed-tools: PowerShell
 ---
 
 ```powershell
-.\scripts\dev.ps1 help
+./scripts/dev.sh help
 ```
 
 Show the output verbatim — it is written to be read, not summarised.

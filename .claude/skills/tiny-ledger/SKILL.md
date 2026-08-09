@@ -11,7 +11,7 @@ Operates the tiny-ledger repository at `C:\development\github\tiny-ledger` — a
 **This skill never edits it.** Changes there go through that repo's PR flow (eight required checks).
 
 Core principle: **the commands are easy; the traps are not.** Every trap below cost real time on
-8–9 August 2026. `dev.ps1` encodes them so they are not rediscovered under pressure.
+8–9 August 2026. `dev.sh` encodes them so they are not rediscovered under pressure.
 
 ## When to Use
 
@@ -24,7 +24,7 @@ Core principle: **the commands are easy; the traps are not.** Every trap below c
 ## Quick Reference
 
 ```powershell
-.\scripts\dev.ps1 <command>
+./scripts/dev.sh <command>
 ```
 
 | Command | Does | Note |
@@ -39,7 +39,7 @@ Core principle: **the commands are easy; the traps are not.** Every trap below c
 | `clean-up` | `down -v` + clears the cached token | deletes the event store |
 | `selfcheck` | assertions only | starts nothing |
 
-Flags: `-RepoPath`, `-User alice|bob|carol|dave|trent`, `-Rebuild`.
+Flags: `--repo`, `--user alice|bob|carol|dave|trent`, `--rebuild`.
 
 ## Common Mistakes
 
