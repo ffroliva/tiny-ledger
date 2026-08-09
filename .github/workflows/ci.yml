@@ -662,6 +662,7 @@ jobs:
           set -uo pipefail
           n=$(grep -oE 'Total of [0-9]+ URLs' zap-api.log | grep -oE '[0-9]+' | tail -1)
           n=${n:-0}
+          echo "Stage 11e — ZAP API scan reached $n URLs (baseline reaches 3)"
           echo "### Stage 11e — ZAP API scan reached $n URLs (baseline reaches 3)" >> "$GITHUB_STEP_SUMMARY"
           if [ "$n" -le 3 ]; then
             echo "::error::the API scan reached $n URLs, no more than the baseline's 3 — the contract was not enumerated, so a clean report proves nothing"
@@ -692,6 +693,12 @@ jobs:
           # `// -1` covers a missing or unparsable report — an absent count must not read as zero.
           errs=$(jq '[.site[]?.alerts[]? | select(.pluginid == "100000") | .instances | length] | add // 0' zap-api-report.json 2>/dev/null || echo -1)
           errs=${errs:--1}
+          # To STDOUT as well as the summary, and that is not duplication. The summary file is not
+          # in the job log, so a value written only there cannot be read back from a finished run —
+          # which made the first green run of this very assertion unverifiable: it passed, and
+          # nothing recorded whether it had computed 8 or 0. An assertion whose value cannot be
+          # observed afterwards is weaker than one that can, whatever it does to the exit code.
+          echo "Stage 11e — client-error responses: $errs (ceiling 8)"
           echo "### Stage 11e — client-error responses: $errs (ceiling 8)" >> "$GITHUB_STEP_SUMMARY"
           if [ "$errs" -lt 0 ]; then
             echo "::error::could not read zap-api-report.json — the scan produced no parsable report, so neither assertion here means anything"
