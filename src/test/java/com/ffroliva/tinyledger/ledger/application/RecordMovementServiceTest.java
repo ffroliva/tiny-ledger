@@ -18,8 +18,10 @@ class RecordMovementServiceTest {
     private final List<LedgerEvent> published = new ArrayList<>();
     private final RecordMovementService service =
             new RecordMovementService(store, published::add, () -> Instant.parse("2026-08-03T12:00:00Z"));
+    // This suite is about movements, so the account limit is wired wide open: `owner -> 0` holdings
+    // against a limit of 1 can never refuse, and no test here would notice if it did.
     private final OpenAccountService openService = new OpenAccountService(
-            store, published::add, () -> Instant.parse("2026-08-03T12:00:00Z"), UUID::randomUUID);
+            store, published::add, () -> Instant.parse("2026-08-03T12:00:00Z"), UUID::randomUUID, owner -> 0, 1);
 
     private AccountId opened;
 

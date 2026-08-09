@@ -31,6 +31,7 @@ class ErrorCodeTest {
                         "/errors/currency-mismatch",
                         "/errors/version-conflict",
                         "/errors/idempotency-conflict",
+                        "/errors/account-limit-reached",
                         "/errors/rate-limit-exceeded",
                         "/errors/unauthenticated",
                         "/errors/forbidden",

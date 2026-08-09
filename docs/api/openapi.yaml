@@ -54,6 +54,10 @@ paths:
       summary: Open an account
       description: |
         Requires `ledger:writer`. The `accountUid` is server-generated (§6.3). Ownership *is* enforced.
+
+        `ledger:writer` is permission to write, **not an unlimited entitlement to create**: a caller
+        may self-open at most `ledger.accounts.max-per-owner` accounts (10 by default) and the next
+        one is a `409`. How many accounts a customer may hold is a bank decision, not a caller's.
       requestBody:
         required: true
         content:
@@ -77,6 +81,20 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: |
+            The caller already holds every account the bank lets them self-open (§6.5). A `403` would
+            be wrong — the roles are correct; what conflicts is state the caller can resolve.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: /errors/account-limit-reached
+                title: Account limit reached
+                status: 409
+                detail: owner already holds the maximum of 10 accounts
+                traceId: 7c6f2e1a9b4d5c30
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/EventStoreUnavailable' }
     get:
