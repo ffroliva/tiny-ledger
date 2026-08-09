@@ -4,7 +4,7 @@ allowed-tools: PowerShell
 ---
 
 ```powershell
-.\scripts\dev.ps1 standalone
+./scripts/dev.sh standalone
 ```
 
 This **streams the application log and does not return** — it is the running app. Ctrl+C stops it.
