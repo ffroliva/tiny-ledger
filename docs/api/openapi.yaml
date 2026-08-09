@@ -94,6 +94,7 @@ paths:
                 type: /errors/account-limit-reached
                 title: Account limit reached
                 status: 409
+                detail: You already hold the maximum of 2 accounts.
                 traceId: 7c6f2e1a9b4d5c30
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/EventStoreUnavailable' }
@@ -467,7 +468,7 @@ components:
             type: /errors/invalid-amount
             title: Invalid amount
             status: 400
-            detail: minorUnits must be a positive integer.
+            detail: The request is malformed. minorUnits must be a positive integer and currency a valid ISO-4217 code.
             traceId: 7c6f2e1a9b4d5c30
     Unauthenticated:
       description: No credential, or one that does not validate. `type` is `/errors/unauthenticated`.
@@ -479,6 +480,7 @@ components:
             type: /errors/unauthenticated
             title: Unauthenticated
             status: 401
+            detail: No valid credential was presented.
             traceId: 7c6f2e1a9b4d5c30
     Forbidden:
       description: |
@@ -492,6 +494,7 @@ components:
             type: /errors/forbidden
             title: Forbidden
             status: 403
+            detail: You do not have access to this account.
             traceId: 7c6f2e1a9b4d5c30
     AccountNotFound:
       description: No such account. `type` is `/errors/account-not-found`.
@@ -503,6 +506,7 @@ components:
             type: /errors/account-not-found
             title: Account not found
             status: 404
+            detail: No such account.
             traceId: 7c6f2e1a9b4d5c30
     Conflict:
       description: |
@@ -528,7 +532,7 @@ components:
                 type: /errors/version-conflict
                 title: Version conflict
                 status: 409
-                detail: The account stream moved on; retry the command.
+                detail: The account stream moved on. Retry the command.
                 traceId: 7c6f2e1a9b4d5c30
     RateLimited:
       description: Rate limit exceeded (§6.1). `type` is `/errors/rate-limit-exceeded`.
@@ -547,6 +551,7 @@ components:
             type: /errors/rate-limit-exceeded
             title: Rate limit exceeded
             status: 429
+            detail: Too many requests. Retry after the interval in the Retry-After header.
             traceId: 7c6f2e1a9b4d5c30
     NotAvailableInStandalone:
       description: |
@@ -579,6 +584,7 @@ components:
             type: /errors/event-store-unavailable
             title: Event store unavailable
             status: 503
+            detail: The event store is unreachable. Retry after the interval in the Retry-After header.
             traceId: 7c6f2e1a9b4d5c30
 
   examples:
@@ -588,7 +594,7 @@ components:
         type: /errors/currency-mismatch
         title: Currency mismatch
         status: 422
-        detail: The amount's currency differs from the account's.
+        detail: The amount currency differs from the account currency.
         traceId: 7c6f2e1a9b4d5c30
 
   schemas:
