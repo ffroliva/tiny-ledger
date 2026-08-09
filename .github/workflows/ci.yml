@@ -424,6 +424,10 @@ jobs:
       # of them used by this job.
       - name: Stage 9 — e2e scenarios over HTTPS (image, through Traefik)
         env:
+          # SS6.5: the account cap OFF for this stack. Each e2e run opens ~7 scratch accounts as
+          # `alice`, run-e2e.sh deliberately leaves Postgres alone, and this job runs the suite
+          # TWICE against the same stack -- so a per-owner cap refuses the second leg outright.
+          LEDGER_ACCOUNTS_MAX_PER_OWNER: "-1"
           LEDGER_PROFILE: full
           LEDGER_ISSUER_URI: https://auth.localhost/realms/tiny-ledger
           LEDGER_CLIENT_ID: ledger-test
@@ -450,6 +454,7 @@ jobs:
 
       - name: Stage 9b — e2e scenarios (jar on the host, plaintext)
         env:
+          LEDGER_ACCOUNTS_MAX_PER_OWNER: "-1"   # same reason as stage 9 above
           E2E_MODE: jar
           LEDGER_PROFILE: full
           # SAME issuer as the image leg. Keycloak is behind Traefik in BOTH modes — only the

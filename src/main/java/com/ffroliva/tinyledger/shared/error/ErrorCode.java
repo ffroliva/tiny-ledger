@@ -16,6 +16,7 @@ public enum ErrorCode {
     ACCOUNT_NOT_FOUND(404, "/errors/account-not-found", "Account not found"),
     IDEMPOTENCY_CONFLICT(409, "/errors/idempotency-conflict", "Idempotency conflict"),
     VERSION_CONFLICT(409, "/errors/version-conflict", "Version conflict"),
+    ACCOUNT_LIMIT_REACHED(409, "/errors/account-limit-reached", "Account limit reached"),
     CURRENCY_MISMATCH(422, "/errors/currency-mismatch", "Currency mismatch"),
     INSUFFICIENT_FUNDS(422, "/errors/insufficient-funds", "Insufficient funds"),
     RATE_LIMIT_EXCEEDED(429, "/errors/rate-limit-exceeded", "Rate limit exceeded"),
