@@ -95,7 +95,15 @@ function Set-LedgerEnv([string]$Profile) {
 
 function Invoke-Cli([string[]]$CliArgs) {
   Push-Location (Join-Path $RepoPath 'ledger-cli')
-  try { & uv run ledger-cli @CliArgs 2>&1 | Where-Object { $_ -notmatch 'keycloak\.(refresh|token)' } }
+  try {
+    & uv run ledger-cli @CliArgs 2>&1 | Where-Object { $_ -notmatch 'keycloak\.(refresh|token)' }
+    # Stop at the FIRST failed step. Every later step in the tour needs the account step 1 opens, so
+    # a 409 there used to print three cascading `account-not-found` 404s — four failures on screen
+    # where there was one refusal. Guarded here rather than at seven call sites; only `demo` calls this.
+    if ($LASTEXITCODE -ne 0) {
+      Die "Step failed (exit $LASTEXITCODE). Stopping: the remaining steps all depend on it."
+    }
+  }
   finally { Pop-Location }
 }
 
