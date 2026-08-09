@@ -177,12 +177,16 @@ loosely; injected, they assert exact values.
 
 ## Still to come
 
-Two sequence diagrams are deliberately not drawn yet, because they describe runtime behaviour rather
-than structure and would document intentions rather than facts:
+Two sequence diagrams are still not drawn:
 
 - **The write path** — validation, ownership check, global movement-UID lookup, optimistic append,
   outbox publication.
 - **The refused withdrawal** — the failure path through to the problem-detail response.
 
-They land once the corresponding code does. A sequence diagram written ahead of the code is a
-prediction, and this document is meant to be checkable.
+**The reason originally given here has expired, and saying so is the point.** This section read
+"they describe runtime behaviour rather than structure and would document intentions rather than
+facts… they land once the corresponding code does". The code landed — both paths are built, tested
+and exercised end to end by CI stage 9 — so a diagram of either would now document facts, and the
+deferral has quietly become an omission. It is recorded as one here rather than left wearing the
+older, better-sounding justification. Until they are drawn, `spec.md` §4.1 (write path) and §6.5
+(the refusal and its problem detail) are the prose versions, and they are current.
