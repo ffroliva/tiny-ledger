@@ -62,21 +62,24 @@ export LEDGER_BASE_URL="$BASE_URL"
 # takes a build to repair; this one takes an install, and there is no reason to learn about it
 # after a ~90 s buildpack run.
 if ! command -v uv >/dev/null 2>&1; then
-  # WSL is checked FIRST because on Windows it is the likelier cause, and the two need opposite
-  # advice. At a PowerShell prompt, bare `bash` resolves to C:\windows\system32\bash.exe — WSL,
-  # not Git Bash — and WSL is a separate Linux world from the Windows-side toolchain this
-  # repository actually uses: the JDK, mvnw, Docker Desktop and uv all live there. So `uv not
-  # found` under WSL almost always means the WRONG SHELL, and telling that reader to install uv
-  # sends them to fix something already installed, then to wonder why it changed nothing. A guard
-  # whose whole purpose is making the real cause readable must not name the wrong cause.
+  # WSL gets its own message because on Windows it is the likeliest way to arrive here, and the
+  # remedy differs. At a PowerShell prompt bare `bash` resolves to C:\windows\system32\bash.exe —
+  # WSL, not Git Bash — so a reader who installed uv on Windows lands in a Linux environment that
+  # cannot see it, and "install uv" sends them to reinstall something that already works.
   #
-  # No fallback to a Windows uv.exe from inside WSL, deliberately. It is findable, but every path
-  # this script then hands to Docker, pytest and the JVM would need /mnt/c translation, and a
-  # cross-boundary shim is far more machinery than one line of guidance is worth. These are POSIX
-  # scripts; on Windows they run in Git Bash.
+  # Deliberately NOT claiming the whole toolchain is absent here: measured on a dev machine, WSL
+  # had /usr/bin/java and /usr/bin/docker (Docker Desktop's WSL integration) and only uv missing.
+  # Naming tools that are in fact present would repeat the exact defect this branch exists to fix.
+  # State what was tested — uv — and offer both ways out.
+  #
+  # No fallback to a Windows uv.exe from inside WSL. It can be reached over /mnt/c, but every path
+  # this script then hands to Docker, pytest and the JVM would need translating, and a
+  # cross-boundary shim is more machinery than one line of guidance is worth.
   if grep -qi microsoft /proc/version 2>/dev/null || [ -n "${WSL_DISTRO_NAME:-}" ]; then
-    echo "::error::this is WSL, and the toolchain is on the Windows side — uv, the JDK and Docker Desktop are not installed in this Linux environment" >&2
-    echo 'Run it in Git Bash instead, naming the shell so PowerShell cannot pick WSL for you:' >&2
+    echo "::error::uv is not installed in this WSL environment — a uv installed on Windows is not visible here, and these are different worlds" >&2
+    echo 'Either install uv inside WSL:' >&2
+    echo '  curl -LsSf https://astral.sh/uv/install.sh | sh' >&2
+    echo 'or run it in Git Bash, naming the shell so PowerShell cannot pick WSL for you:' >&2
     echo '  & "C:\Program Files\Git\bin\bash.exe" scripts/e2e/run-e2e.sh' >&2
     exit 1
   fi
