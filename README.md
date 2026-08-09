@@ -109,27 +109,56 @@ Start it. `standalone` is the default profile; the log prints `AUTH DISABLED (st
 .\mvnw.cmd spring-boot:run      # Windows
 ```
 
-Open an account, and copy the `accountUid` from the response:
+Open an account, deposit into it, then read the balance. Account uids are server-generated, so both
+blocks below capture the uid into a variable rather than asking you to paste it between commands —
+**each block runs as one copy-paste, unedited.**
+
+**Unix shells** — Linux, macOS, WSL. Uses [`jq`](https://jqlang.github.io/jq/) to read one field out
+of the response, and `uuidgen` to mint a movement uid; both are conveniences for this snippet, not
+dependencies of the ledger. Without jq, drop the `| jq -r .accountUid` and copy the uid by hand.
+(Git Bash on Windows ships neither — use the PowerShell block below, which needs no extra tool.)
 
 ```bash
-curl -X POST localhost:8080/api/v1/accounts \
+ACC=$(curl -s -X POST localhost:8080/api/v1/accounts \
   -H 'Content-Type: application/json' \
-  -d '{"name":"ACC-001","currency":"GBP"}'
-```
+  -d '{"name":"ACC-001","currency":"GBP"}' | jq -r .accountUid)
 
-Deposit into it, then read the balance — substitute the `accountUid` you just got:
+MV=$(uuidgen)   # the movement uid is yours to choose — see the note below
 
-```bash
-curl -X PUT localhost:8080/api/v1/accounts/<accountUid>/deposits/11111111-1111-4111-8111-111111111111 \
+curl -X PUT "localhost:8080/api/v1/accounts/$ACC/deposits/$MV" \
   -H 'Content-Type: application/json' \
   -d '{"amount":{"currency":"GBP","minorUnits":10000}}'
 
-curl localhost:8080/api/v1/accounts/<accountUid>/balance
+curl "localhost:8080/api/v1/accounts/$ACC/balance"
 ```
 
-On Windows use `curl.exe` — PowerShell aliases bare `curl` to `Invoke-WebRequest`, which does not
-take these flags. PowerShell 7 passes the single-quoted JSON through unchanged; otherwise the
-arguments are identical.
+**PowerShell** — needs nothing beyond the JDK. `Invoke-RestMethod` parses the response itself, so
+there is no `jq` and no second tool to install.
+
+```powershell
+$acc = (Invoke-RestMethod -Method Post http://localhost:8080/api/v1/accounts `
+  -ContentType 'application/json' `
+  -Body '{"name":"ACC-001","currency":"GBP"}').accountUid
+
+$mv = [guid]::NewGuid()   # the movement uid is yours to choose — see the note below
+
+Invoke-RestMethod -Method Put "http://localhost:8080/api/v1/accounts/$acc/deposits/$mv" `
+  -ContentType 'application/json' `
+  -Body '{"amount":{"currency":"GBP","minorUnits":10000}}' | ConvertTo-Json
+
+Invoke-RestMethod "http://localhost:8080/api/v1/accounts/$acc/balance" | ConvertTo-Json
+```
+
+Do not mix the two: in PowerShell, bare `curl` is an alias for `Invoke-WebRequest` and will not take
+curl's flags. If you want the curl form on Windows, spell it `curl.exe`. (`uuidgen` ships with macOS
+and Linux; on Windows use the PowerShell block, which needs no such tool.)
+
+**Why the movement uid is generated rather than written into this page.** `PUT`ting a movement means
+*you* choose its uid, and that uid is the idempotency key — **globally, not per account** (§6.3). A
+literal uid printed in a README therefore works exactly once per running instance: open a second
+account, paste the same block, and the server correctly answers `409 Idempotency conflict`, because
+that key already belongs to a different account's movement. Generating it keeps the snippet
+re-runnable, which is the whole point of a quick start.
 
 **Now run the deposit again.** Same URL, same body, same balance. The movement UID in the path is the
 idempotency key, enforced by a unique index, so a retried request is answered rather than reapplied —
