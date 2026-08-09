@@ -185,6 +185,15 @@ bash scripts/e2e/run-e2e.sh                          # the seven e2e scenarios, 
 The e2e run expects the Compose stack already up and needs JDK, Docker and uv together — the full
 sequence, and how to read its output, is [`docs/docker.md`](docs/docker.md) §6.
 
+**On Windows, run these in Git Bash, not WSL.** At a PowerShell prompt bare `bash` resolves to
+`C:\windows\system32\bash.exe`, which is WSL — a separate Linux environment where none of this
+repository's toolchain is installed. Name the shell instead, and the script will tell you if you
+land in the wrong one anyway:
+
+```powershell
+& "C:\Program Files\Git\bin\bash.exe" scripts/e2e/run-e2e.sh
+```
+
 ## If you are reviewing this
 
 | You have | Read |
