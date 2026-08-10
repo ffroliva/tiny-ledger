@@ -14,4 +14,13 @@ public record MoneyWithdrawn(
         String reference,
         Money balanceAfter,
         String actor)
-        implements MovementEvent {}
+        implements MovementEvent {
+
+    /** Stored in {@code events.event_type}. Data, not a name — see {@link LedgerEvent#eventType()}. */
+    public static final String TYPE = "MoneyWithdrawn";
+
+    @Override
+    public String eventType() {
+        return TYPE;
+    }
+}
