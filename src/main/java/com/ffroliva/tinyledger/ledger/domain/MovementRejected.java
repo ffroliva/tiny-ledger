@@ -14,4 +14,13 @@ public record MovementRejected(
         Money amount,
         String reason,
         String actor)
-        implements MovementEvent {}
+        implements MovementEvent {
+
+    /** Stored in {@code events.event_type}. Data, not a name — see {@link LedgerEvent#eventType()}. */
+    public static final String TYPE = "MovementRejected";
+
+    @Override
+    public String eventType() {
+        return TYPE;
+    }
+}

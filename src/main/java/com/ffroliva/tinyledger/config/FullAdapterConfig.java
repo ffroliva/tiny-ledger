@@ -100,7 +100,7 @@ public class FullAdapterConfig {
                 .headers(
                         LedgerEvent.class,
                         event -> Map.of(
-                                "event-type", event.getClass().getSimpleName(),
+                                "event-type", event.eventType(),
                                 "stream-version", String.valueOf(event.version()),
                                 "occurred-at", event.occurredAt().toString(),
                                 "actor", event.actor()))
