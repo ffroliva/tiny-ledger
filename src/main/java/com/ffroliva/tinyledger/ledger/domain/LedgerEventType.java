@@ -1,46 +1,32 @@
 package com.ffroliva.tinyledger.ledger.domain;
 
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
- * The durable name of each ledger event, decoupled from its Java class name.
+ * Resolves a stored event name back to the class that reads it — the one direction the compiler cannot
+ * help with, because the input is a string arriving from the database.
  *
- * <p>These strings are <strong>data, not code</strong>. They are written to {@code events.event_type}
- * and published as the {@code event-type} Kafka header, so once a value has been stored it has to stay
- * readable forever. <strong>A value here can never change</strong> — a new spelling is a new event
- * type, never a rename of an existing one.
+ * <p>The forward direction is not here: {@link LedgerEvent#eventType()} is abstract, so the compiler
+ * refuses an event type that has not named itself, and writers ask the event directly. This table is the
+ * boundary parse for reads, keyed on the very same {@code TYPE} constants — so a name cannot be
+ * mistyped here, and cannot drift from the one the writer used.
  *
- * <p>Both call sites previously derived the name from {@code getClass().getSimpleName()}, which made an
- * IDE rename a silent data-loss event: the discriminator written from then on would change while every
- * row already stored kept the old spelling, and the reader throws on a name it does not know. The
- * root-package rename in {@code 5dd71a7} survived only because {@code getSimpleName()} drops the
- * package; renaming the class itself has no such protection.
+ * <p>What is left for a test rather than the compiler is *coverage*: nothing forces a new event type to
+ * appear in this map. {@code LedgerEventTypeTest} walks the sealed hierarchy and fails the build if one
+ * is missing.
  *
- * <p>{@code LedgerEventTypeTest} walks the sealed hierarchy rather than a hand-written list, so an event
- * type added without a name here fails the build instead of failing a replay.
+ * <p>These names are data. Once a value has been written it stays readable forever, so a value never
+ * changes — a new shape is a new event type alongside the old one, never a rename of it.
  */
 public final class LedgerEventType {
 
-    private static final Map<Class<? extends LedgerEvent>, String> NAMES = Map.of(
-            AccountOpened.class, "AccountOpened",
-            MoneyDeposited.class, "MoneyDeposited",
-            MoneyWithdrawn.class, "MoneyWithdrawn",
-            MovementRejected.class, "MovementRejected");
-
-    private static final Map<String, Class<? extends LedgerEvent>> TYPES =
-            NAMES.entrySet().stream().collect(Collectors.toUnmodifiableMap(Map.Entry::getValue, Map.Entry::getKey));
+    private static final Map<String, Class<? extends LedgerEvent>> TYPES = Map.of(
+            AccountOpened.TYPE, AccountOpened.class,
+            MoneyDeposited.TYPE, MoneyDeposited.class,
+            MoneyWithdrawn.TYPE, MoneyWithdrawn.class,
+            MovementRejected.TYPE, MovementRejected.class);
 
     private LedgerEventType() {}
-
-    /** The stored name of an event. */
-    public static String of(LedgerEvent event) {
-        String name = NAMES.get(event.getClass());
-        if (name == null) {
-            throw new IllegalStateException("No durable event type registered for " + event.getClass());
-        }
-        return name;
-    }
 
     /** The class a stored name deserialises to. */
     public static Class<? extends LedgerEvent> classOf(String eventType) {
@@ -51,8 +37,8 @@ public final class LedgerEventType {
         return type;
     }
 
-    /** The registry itself, so the test can prove it covers the sealed hierarchy. */
-    public static Map<Class<? extends LedgerEvent>, String> registered() {
-        return NAMES;
+    /** The table itself, so the test can prove it covers the sealed hierarchy. */
+    public static Map<String, Class<? extends LedgerEvent>> registered() {
+        return TYPES;
     }
 }

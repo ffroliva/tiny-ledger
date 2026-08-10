@@ -19,4 +19,20 @@ public sealed interface LedgerEvent permits AccountOpened, MovementEvent {
      * records how that absence is interpreted.
      */
     String actor();
+
+    /**
+     * The permanent name of this event in storage — written to {@code events.event_type} and published as
+     * the {@code event-type} Kafka header.
+     *
+     * <p><strong>Abstract on purpose.</strong> It was previously derived from
+     * {@code getClass().getSimpleName()}, which made a class rename a silent data-loss event, and briefly
+     * lived in a lookup table, which made an unregistered new event type a *test* failure rather than a
+     * compile failure. Declared here, the compiler will not let a new event type join this hierarchy
+     * without naming itself. Each implementation returns its own {@code TYPE} constant, and
+     * {@link LedgerEventType} maps the same constants back for reads.
+     *
+     * <p>The returned value is data: once written it is readable forever, so a value never changes. A new
+     * shape is a new event type standing alongside the old one, never a rename of it.
+     */
+    String eventType();
 }

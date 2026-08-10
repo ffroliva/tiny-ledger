@@ -73,7 +73,7 @@ public class PostgresEventStore implements EventStorePort {
                         "Event version mismatch: expected " + version + " but got " + event.version());
             }
 
-            String eventType = LedgerEventType.of(event);
+            String eventType = event.eventType();
             String payload = objectMapper.writeValueAsString(event);
 
             UUID clientMovementUid = clientMovementUidOf(event);

@@ -9,6 +9,14 @@ public record AccountOpened(
         AccountId accountId, long version, Instant occurredAt, String owner, String name, Currency currency)
         implements LedgerEvent {
 
+    /** Stored in {@code events.event_type}. Data, not a name — see {@link LedgerEvent#eventType()}. */
+    public static final String TYPE = "AccountOpened";
+
+    @Override
+    public String eventType() {
+        return TYPE;
+    }
+
     /**
      * {@code owner} is the account's identity, not decoration: {@code RecordMovementService} and
      * {@code StrongBalanceService} both authorise by calling {@code account.owner().equals(caller)}, so a
