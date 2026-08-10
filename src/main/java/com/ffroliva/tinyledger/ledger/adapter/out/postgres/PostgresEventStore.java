@@ -3,8 +3,8 @@ package com.ffroliva.tinyledger.ledger.adapter.out.postgres;
 import com.ffroliva.tinyledger.ledger.application.error.ConcurrencyConflictException;
 import com.ffroliva.tinyledger.ledger.application.error.DuplicateMovementException;
 import com.ffroliva.tinyledger.ledger.application.port.out.EventStorePort;
-import com.ffroliva.tinyledger.ledger.domain.AccountOpened;
 import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
+import com.ffroliva.tinyledger.ledger.domain.LedgerEventType;
 import com.ffroliva.tinyledger.ledger.domain.MoneyDeposited;
 import com.ffroliva.tinyledger.ledger.domain.MoneyWithdrawn;
 import com.ffroliva.tinyledger.ledger.domain.MovementEvent;
@@ -34,13 +34,7 @@ public class PostgresEventStore implements EventStorePort {
         return (rs, rowNum) -> {
             String eventType = rs.getString("event_type");
             String payload = rs.getString("payload");
-            return switch (eventType) {
-                case "AccountOpened" -> objectMapper.readValue(payload, AccountOpened.class);
-                case "MoneyDeposited" -> objectMapper.readValue(payload, MoneyDeposited.class);
-                case "MoneyWithdrawn" -> objectMapper.readValue(payload, MoneyWithdrawn.class);
-                case "MovementRejected" -> objectMapper.readValue(payload, MovementRejected.class);
-                default -> throw new IllegalStateException("Unknown event type: " + eventType);
-            };
+            return objectMapper.readValue(payload, LedgerEventType.classOf(eventType));
         };
     }
 
@@ -79,7 +73,7 @@ public class PostgresEventStore implements EventStorePort {
                         "Event version mismatch: expected " + version + " but got " + event.version());
             }
 
-            String eventType = event.getClass().getSimpleName();
+            String eventType = LedgerEventType.of(event);
             String payload = objectMapper.writeValueAsString(event);
 
             UUID clientMovementUid = clientMovementUidOf(event);

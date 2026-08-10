@@ -14,6 +14,7 @@ import com.ffroliva.tinyledger.ledger.application.port.out.IdGeneratorPort;
 import com.ffroliva.tinyledger.ledger.application.usecase.OpenAccountService;
 import com.ffroliva.tinyledger.ledger.application.usecase.RecordMovementService;
 import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
+import com.ffroliva.tinyledger.ledger.domain.LedgerEventType;
 import com.ffroliva.tinyledger.notification.adapter.out.log.LogNotificationAdapter;
 import com.ffroliva.tinyledger.notification.application.NotificationPort;
 import com.ffroliva.tinyledger.platform.AuditLagGauge;
@@ -100,7 +101,7 @@ public class FullAdapterConfig {
                 .headers(
                         LedgerEvent.class,
                         event -> Map.of(
-                                "event-type", event.getClass().getSimpleName(),
+                                "event-type", LedgerEventType.of(event),
                                 "stream-version", String.valueOf(event.version()),
                                 "occurred-at", event.occurredAt().toString(),
                                 "actor", event.actor()))
