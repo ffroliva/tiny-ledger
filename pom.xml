@@ -15,7 +15,7 @@
   <properties>
     <java.version>25</java.version>
     <spring-modulith.version>2.1.0</spring-modulith.version>
-    <testcontainers.version>1.20.5</testcontainers.version>
+    <testcontainers.version>1.21.4</testcontainers.version>
     <archunit.version>1.5.0</archunit.version>
     <cucumber.version>7.34.6</cucumber.version>
     <openapi-generator.version>7.24.0</openapi-generator.version>
@@ -75,7 +75,7 @@
     <sonar.host.url>https://sonarcloud.io</sonar.host.url>
     <sonar.organization>ffroliva-github</sonar.organization>
     <sonar.projectKey>ffroliva_tiny-ledger</sonar.projectKey>
-    <sonar-maven-plugin.version>5.1.0.4751</sonar-maven-plugin.version>
+    <sonar-maven-plugin.version>5.7.0.6970</sonar-maven-plugin.version>
 
     <!-- TWO paths, comma-separated, and that is the whole reason the `it` profile writes its JaCoCo
          data to a separate file. CI runs unit and integration on different runners, so neither ever
