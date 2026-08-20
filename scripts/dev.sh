@@ -30,7 +30,7 @@ die()  { printf "${R}%s${N}\n" "$*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    help|status|doctor|standalone|full|demo|run-e2e|clean-up|selfcheck) COMMAND=$1; shift ;;
+    help|status|doctor|standalone|full|demo|run-e2e|stop|clean-up|selfcheck) COMMAND=$1; shift ;;
     --user) USER_NAME=${2:?--user needs a name}; shift 2 ;;
     --repo) REPO=${2:?--repo needs a path}; shift 2 ;;
     --rebuild) REBUILD=1; shift ;;
@@ -64,6 +64,16 @@ port_owner() {
     name=$(ss -ltnp 2>/dev/null | grep -E "[:.]${port}[[:space:]]" | grep -oE 'users:\(\("[^"]+' | head -1 | sed 's/.*"//' || true)
     [ -n "$name" ] && { printf '%s\n' "$name"; return; }
   elif command -v netstat >/dev/null 2>&1; then
+    # `netstat -ano` carries the PID; `netstat -an` does not. Git Bash has neither lsof nor ss, so
+    # this is the branch Windows actually takes — and it used to answer "a host process", which
+    # names a symptom and withholds every fact needed to act on it. Measured 9 Aug: the report
+    # said "held by a host process" for a java process whose pid was two commands away.
+    pid=$(netstat -ano 2>/dev/null | grep -E "[:.]${port}[[:space:]]+.*LISTENING" | awk '{print $NF}' | head -1 || true)
+    if [ -n "$pid" ]; then
+      name=$(tasklist //FI "PID eq $pid" //NH //FO CSV 2>/dev/null | head -1 | cut -d, -f1 | tr -d '"' || true)
+      printf '%s (pid %s)\n' "${name:-a host process}" "$pid"
+      return
+    fi
     grep -qE "[:.]${port}[[:space:]]+.*LISTEN" <(netstat -an 2>/dev/null) && { printf 'a host process\n'; return; }
   fi
   name=$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | grep ":${port}->" | head -1 | cut -f1 || true)
@@ -135,7 +145,8 @@ COMMANDS
   full          Compose stack, HTTPS via Traefik. --rebuild forces the image build
   demo          five-command tour of whichever mode is up
   run-e2e       the seven e2e scenarios (needs full). Removes app+traefik on exit
-  clean-up      down -v, delete the event store, clear the cached token
+  stop          stop everything and KEEP the data. Frees port 8080 too
+  clean-up      stop everything and DELETE the event store + cached token
   selfcheck     the script's own assertions. Starts nothing
 
 TYPICAL FLOWS
@@ -196,7 +207,13 @@ doctor)
   o8080=$(port_owner 8080 || true)
   case "$o8080" in "") diag 'port 8080' ok 'free for standalone' ;;
     *tiny-ledger*) diag 'port 8080' ok "$o8080" ;;
-    *) diag 'port 8080' warn "held by $o8080 — standalone will refuse to start" ;; esac
+    *) diag 'port 8080' warn "held by $o8080 — standalone will refuse to start"
+       # A warning without a remedy makes the reader go and find one. Print the command.
+       case "$o8080" in
+         *"(pid "*) p=${o8080##*(pid }; p=${p%)}
+                    printf '         fix: ./scripts/dev.sh stop      (or: taskkill //PID %s //F)\n' "$p" ;;
+         *)         printf '         fix: ./scripts/dev.sh stop\n' ;;
+       esac ;; esac
 
   o5432=$(port_owner 5432 || true)
   case "$o5432" in "") diag 'port 5432' ok 'free' ;;
@@ -359,6 +376,36 @@ clean-up)
   owner=$(port_owner 8080 || true)
   [ -z "$owner" ] || warn "Something still holds 8080 ($owner) — a leftover standalone run. Stop it before 'standalone'."
   ok "Clean. Next: ./scripts/dev.sh full   (or standalone)"
+  ;;
+
+stop)
+  # The counterpart to `clean-up`, and the difference is the event store. `stop` halts everything
+  # and KEEPS the data; `clean-up` deletes it. Two verbs because they answer different questions:
+  # "I am finished for now" and "I want a clean round". Conflating them loses data by accident.
+  say "Stopping everything. The event store is KEPT — use clean-up to delete it."
+
+  if docker ps -q --filter 'name=tiny-ledger' | grep -q .; then
+    # --profile app is mandatory: without it Compose leaves the app container up, removes no
+    # network, and still exits 0. No -v here, deliberately.
+    (cd "$REPO" && docker compose -f "$COMPOSE" --profile app down)
+  else
+    echo "  no tiny-ledger containers running"
+  fi
+
+  owner=$(port_owner 8080 || true)
+  case "$owner" in
+    "")        echo "  port 8080 already free" ;;
+    *"(pid "*) p=${owner##*(pid }; p=${p%)}
+               echo "  stopping $owner on port 8080"
+               if command -v taskkill >/dev/null 2>&1; then taskkill //PID "$p" //F >/dev/null 2>&1 || true
+               else kill "$p" 2>/dev/null || true; fi
+               sleep 1
+               [ -z "$(port_owner 8080 || true)" ] && ok "  port 8080 released" \
+                 || warn "  port 8080 still held — stop it by hand (pid $p)" ;;
+    *)         warn "  port 8080 held by $owner — this script cannot identify the pid; stop it by hand" ;;
+  esac
+
+  ok "Stopped. Data kept. Next: ./scripts/dev.sh full   (or standalone)"
   ;;
 
 selfcheck)
