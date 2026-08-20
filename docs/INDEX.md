@@ -28,52 +28,12 @@ Quadrants are Diátaxis, per spec §8.1.
 | `adr/0004-readiness-does-not-gate-on-lag.md` | Touching the health probes, the readiness group, or the lag gauge — or asking why `E9` was rewritten rather than implemented as specified | Explanation |
 | `adr/0005-kubernetes-is-the-production-target.md` | Adding a meter tag, a resource attribute or anything an operator consumes — or asking where this deploys, why Compose is not it, and why there are no manifests | Explanation |
 | `agentic-workflow.md` | Understanding how this was built — including §5, where the agents were wrong, and §7, the per-phase gate record | Explanation |
-| `_archive/reviews/` | Checking that the review claims in `agentic-workflow.md` are real — the council reports and assessments as they were written | Reference |
-| `_archive/` (start at its `README.md`) | Tracing *why* a decision was taken, or auditing what an agent was actually instructed to do. **Working artifacts, not documentation** — the README states which paths inside them are stale | — |
-| `superpowers/plans/` and `superpowers/specs/` | The same kind of artifact as `_archive/plans/`, for the **five most recent** pieces of work — step 9's probes and tracing, step 10's e2e runtime, the buildpack image, and the TLS/Traefik pass. **All delivered; none archived yet.** Added to this table 2026-08-08, having been absent while the directory held five files | — |
 
 The Diátaxis quadrants above (spec §8.1) are the ones that have documents. `docs/` still has no
 `how-to/` or `tutorial/` tree — both directories held a `.gitkeep` and nothing else, and were removed
 rather than left as a promise. The quadrant is not empty any more, though: the README is the
 tutorial, and `docker.md` and `ledger-cli.md` are the two operational runbooks, kept as flat files
 rather than reinstating a tree for two documents.
-
-## Archived plans, newest first
-
-**These are agent execution scripts, not documentation.** They read "Step 1: write the failing test",
-carry commit heredocs, and run to 8,838 lines — over five times the length of `spec.md` — because they were
-written to be executed by a subagent, not read by a person. They are archived rather than deleted so
-the record of *why* each change was made survives, and so a reviewer can check the account in
-`agentic-workflow.md` against the instructions that actually produced the code. **Nothing here is
-current contract.** Where a plan and `spec.md` disagree, `spec.md` wins.
-
-Everything under `_archive/` is delivered or superseded, and so is everything under
-`superpowers/` — **there is still no "in flight" plan directory**, but that sentence was doing more
-work than it could carry until 2026-08-08: `docs/superpowers/plans/` was recreated after the
-2026-08-06 move and has held five delivered plans since, unlisted by this table and described by
-`_archive/README.md` as a path that no longer exists. Both are now accurate. What is being built next
-is §14 of `spec.md`; what is known-open is its *Open issues* section.
-
-The two directories should be merged — five delivered plans in a second location is exactly the
-"two sources of truth" shape `AGENTS.md` opens by warning about. That is named here rather than done,
-because moving them rewrites paths cited from `agentic-workflow.md` and the commit history, and a
-rename is only proven by asserting the old name is gone (`AGENTS.md`, trap 2).
-
-| Plan | State |
-|---|---|
-| `_archive/plans/2026-08-06-battle-testing.md` | **Delivered** — the concurrency/idempotency pass: N2, N19–N23, P7, P10, E6, E7, E10–E12 covered, four production defects fixed and §6.3's racing-duplicate mechanism corrected against a measurement (spec v3.13–v3.31). **Carries a correction header listing six places the plan itself was wrong** — most usefully "the spec's §12 catalogue", which is §9.3, and a write-budget change that would have thinned the very margin it was protecting |
-| `_archive/plans/2026-08-07-admin-on-behalf-of.md` | **Applied through task 5** — `ledger:admin` exists in `src/main`: `CallerPrincipal:55` reads the authority, `RecordMovementService:65` is the one comparison it widens, and the acting principal reaches the audit trail on the event. **Fully applied** — task 6 landed spec v3.12, whose revision-history row carries both this plan and the 2026-08-06 documentation pass (§5, §8–§8.6, §10, §12.1, §14, the glossary and *Traceability*) |
-| `_archive/plans/2026-08-06-security-hardening.md` | **Delivered** — closed the four security gaps spec v3.10 recorded open (rate limiter §6.1, `aud` validation, `x-fapi-interaction-id` bound/validated, `/error` path leak excluded) plus CI stage 11 (`gitleaks`); spec v3.11 close-out |
-| `_archive/plans/2026-08-06-roles-and-keycloak-realm.md` | **Delivered** — `ledger:reader`/`writer`/`auditor` enforced on the `full` filter chain, a real Keycloak container and realm behind the integration suite; spec v3.10 close-out |
-| `_archive/plans/2026-08-05-spec-v3.9-and-proposal-repair.md` | Delivered — spec v3.9 truth alignment folded into `docs/spec.md`; the admin on-behalf-of proposal repaired, not applied |
-| `_archive/plans/2026-08-05-plan-3-security-and-authorization.md` | **Delivered (Plan 3)** — council-reviewed three times; the third round's 13 P0s are folded into the task text, so the plan reads as executed rather than as first drafted |
-| `_archive/plans/2026-08-05-plan-3-research.md` | Research input to the above |
-| `_archive/plans/2026-08-04-error-handling-catalogue-proposal.md` | Approved, folded into Plan 3 |
-| `_archive/plans/2026-08-04-spec-admin-on-behalf-of-proposal.md` | Approved; its decisions (D1–D8) were executed by `_archive/plans/2026-08-07-admin-on-behalf-of.md`. Its "targets spec v3.9" is stale — v3.9 was spent on the truth-alignment pass above; the proposal's own target version is `TBD`, assigned by the applying plan |
-| `_archive/plans/2026-08-04-open-banking-standards-review.md` | Four items approved. **Contains two known errors** corrected by the Plan 3 research: the DPoP DSL is `@since 7.1` and opt-in, not "6.5+ auto-validated", and Keycloak is 26.7 |
-| `_archive/plans/2026-08-04-full-persistence.md` | Delivered (Plan 2) |
-| `_archive/plans/2026-08-03-standalone-core.md` | Delivered (Plan 1) |
-| `_archive/specs/2026-08-05-spec-v3.9-and-proposal-repair-design.md` | The design doc behind `_archive/plans/2026-08-05-spec-v3.9-and-proposal-repair.md` |
 
 ## Keeping this honest
 

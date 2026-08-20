@@ -5,21 +5,11 @@
 
 ---
 
-## Why this document is part of the deliverable
+## Why this document exists
 
-The coding-stage invitation that prompted this exercise says, verbatim:
-
-> *"Feel free to use AI tools (e.g., Copilot, Claude, Cursor) if they're part of your normal
-> workflow. We're mainly interested in how you think and approach problems, so just be ready to talk
-> through your solution and decisions during the interview."*
-
-And the interview prep pack says the round grades **domain modelling and code clarity**, plus
-*"share your assumptions, and discuss potential shortcomings."*
-
-Taken together: the reasoning is the artefact being assessed, and the tooling that produced it is
-fair game. So this repository ships the process alongside the code. Every decision below is
-traceable to a file in `docs/` or a commit in the history — nothing here is a claim without an
-artefact behind it.
+Most repositories built with AI assistance show you the output and ask you to take the process on
+trust. This one ships the process alongside the code. Every decision below is traceable to a file in
+`docs/` or a commit in the history — nothing here is a claim without an artefact behind it.
 
 The honest framing: **agents did the typing; the engineering judgement is mine, and the record shows
 where I overruled them.** §6 is that record, and it is the most useful part of this document.
@@ -45,7 +35,7 @@ It is the same argument as lazy loading, applied to instructions.
 ## 2. The pipeline
 
 Adapted from the **superpowers** SDD workflow (obra/superpowers, v4.3.1), already proven on prior
-projects. The review artefacts it produced are kept under `docs/_archive/reviews/`.
+projects.
 
 ```
   intake  ──►  spec  ──►  plan  ──►  task briefs  ──►  execute  ──►  review  ──►  integrate
@@ -60,12 +50,9 @@ projects. The review artefacts it produced are kept under `docs/_archive/reviews
 
 Read the primary sources directly; never work from a paraphrase.
 
-For this project: the assignment and prep PDFs were pulled from Gmail, the prior V2 specification
-from Google Drive, and the surrounding process state (dates, stages, who said what) reconstructed
-from the mailbox by the `pipeline` skill. Both PDFs are kept on disk under `docs/source/` and
-**deliberately not committed** — `.gitignore:10-12` excludes that directory, because the brief is the
-assessor's material to publish, not this repository's. The derived contract is `docs/spec.md`, and §1
-of it is where a reader checks what was actually asked for.
+For this project the source material was read first-hand rather than summarised, and kept on disk
+outside the tree. The derived contract is `docs/spec.md`, and §1 of it is where a reader checks what
+was actually asked for.
 
 **Rule:** the primary source is read first-hand and kept beside the work derived from it, whether or
 not licensing lets it be committed.
@@ -82,12 +69,11 @@ consequences, and the alternatives rejected. An ADR exists so that a future read
 
 ### Stage 3 — Plan
 
-`docs/superpowers/plans/YYYY-MM-DD-<slug>.md` while in flight, archived to `docs/_archive/plans/`
-once delivered — which is where all eleven of this repository's plans now sit, listed newest-first in
-`docs/INDEX.md`. The spec says what the system is; the plan says in what order it gets built and what
-"done" looks like at each step. `spec.md` §14 is the coarse version of this. **A plan is an execution
-script for an agent, not documentation**, which is why they are archived rather than routed to as
-current material.
+A dated plan file per work package while in flight. The spec says what the system is; the plan says
+in what order it gets built and what "done" looks like at each step. `spec.md` §14 is the coarse
+version of this. **A plan is an execution script for an agent, not documentation**, which is why the
+eleven plans this repository ran were removed from the tree once delivered — the commit history is
+the durable record.
 
 ### Stage 4 — Task briefs
 
@@ -145,8 +131,7 @@ judgement I would otherwise have made from memory, under time pressure, at 22:00
 
 The skills are agent *tooling*, not part of the deliverable, so they are not committed here — a ledger
 exercise carrying ~150 files of another project's repository is noise, and its licence obligations are
-someone else's to carry. What is committed is the trail they produced: the council reports and
-assessments under `docs/_archive/reviews/`, the per-task commits, and this document. Provenance and
+someone else's to carry. What is committed is the trail they produced: the per-task commits and this document. Provenance and
 licences, because a process claim you cannot trace is marketing:
 
 | Source | Version | Licence | Provides |
@@ -195,8 +180,6 @@ Kept deliberately, because a process document that only records successes is mar
 
 | What happened | Consequence |
 |---|---|
-| A prior session recorded a recruiter conversation as arriving "by email" when it was a phone call. Repeated across four files before anyone checked the mailbox. | Corrected. **Lesson: an agent's confident record of a source is not the source.** Verified against Gmail; the compensation figure is now explicitly marked as recollection, not a quoted document. |
-| The same session reported a GitHub application as "stalled 32 days". It had been rejected on day six, and a third application to the same company was missing from the tracker entirely. | Corrected. **Lesson: absence of a signal was read as absence of an event.** The rejection was sitting in the inbox the whole time. |
 | The minimalism skill argued hard against building this platform at all. | Overruled deliberately — §6. It was right about the brief and wrong about the goal. |
 | A Plan 2 implementation agent was still running when its session was closed. It kept working, finished all eleven assigned fixes, ran its own test suites — and then had no orchestrator left to report to. The work sat committed but unreviewed and unrecorded until the next session went looking for it. | **Lesson: an agent's output is only as durable as the process that collects it.** A replacement agent dispatched into the same repository detected the collision from file timestamps, refused to edit anything, and aborted — which is the behaviour you want, and it happened because the dispatch brief named the hazard. The recovery was to review the orphan's diff on its own merits, since its reasoning was gone and only its diff could be audited. |
 | That same orphaned wave wrote a dead-letter test that subscribed to `ledger.events.DLT` while Spring Kafka 4 publishes to `<topic>-dlt` by default. Its own test would have failed on a 60-second timeout. | Caught twice independently — by the orphan itself on a later run, and by a reviewer that decompiled `spring-kafka-4.1.0.jar` to confirm the constant. **Lesson: "the framework's default is X" is a claim about a jar, not a memory.** The destination is now named explicitly rather than inherited. |
@@ -211,7 +194,7 @@ Kept deliberately, because a process document that only records successes is mar
 
 ## 6. Decision log — human over agent
 
-The section that matters most in an interview, because it is where judgement is visible.
+The section that matters most, because it is where judgement is visible.
 
 **Decision: build the full platform, not the minimal solution.**
 
@@ -222,13 +205,12 @@ record that the argument was made and made well.
 
 I overrode it. The reasoning:
 
-1. The brief is a floor, not a ceiling. It grades *approach*, and approach is more visible across a
-   system than across four endpoints.
-2. The follow-up round is a conversation about the submission. A larger surface produces more to
-   talk about — provided the trade-offs are deliberate and stated, which is what `spec.md` is for.
-3. The role in question is a backend engineering role at a payments company. Optimistic concurrency,
-   idempotency, outbox delivery and cache invalidation are the actual daily work, and demonstrating
-   them beats asserting them.
+1. The brief is a floor, not a ceiling. What this project sets out to demonstrate is *approach*, and
+   approach is more visible across a system than across four endpoints.
+2. A larger surface produces more to talk about — provided the trade-offs are deliberate and stated,
+   which is what `spec.md` is for.
+3. Optimistic concurrency, idempotency, outbox delivery and cache invalidation are the actual daily
+   work of a payments backend, and demonstrating them beats asserting them.
 
 **The hedge that makes it safe:** the repository runs in two modes from one codebase.
 `./mvnw spring-boot:run` is in-memory, unauthenticated and dependency-free — the brief, satisfied
@@ -252,12 +234,11 @@ groups, ruff pinned exactly.** Not because each is uniquely correct, but because
 in the same estate is a maintenance tax with no offsetting benefit. Consistency is a decision, and
 this is it.
 
-**Decision: hold the scope; move the deadline.** The submission window is self-imposed — nothing
-fixes it except the interview slot chosen after it. When the spec's scope collided with a two-day
-window, the instruction was explicit: the scope stands, the schedule bends. Recorded because the
-reflex under deadline pressure is to cut quietly, and a cut here would remove exactly the surface
-this submission exists to demonstrate. The brief-compliant path is already protected by the dual
-run mode; reducing scope would have hedged a hedge.
+**Decision: hold the scope; move the deadline.** The deadline was self-imposed. When the spec's
+scope collided with a two-day window, the instruction was explicit: the scope stands, the schedule
+bends. Recorded because the reflex under deadline pressure is to cut quietly, and a cut here would
+remove exactly the surface this project exists to demonstrate. The minimal path is already protected
+by the dual run mode; reducing scope would have hedged a hedge.
 
 **Decision: Starling Bank's public API is the reference model for the API surface.** Convention
 questions — resource naming, money representation, identifier style, error shape, idempotency
@@ -439,9 +420,9 @@ had both on deposit and one on withdrawal.
 
 | Question | Where to look |
 |---|---|
-| What was actually asked for? | `docs/spec.md` §1 and §13 — the brief PDFs themselves are the assessor's material and are gitignored, not committed (§2, Stage 1) |
+| What was actually asked for? | `docs/spec.md` §1 and §13 |
 | What was decided, and why? | `docs/spec.md` and `docs/adr/` |
-| In what order was it built? | `docs/_archive/plans/*.md`, and the commit history — one commit per task, each landing only after its review was accepted |
-| Was each step reviewed? | The council reports and assessments are committed under `docs/_archive/reviews/`. The per-task ledger and review packages that produced them are session-local working state and are not — what survives in the repo is those reports, §7 above, the commit messages, and this document |
+| In what order was it built? | The commit history — one commit per task, each landing only after its review was accepted |
+| Was each step reviewed? | Every task commit landed only after a review pass it had to survive; §5 records the ones that caught something |
 | Does it do what it claims? | `./mvnw verify` — unit, architecture, BDD, use-case (starts no containers); `./mvnw verify -Pit` — the integration suite against real Postgres, Redis, Kafka **and Keycloak**. No fixed count is quoted here on purpose: count `<testcase ` in that run's own `target/failsafe-reports/*.xml` and read it beside that run's exit code (§5, AGENTS trap 3) — a number carried in prose goes stale the next time a test is added. `docker compose -f docker/docker-compose.yml up -d` then starts the `full` profile's four backing services — Postgres, Redis, Kafka **and Keycloak**, each with a healthcheck — and `--profile app` adds **the application itself and Traefik**, so `full` is one `up` away rather than a jar you run by hand. (This row read "there is no Keycloak service and no app service in that file" until 2026-08-08; both have existed since the roles/realm work and issue #11 respectively.) The host jar is still supported and still exercised, as `E2E_MODE=jar` — see [`docker.md`](docker.md) |
 | What was left out on purpose? | `docs/spec.md` §13 non-goals and §15 assumptions |

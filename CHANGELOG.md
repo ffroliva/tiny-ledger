@@ -199,7 +199,7 @@
   in place rather than the table renumbered, because six citations across three files name absolute
   stage numbers and no gate would catch them drifting.
 - `docs/how-to/` and `docs/tutorial/`, both empty and both routed to. The eleven delivered plans
-  (8,838 lines of agent execution script, five times the spec) moved to `docs/_archive/`.
+  (8,838 lines of agent execution script, five times the spec) removed from the tree; the commit history is the record.
   `docs/agentic-workflow.md` deliberately stays — it is the readable account of how this was built.
 
 ### Security

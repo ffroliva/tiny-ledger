@@ -13,7 +13,7 @@ diagram and the code disagree, that is a drift alarm, not a documentation bug.
 
 **The question: why are there two ways to run this, and which one is "the real one"?**
 
-Both are. The take-home-compliant run and the full production stack execute *the same compiled domain
+Both are. The minimal run and the full production stack execute *the same compiled domain
 and application code*. Only the adapters differ, and they are selected by Spring profile in a single
 composition root (§4.5).
 
@@ -27,7 +27,7 @@ flowchart TB
         AGG --- UC --- PORTS
     end
 
-    subgraph standalone["profile: standalone — the brief as written"]
+    subgraph standalone["profile: standalone — minimal, no infrastructure"]
         direction TB
         S1["InMemoryEventStore"]
         S2["MapBalanceCache"]

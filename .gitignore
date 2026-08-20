@@ -3,8 +3,7 @@ HANDOFF.md
 
 # Local agent state and tooling. The skills this project was built with are credited by source and
 # licence in docs/agentic-workflow.md §3; vendoring ~150 files of another project's repository into
-# a ledger exercise is tooling, not deliverable. The review artefacts those skills produced — the
-# council reports and assessments — are kept, under docs/_archive/reviews/.
+# a ledger exercise is tooling, not deliverable.
 .superpowers/
 
 # `.claude/` is deliberately NOT ignored, so a decision to commit agent configuration stays a
@@ -18,8 +17,7 @@ HANDOFF.md
 # Build output
 target/
 
-# Source briefs held for reference only. They are the assessor's material, not
-# ours to redistribute, private repo or not. Kept on disk, never committed.
+# Reference material held on disk only — third-party documents, never committed.
 docs/source/
 
 # Tooling caches
@@ -67,3 +65,6 @@ app-after-restart.log
 # same generator in-run. Ignoring the directory rather than the file extensions is deliberate:
 # an extension list is a rule you have to remember to extend.
 docker/tls/
+
+# IDE
+.idea/

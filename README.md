@@ -10,30 +10,9 @@
 [![Duplication](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=duplicated_lines_density&branch=main)](https://sonarcloud.io/component_measures?id=ffroliva_tiny-ledger&metric=duplicated_lines_density&branch=main)
 [![Licence: MIT](https://img.shields.io/github/license/ffroliva/tiny-ledger)](LICENSE)
 
-<!-- Every badge above is LIVE: each is fetched from CI or SonarCloud at render time and cannot drift
-     from the thing it claims. That is deliberate, and it is why there is no hand-written "Java 25" or
-     "Spring Boot 4.1" badge here — a version badge is a copy of pom.xml with nothing keeping the two
-     in step, and this repository has already spent a documentation pass deleting exactly that kind of
-     claim (spec v3.8, finding CR14). The toolchain versions live in `pom.xml` and are listed under
-     Prerequisites below, once.
-
-     The coverage figure is unit AND integration coverage combined (.github/workflows/ci.yml merges
-     two JaCoCo reports), not the unit suite alone — see docs/spec.md §9.
-
-     EVERY BADGE IS PINNED TO `main` (`?branch=main` / `&branch=main`), and that is a statement rather
-     than a default. Without it the Sonar badges fall back to the main branch implicitly and the CI
-     badge to the default branch — correct by accident, and silently wrong the day either default
-     changes. Pinned, these badges mean one thing on every branch and in every fork: *this is the state
-     of main*.
-
-     They deliberately do NOT follow the branch you are reading. A badge URL is static text in a file,
-     so per-branch badges would mean editing this block on every branch — a README conflict in every
-     pull request, and a stale claim the first time someone forgets. It would not work anyway:
-     SonarCloud analyses feature branches as PULL REQUESTS, and a pull request has no badge URL. The
-     honest answer to "is this branch healthy" is the pull request's own checks, which are already
-     required and already visible on the PR.
-
-     The licence badge is not pinned because a licence has no branch. -->
+<!-- Every badge is live — fetched from CI or SonarCloud at render time, so none can drift from what
+     it claims — and every one is pinned to `main`, so it means the same thing in every fork and on
+     every branch. Toolchain versions live in `pom.xml`, listed under Prerequisites below, once. -->
 
 An event-sourced banking ledger — accounts, deposits, withdrawals, balances — built as a Spring
 Modulith modular monolith. It runs as a single JDK process with nothing installed, or against
@@ -43,7 +22,7 @@ Postgres, Redis and Kafka, from one codebase.
 
 - [Prerequisites](#prerequisites)
 - [Quick start](#quick-start) — running in three commands
-- [If you are reviewing this](#if-you-are-reviewing-this) — where to look, by how long you have
+- [Where to start](#where-to-start) — what to read, by how long you have
 - [Two run modes](#two-run-modes)
 - **[Running with Docker](docs/docker.md)** — the `full` profile end to end: image, stack, token,
   a real deposit, teardown. Verified commands, and the responses that look like faults but are not
@@ -194,14 +173,14 @@ land in the wrong one anyway:
 & "C:\Program Files\Git\bin\bash.exe" scripts/e2e/run-e2e.sh
 ```
 
-## If you are reviewing this
+## Where to start
 
 | You have | Read |
 |---|---|
 | **10 minutes** | [`docs/architecture.md`](docs/architecture.md) — three diagrams: the two run modes, the module boundaries, the domain |
 | **20 minutes** | [`docs/agentic-workflow.md`](docs/agentic-workflow.md) — how this was built, including §5, where the agents were wrong |
 | **Longer** | [`docs/spec.md`](docs/spec.md) — the full contract. [`docs/INDEX.md`](docs/INDEX.md) navigates everything else |
-| **You want to judge the code** | `git log` — one commit per reviewed task, with the reasoning in the messages |
+| **You want to read the code** | `git log` — one commit per reviewed task, with the reasoning in the messages |
 
 ## Two run modes
 
@@ -212,8 +191,8 @@ One codebase, one set of domain classes. Only the adapters differ.
 | **`standalone`** (default) | In-memory event store and cache. No database, broker or auth. Binds `127.0.0.1` only |
 | **`full`** | PostgreSQL, Redis, Kafka (KRaft) and Keycloak. JWT authentication and role authorisation |
 
-That duality is the design's central bet: a reviewer who wants the ledger from the brief gets it in
-one command; a reviewer who wants production concerns gets those too, without forking the code that
+That duality is the design's central bet: a reader who wants the minimal ledger gets it in
+one command; a reader who wants production concerns gets those too, without forking the code that
 holds the money.
 
 Compose brings up the whole system — Postgres, Redis, Kafka, a Keycloak preloaded with the realm and
