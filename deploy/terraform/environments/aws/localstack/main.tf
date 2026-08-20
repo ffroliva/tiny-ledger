@@ -10,24 +10,33 @@ module "networking" {
   tags                 = var.tags
 }
 
-module "rds_postgres" {
-  source = "../../../modules/aws/rds_postgres"
+resource "aws_security_group" "db_mock" {
+  name        = "${var.environment}-postgres-mock-sg"
+  description = "Security group for ${var.environment} mock PostgreSQL"
+  vpc_id      = module.networking.vpc_id
 
-  environment                = var.environment
-  vpc_id                     = module.networking.vpc_id
-  subnet_ids                 = module.networking.private_subnet_ids
-  eks_node_security_group_id = ""
-  instance_class             = "db.t4g.micro"
-  allocated_storage          = 20
-  database_name              = var.postgres_database_name
-  admin_username             = var.postgres_admin_username
-  admin_password             = var.postgres_admin_password
-  multi_az                   = false
-  skip_final_snapshot        = true
-  deletion_protection        = false
-  tags                       = var.tags
+  ingress {
+    description = "Allow PostgreSQL access from within VPC"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
 
-  depends_on = [module.networking]
+  egress {
+    description = "Allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.environment}-postgres-mock-sg"
+    }
+  )
 }
 
 module "secrets" {
@@ -39,9 +48,9 @@ module "secrets" {
   service_account_name      = "tiny-ledger-sa"
 
   secrets = {
-    SPRING_DATASOURCE_URL          = "jdbc:postgresql://${module.rds_postgres.endpoint}/${module.rds_postgres.database_name}"
-    SPRING_DATASOURCE_USERNAME     = module.rds_postgres.admin_username
-    SPRING_DATASOURCE_PASSWORD     = module.rds_postgres.admin_password
+    SPRING_DATASOURCE_URL          = "jdbc:postgresql://localhost:5432/${var.postgres_database_name}"
+    SPRING_DATASOURCE_USERNAME     = var.postgres_admin_username
+    SPRING_DATASOURCE_PASSWORD     = var.postgres_admin_password
     SPRING_DATA_REDIS_HOST         = "localhost"
     SPRING_DATA_REDIS_PORT         = "6379"
     SPRING_KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
@@ -49,5 +58,6 @@ module "secrets" {
 
   tags = var.tags
 
-  depends_on = [module.rds_postgres]
+  depends_on = [module.networking]
 }
+

@@ -962,13 +962,13 @@ jobs:
       - name: "Stage 14b — LocalStack IaC Apply Validation"
         run: |
           set -euo pipefail
-          docker run -d --name localstack -p 4566:4566 -e SERVICES=secretsmanager,rds,ec2 localstack/localstack:3.8
+          docker run -d --name localstack -p 4566:4566 -e SERVICES=secretsmanager,ec2,iam localstack/localstack:3.8
           # Wait for LocalStack health
           timeout 60 bash -c 'until curl -s http://localhost:4566/_localstack/health | grep -q "\"secretsmanager\": \"available\""; do sleep 2; done' || true
           cd deploy/terraform/environments/aws/localstack
           terraform init -backend=false
           terraform validate
-          terraform apply -auto-approve || echo "LocalStack applied verified subset"
+          terraform apply -auto-approve
           docker stop localstack && docker rm localstack
 
   # Stage 14c — Kubernetes Packaging & Kind e2e validation

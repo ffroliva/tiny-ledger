@@ -13,12 +13,13 @@ output "private_subnet_ids" {
   value       = module.networking.private_subnet_ids
 }
 
-output "rds_endpoint" {
-  description = "RDS Postgres endpoint in LocalStack"
-  value       = module.rds_postgres.endpoint
+output "db_security_group_id" {
+  description = "Mock DB Security Group ID in LocalStack"
+  value       = aws_security_group.db_mock.id
 }
 
 output "secrets_arn" {
   description = "Secrets Manager Secret ARN in LocalStack"
   value       = module.secrets.secret_arn
 }
+
