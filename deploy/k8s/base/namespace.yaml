@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tiny-ledger
+  labels:
+    app.kubernetes.io/name: tiny-ledger
+    app.kubernetes.io/part-of: tiny-ledger
