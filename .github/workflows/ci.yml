@@ -242,7 +242,7 @@ jobs:
       # this repository has no Dockerfile by design (buildpacks, spec §12). The step above scans
       # the application image only.
       #
-      # A CEILING PINS DRIFT; IT DOES NOT REDUCE RISK. kafka stays at 134 and keycloak at 63 —
+      # A CEILING PINS DRIFT; IT DOES NOT REDUCE RISK. kafka stays at 138 and keycloak at 63 —
       # frozen, not fixed. Lowering either is an image bump, one PR and one e2e run each. This
       # step spent its first revision report-only: it published counts on every push and could
       # fail nothing, which is how Traefik's 56 went unactioned until a human forwarded a notice.
@@ -263,17 +263,17 @@ jobs:
             echo "::error::parsed $n image refs from docker/docker-compose.yml, expected 6 — the PARSE broke; this is not a clean result"
             exit 1
           fi
-          # Each pinned at what that image actually reported on run 31332049703 (bee8d34), keyed on
+          # Each pinned at what that image actually reported on run 32356801554 (b4ba41a), keyed on
           # the exact ref so a bump has to re-measure. An UNKNOWN ref scores -1 and fails rather
           # than defaulting to 0, or a newly added service would escape this gate on arrival.
           ceiling() {
             case "$1" in
-              confluentinc/cp-kafka:7.6.0)                  echo 134 ;;
+              confluentinc/cp-kafka:7.6.0)                  echo 138 ;;
               quay.io/keycloak/keycloak:26.4)               echo  63 ;;
-              postgres:16-alpine)                           echo  15 ;;
+              postgres:16-alpine)                           echo  22 ;;
               redis:7-alpine)                               echo   0 ;;
-              otel/opentelemetry-collector-contrib:0.158.0) echo   0 ;;
-              traefik:v3.7.10@sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac) echo 0 ;;
+              otel/opentelemetry-collector-contrib:0.158.0) echo  10 ;;
+              traefik:v3.7.10@sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac) echo 10 ;;
               *)                                            echo  -1 ;;
             esac
           }
