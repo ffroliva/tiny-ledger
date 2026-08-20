@@ -1,0 +1,60 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tiny-ledger-netpol
+  labels:
+    app.kubernetes.io/name: tiny-ledger
+    app.kubernetes.io/part-of: tiny-ledger
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tiny-ledger
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow incoming traffic to application port from any ingress/pod in cluster
+    - ports:
+        - protocol: TCP
+          port: 8080
+    # Allow management port scrapes (kubelet health checks, internal prometheus)
+    - ports:
+        - protocol: TCP
+          port: 9090
+  egress:
+    # Allow DNS resolution (kube-dns / CoreDNS)
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow PostgreSQL (5432)
+    - ports:
+        - protocol: TCP
+          port: 5432
+    # Allow Redis (6379)
+    - ports:
+        - protocol: TCP
+          port: 6379
+    # Allow Kafka (9092, 29092)
+    - ports:
+        - protocol: TCP
+          port: 9092
+        - protocol: TCP
+          port: 29092
+    # Allow Keycloak / OAuth / JWKS (8080, 8443, 443)
+    - ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8443
+        - protocol: TCP
+          port: 443
+    # Allow OpenTelemetry Collector (4317 gRPC, 4318 HTTP)
+    - ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318

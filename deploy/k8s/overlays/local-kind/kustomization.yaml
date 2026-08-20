@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tiny-ledger
+
+resources:
+  - ../../base
+  - backing-services.yaml
+  - ingress.yaml
+
+configMapGenerator:
+  - name: keycloak-realm-config
+    files:
+      - realm-tiny-ledger.json=realm-tiny-ledger.json
+
+images:
+  - name: tiny-ledger
+    newName: tiny-ledger
+    newTag: local
+
+patches:
+  - target:
+      kind: Deployment
+      name: tiny-ledger
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent

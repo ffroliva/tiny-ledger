@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tiny-ledger-service
+  labels:
+    app.kubernetes.io/name: tiny-ledger
+    app.kubernetes.io/part-of: tiny-ledger
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tiny-ledger
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+    - name: management
+      port: 9090
+      targetPort: management
+      protocol: TCP

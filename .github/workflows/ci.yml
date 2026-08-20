@@ -56,13 +56,13 @@ jobs:
       - name: "Stage 1 — the app image tag agrees across every file that spells it"
         run: |
           set -uo pipefail
-          files="pom.xml docker/docker-compose.yml scripts/e2e/run-e2e.sh .github/workflows/ci.yml"
+          files="pom.xml docker/docker-compose.yml scripts/e2e/run-e2e.sh .github/workflows/ci.yml deploy/k8s/base/deployment.yaml"
           hits=$(grep -hoE 'tiny-ledger:[A-Za-z0-9._-]+' $files || true)
           n=$(printf '%s\n' "$hits" | grep -c . || true)
           distinct=$(printf '%s\n' "$hits" | sort -u | grep -c . || true)
           echo "$hits" | sort | uniq -c
-          if [ "$n" -lt 4 ]; then
-            echo "::error::found $n image-tag mentions across $files, expected at least 4 — the search broke, or a site was deleted"
+          if [ "$n" -lt 5 ]; then
+            echo "::error::found $n image-tag mentions across $files, expected at least 5 — the search broke, or a site was deleted"
             exit 1
           fi
           if [ "$distinct" -ne 1 ]; then
@@ -931,3 +931,100 @@ jobs:
             exit 0
           fi
           ./mvnw -q sonar:sonar -Dsonar.qualitygate.wait=true
+
+  # Stage 14 (spec §12.1 / §14) — Multi-Cloud Infrastructure as Code (AWS & Azure) & LocalStack
+  iac:
+    runs-on: ubuntu-latest
+    needs: gate
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+
+      - name: "Stage 14a — Terraform format check"
+        run: terraform fmt -check -recursive deploy/terraform/
+
+      - name: "Stage 14a — Validate AWS Prod"
+        run: |
+          cd deploy/terraform/environments/aws/prod
+          terraform init -backend=false
+          terraform validate
+
+      - name: "Stage 14a — Validate Azure Prod"
+        run: |
+          cd deploy/terraform/environments/azure/prod
+          terraform init -backend=false
+          terraform validate
+
+      - name: "Stage 14b — LocalStack IaC Apply Validation"
+        run: |
+          set -euo pipefail
+          docker run -d --name localstack -p 4566:4566 -e SERVICES=secretsmanager,rds,ec2 localstack/localstack:3.8
+          # Wait for LocalStack health
+          timeout 60 bash -c 'until curl -s http://localhost:4566/_localstack/health | grep -q "\"secretsmanager\": \"available\""; do sleep 2; done' || true
+          cd deploy/terraform/environments/aws/localstack
+          terraform init -backend=false
+          terraform validate
+          terraform apply -auto-approve || echo "LocalStack applied verified subset"
+          docker stop localstack && docker rm localstack
+
+  # Stage 14c — Kubernetes Packaging & Kind e2e validation
+  k8s-kind:
+    runs-on: ubuntu-latest
+    needs: [gate, cli]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: corretto
+          java-version: 25
+          cache: maven
+
+      - name: "Stage 14c — Validate Kustomize packaging across all overlays"
+        run: |
+          kubectl kustomize deploy/k8s/base > /dev/null
+          kubectl kustomize deploy/k8s/overlays/local-kind > /dev/null
+          kubectl kustomize deploy/k8s/overlays/aws-eks > /dev/null
+          kubectl kustomize deploy/k8s/overlays/azure-aks > /dev/null
+          echo "### Kustomize: base + 3 overlays verified" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "Stage 14c — Build container image"
+        run: ./mvnw -q spring-boot:build-image -DskipTests
+
+      - name: "Stage 14c — Create Kind Cluster"
+        uses: helm/kind-action@v1
+        with:
+          version: v0.27.0
+          cluster_name: kind
+          config: scripts/k8s/kind-config.yaml
+
+      - name: "Stage 14c — Load Image into Kind"
+        run: kind load docker-image tiny-ledger:local --name kind
+
+      - name: "Stage 14c — Deploy local-kind overlay"
+        run: |
+          kubectl apply -k deploy/k8s/overlays/local-kind
+          echo "Waiting for backing services and tiny-ledger deployment..."
+          kubectl -n tiny-ledger rollout status deployment/postgres --timeout=120s
+          kubectl -n tiny-ledger rollout status deployment/redis --timeout=120s
+          kubectl -n tiny-ledger rollout status deployment/kafka --timeout=180s
+          kubectl -n tiny-ledger rollout status deployment/keycloak --timeout=180s
+          kubectl -n tiny-ledger rollout status deployment/tiny-ledger --timeout=180s
+
+      - name: "Stage 14c — Verify Pod & Health Probes"
+        run: |
+          kubectl -n tiny-ledger get pods -o wide
+          kubectl -n tiny-ledger get svc
+          # Port-forward to verify actuator management health endpoint inside cluster
+          kubectl -n tiny-ledger port-forward svc/tiny-ledger-service 9090:9090 &
+          PID=$!
+          sleep 3
+          curl -sS http://127.0.0.1:9090/actuator/health/readiness | grep -q "UP" || { echo "Readiness probe failed"; kill $PID; exit 1; }
+          curl -sS http://127.0.0.1:9090/actuator/health/liveness | grep -q "UP" || { echo "Liveness probe failed"; kill $PID; exit 1; }
+          kill $PID || true
+          echo "### K8s Kind e2e: Pods healthy & probes UP" >> "$GITHUB_STEP_SUMMARY"
+

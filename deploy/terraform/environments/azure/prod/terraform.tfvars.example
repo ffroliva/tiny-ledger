@@ -1,0 +1,27 @@
+resource_group_name     = "rg-tiny-ledger-prod"
+location                = "eastus"
+environment             = "prod"
+resource_prefix         = "tlprod"
+kubernetes_version      = "1.31"
+system_node_count       = 2
+system_vm_size          = "Standard_D2s_v5"
+user_node_count         = 3
+user_vm_size            = "Standard_D4s_v5"
+enable_auto_scaling     = true
+min_count               = 2
+max_count               = 6
+postgres_sku_name       = "GP_Standard_D2ds_v5"
+postgres_storage_mb     = 32768
+redis_sku_name          = "Standard"
+redis_family            = "C"
+redis_capacity          = 1
+event_hub_sku           = "Standard"
+event_hub_capacity      = 1
+k8s_namespace           = "tiny-ledger"
+k8s_service_account_name = "tiny-ledger-sa"
+
+tags = {
+  Environment = "prod"
+  Project     = "tiny-ledger"
+  ManagedBy   = "terraform"
+}

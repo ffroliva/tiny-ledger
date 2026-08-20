@@ -24,6 +24,10 @@ docs/source/
 .pytest_cache/
 .serena/
 __pycache__/
+.terraform/
+*.tfstate
+*.tfstate.*
+
 
 # Keys never land by accident. TestJwt now generates its signing key per-JVM instead of loading a
 # committed PEM (see that class), so there is nothing left to un-ignore — recreating either filename
