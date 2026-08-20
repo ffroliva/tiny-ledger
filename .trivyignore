@@ -1,0 +1,12 @@
+# Paketo buildpack CNB lifecycle Go binaries (launcher / performance runner).
+# The tiny-ledger application itself is pure Java 25 running on the JVM with no Go code.
+# These Go standard library CVEs are inside the buildpack launcher compiled with Go 1.26.5.
+# Re-evaluate when paketobuildpacks/builder-noble-java-tiny is bumped to a release built with Go >= 1.26.6.
+CVE-2026-33818
+CVE-2026-39821
+CVE-2026-46600
+CVE-2026-56853
+CVE-2026-56858
+CVE-2026-56859
+CVE-2026-56860
+CVE-2026-56862

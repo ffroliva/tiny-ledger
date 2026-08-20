@@ -235,6 +235,7 @@ jobs:
           # which trains people to ignore it. THE CONSEQUENCE IS THAT THIS BUILD CAN BE GREEN WITH
           # KNOWN-UNFIXABLE CRITICALS PRESENT IN THE IMAGE. That is accepted, not overlooked.
           ignore-unfixed: true
+          trivyignores: .trivyignore
 
       # ---------------------------------------------------------------------------------------
       # Stage 11d. The Compose images are the surface nothing else covers: Dependabot has no
