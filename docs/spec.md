@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.53
+**Version:** 3.54
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -108,6 +108,10 @@ an accident.
 | **LedgerEntry** | The immutable, persisted record of a movement, carrying the resulting balance. |
 | **Balance** | A *projection* of the event stream. Never an independently writable field. |
 | **Stream version** | Monotonic sequence number per account; the optimistic-concurrency token. |
+| **Asset class** | `CURRENCY`, `EQUITY_ETF`, `BOND_ETF`. Part of an asset's identity, not a label beside it (§2.5). |
+| **Quantity** | Value object: signed amount of one asset in **micro-units** (`long`, six decimal places) plus its asset. The sibling of `Money`, deliberately not the same type — see §2.5. Never a `double`. |
+| **Tax lot** | One acquisition and what is left of it: quantity still held, the cost basis of *that* quantity, and when it was acquired (§2.5). |
+| **Cost basis** | What the quantity still held cost. Shrinks with the lot it belongs to; never re-derived from a price. |
 
 ### 2.2 Aggregate: `Account`
 
@@ -148,6 +152,113 @@ stamps it onto every event it emits as the `actor` (§2.3), so *who acted* survi
 than only in a request that is already gone. `Deposit` and `Withdraw` also carry a
 **client-generated movement UID** — at once the idempotency key and the movement's permanent
 identity (§6.3) — and an optional free-text `reference` that travels to the feed item (§7).
+
+### 2.5 Multi-asset positions and tax lots
+
+**Scope, stated first because it bounds every claim below: these are domain types and nothing else.**
+No endpoint accepts an asset symbol, no event carries one, no column stores one, and `MovementType`
+still has exactly two arms. Nothing in §7's API changed, so `docs/api/openapi.yaml` is untouched and
+no client sees a difference. What is built is the write-model vocabulary a multi-asset ledger needs,
+with its invariants pinned by tests, so the wire and persistence work that follows has something
+correct to sit on.
+
+**That scope is also why dual-mode parity (§9.2b) is not at risk here and is not merely untested.**
+These types live in `ledger.domain`, depend on no framework, and are reachable from no adapter, so
+`standalone` and `full` compile and run the *same* code by construction — there is no profile-gated
+branch that could differ. The claim is structural, not measured.
+
+#### Quantity — the second value type, deliberately not `Money`
+
+`Money` (§2.1) is anchored to a `java.util.Currency`, which has no instance for a ticker and carries
+the wrong scale regardless: a currency has two decimal places, a fractional share is quoted at six.
+`Quantity` is therefore a separate type rather than a widened `Money`, and the separation is enforced
+by the compiler — adding 10.5 shares to $10.50 does not typecheck, which no runtime guard would have
+to catch.
+
+| Property | Value | Why |
+|---|---|---|
+| Representation | `long` count of **micro-units** (10⁻⁶) | Fixed-point, never `double` — the same rule §2.1 states for `Money`, and the reason `+10.500000` and `−10.500000` cancel to exactly zero |
+| Scale | **6 decimal places** (`Quantity.SCALE`) | The precision brokers quote fractional shares at |
+| Excess precision | **Refused, never rounded** | Silently truncating a seventh place is how a position drifts from the broker's and is found only at reconciliation |
+| Asset identity | `(symbol, assetClass)` — both | Tickers are reused across instrument types; netting an equity position against a bond position because both are called "AGG" is a reconciliation break weeks later |
+| Cross-asset arithmetic | Refused | See the error-shape note below |
+| Overflow | `ArithmeticException` (`Math.addExact`) | A bug, not a catalogued error — see below |
+
+`AssetClass` is `CURRENCY`, `EQUITY_ETF`, `BOND_ETF`. **Cash is a member on purpose:** a multi-asset
+book then needs no second container for it, and a portfolio total is one fold rather than two.
+
+**On error shapes.** Every refusal above raises `IllegalArgumentException`, *not* a §6.5 catalogued
+error and *not* a `MovementResult`. That follows AGENTS.md's rule rather than departing from it: no
+asset symbol reaches these types from the wire, so reaching a mismatch is a bug in a caller, and
+exceptions are for bugs and catalogued errors. **When these types are wired to an endpoint, that
+choice has to be revisited**, and §6.5 will need rows for asset mismatch and excess precision — a
+client-supplied ticker is untrusted input and must not answer 500.
+
+#### Tax lots and cost basis
+
+A position is not one number. It is the acquisitions it was built from, because *which* lot a
+disposal consumes decides the cost basis and therefore the tax.
+
+- **`TaxLot`** — `(lotId, remaining, costBasis, acquiredAt)`. `costBasis` is the cost of the quantity
+  **still held**, not of the original purchase: both halves shrink together as the lot is consumed.
+  `remaining` is strictly positive, so a spent lot leaves the book rather than lingering at zero, and
+  `lotId` is stable across a split — a split lot is still the same lot.
+- **`TaxLotSelector`** — a closed enum of methods, not an interface with two implementations: the
+  method *is* the strategy, and it has to survive a round-trip through configuration or an API field
+  as a name.
+
+| Method | Order | Note |
+|---|---|---|
+| `FIFO` | Oldest `acquiredAt` first | Ages a holding fastest |
+| `HIFO` | Highest **cost per unit** first | Realises the smallest gain. Ranked per *unit*, never per lot: a large cheap lot costs more in total than a small expensive one, so a total-cost ranking hands HIFO the wrong lot whenever the sizes differ |
+
+Both orderings break ties on `lotId`. Without that, two lots bought in the same instant — or at the
+same price — consume in whatever order the list happened to hold them, and the same disposal produces
+a different cost basis on a replay.
+
+- **`TaxLotAggregate`** — the lots held in one asset, and the double-entry rule over them. Its cost
+  currency is fixed at construction, so an empty book still answers `costBasis()` and a lot priced in
+  another currency is refused where it enters rather than where it is summed.
+
+**The double-entry invariant, stated as an equation:** for any disposal,
+
+```
+quantity(consumed) + quantity(remaining) == quantity(before)
+costBasis(consumed) + costBasis(remaining) == costBasis(before)
+```
+
+This holds **by construction, not by assertion**. `select` partitions the lots into two lists that
+together are exactly the lots it was handed, and a split lot rounds only the *taken* slice — the
+remainder is the subtraction, so it absorbs the rounding and no minor unit can be minted or lost in
+the middle. `TaxLotAggregateTest#aDisposalConservesBothQuantityAndCostBasis` pins it against a
+deliberately indivisible basis ($100,000 over 3 shares), where independent rounding of each side
+would break it.
+
+A disposal larger than the holding is refused and **leaves the book untouched**: the lots are
+replaced only after the selection succeeds, so there is no partial application to undo.
+
+#### What is deliberately not built
+
+Named so the absence is visible rather than inferred:
+
+- **Realised gain or loss.** It needs proceeds, which no command carries. The aggregate answers what
+  a disposal *cost*; what it *sold for* is not yet a domain concept.
+- **Holding period.** `acquiredAt` is recorded and is FIFO's ordering key, but nothing splits a
+  disposal into long-term and short-term.
+- **Wash-sale and other jurisdiction rules.** Out of scope, and they are not a selector variant —
+  they change the basis of a *later* acquisition, which this shape does not model.
+- **Persistence and projection.** A tax-lot book is rebuilt from nothing today; it is not an event
+  stream, not a Postgres table, and not a read model.
+
+#### Which gate enforces what
+
+| Claim | Gate |
+|---|---|
+| Framework-free, no package cycles, no `Instant.now()` in the domain | `HexagonalRulesTest` (9 rules), inside `./mvnw -q verify` |
+| The invariants above | `TaxLotAggregateTest`, `MultiAssetMovementTest` — 29 tests, no containers |
+| Domain coverage ≥ 90% line / 85% branch | JaCoCo `check`, `PACKAGE` scope over `com.ffroliva.tinyledger.*.domain*` |
+| Dual-mode parity | **None, and none is needed** — the parity is structural (no adapter, no profile branch), so there is nothing a test could differentiate |
+| The scope boundary itself — that no endpoint gained an asset field | **None.** Nothing stops a later change wiring these types to the API without the §6.5 rows this section says they need |
 
 ---
 
@@ -2298,3 +2409,4 @@ replica runs anywhere.
 | 3.51 | 2026-08-09 | **The ZAP baseline's image is pinned, and that is the prerequisite for `zap` becoming a required check rather than a tidy-up.** `zaproxy/action-baseline@v0.15.0` defaults `docker_name` to `ghcr.io/zaproxy/zaproxy:**stable**`, and this workflow never overrode it — so half the `zap` job ran a mutable tag while stage 11e pinned `2.17.0`. **That is the defect v3.42 finding 2 already recorded and fixed once**, when the buildpack builder was found floating on `latest` while feeding a required check; it is worse for a scanner than for a builder, because a ZAP `stable` bump ships **new passive rules** that fire against code nobody changed and turn `main` red for a reason that appears in no diff — which is precisely how a required check stops being read. Pinned to the same tag stage 11e uses. **It also closes a split the two scanners had carried since 11e landed:** two rule sets and two disposition files, with neither file recording which engine produced its numbers, so the two files' tallies were not comparable. They are now — and the first run on the pinned engine is recorded here rather than left for someone to re-derive: **baseline `IGNORE: 2, PASS: 65`; API scan `IGNORE: 1, PASS: 118`, 14 URLs, 8 client errors** (run `31301914764`). **Those differ from the numbers this document carried an hour earlier — 66 and 119 — and the pin is NOT why.** v3.49 removed HSTS for real, so rule 10035 stopped passing and started firing: it moved out of PASS and into the IGNORE bucket in both scans, one rule each, which is exactly the arithmetic. `PASS: Strict-Transport-Security` appears **0** times in this run's log and appeared in every run before the fix. A tally is a measurement of a configuration, not a property of the tool, and this one changed because the system did. **The remaining half of this is a branch-protection change only the repository owner can make** — `zap` is still absent from `main`'s seven required contexts (`gate`, `unit`, `integration`, `security`, `cli`, `e2e`, `sonar`), so the three gates inside it, including the one that caught v3.49's live HSTS defect on nine routes, still cannot block a merge. Measured on run `31300929908`, since "it is too slow to be required" is the usual objection and does not hold here: `zap` takes **3.58 m** against `e2e`'s 3.10 m and `integration`'s 2.77 m — the slowest job, and not an outlier |
 | 3.52 | 2026-08-09 | **The contract described its shapes and gave no values, so it could not be run — and adding the values proved two of §11e's sentences wrong.** `docs/api/openapi.yaml` held **7** `example:` entries, all of them error bodies; every parameter and every schema property now carries one, **62** in total, and they describe ONE account rather than one plausible value each — `ACC-001`, owner `alice`, opened at stream version 1, a single 100.00 GBP deposit at version 2, balance 100.00 at version 2. `Money` is `$ref`'d by `Balance.amount`, `Transaction.amount` and `balanceAfter`, so one amount has to be true in all three at once, which is why the story is a deposit and not the 100/25/75 the plan suggested. **Three things were measured rather than assumed, and two of them contradicted the plan.** (1) **`example:` is not inert metadata for codegen**: the spring generator's `interfaceOnly` stubs embed an `exampleString` literal built from the contract, so 38 generated lines moved across 7 files — 22 `exampleString` literals, 16 javadoc, **zero signatures**, with a comparison first proven able to fail (its initial control was inert and the result was discarded). (2) **Postman's import ignores every example in this file on its default setting.** Measured with `openapi-to-postmanv2`, the library the import IS: on *Parameter generation: Schema* 20 of 23 request slots are `<string>`/`<uuid>` before **and** after, and a probe placing the same example at five different points (shared parameter level, shared parameter `schema`, property, media-type, schema object-level) filled none of them — **no edit to this contract can change that**. On the default the **response** side is filled either way — 65 example bodies, no placeholders — so the default import is not value-free, only request-value-free. On *Example* both versions fill all 23 request slots, so the placeholder count was never the discriminator: `main` fills them with a random `accountUid` unrelated to the next request and a `minTransactionTimestamp` of 2002-07-08, and this revision fills them with one account. `docs/INDEX.md` names the setting rather than promising a result the default does not give. (3) **§11e's "nothing is written" stopped being true.** ZAP substitutes no path parameter — example or not, `%7BaccountUid%7D` still goes out verbatim, so the missing example was never the reason — but it *does* build query strings and request bodies from examples, so `openAccount` now posts a valid body, answers `201` and **creates an account on every scan**. It is the one operation that left the client-error list: **7**, not 8, on run `31322855040`'s predecessor `31322575966`. **`ci.yml` is untouched** — the ceiling stays at 8, because lowering it belongs with the seed step that makes the number mean something, and this is the run that would justify it |
 | 3.53 | 2026-08-09 | **Holding `ledger:writer` was an unlimited entitlement to create accounts, and now is not.** `OpenAccountService.open` minted an id and appended with no lookup and no policy call, so one principal could self-open accounts until the per-principal write budget throttled them — 100/minute, which bounds the RATE and not the COUNT. Demonstrated rather than inferred: repeated `dev.ps1 demo` runs opened a fresh account for `alice` every time, and the only `UNIQUE` constraints in the schema are on `(aggregate_id, sequence_number)`, `client_movement_uid` and `(account_id, stream_version)` — none touches owner or currency. **The rule is a cap, deliberately not one-account-per-currency.** Per-currency uniqueness is the obvious reading and it is wrong: a customer may legitimately want a personal and a business account in the same currency, and currency is fixed for the life of an account (§7), so multi-currency support REQUIRES one principal to hold several accounts. What was missing is not uniqueness, it is an opening authority. `ledger.accounts.max-per-owner` is that authority expressed as the smallest thing that works; a product/purpose concept, eligibility and approval are the real shape and are NOT built. **Composed in `UseCaseConfig`, not in `ledger`.** The count lives in `balance`'s account projection, so the ledger declares `OwnedAccountsPort` and the composition root supplies `owner -> accounts.accountsOwnedBy(owner).size()` — one wiring, so `standalone` and `full` enforce the identical rule (§9.2b) rather than a Postgres constraint the in-memory mode could not honour. **Read-then-append, and the race is named rather than hidden:** two concurrent opens by one owner can both pass at the boundary and land one over the cap. Self-correcting on the next open and bounded by the write budget; a count constraint in the synchronous projection is the upgrade if exactness is ever needed, and it is only possible because that projection is a plain `@EventListener` in the same transaction (spec v3.5 §4.3). New catalogue entry `409 /errors/account-limit-reached` — a `403` would be wrong, because the roles are correct and what conflicts is state the caller can resolve. Proven by a red→green cycle whose red ran 3 tests and failed on the one it names, and by a web test whose control was run: flipping the code to 422 fails it `expected:<409> but was:<422>`, so it is coverage and not an observation |
+| 3.54 | 2026-08-20 | **New §2.5: multi-asset positions and tax lots — domain types only, and the section says so before it says anything else.** `Quantity` is a second value type beside `Money` rather than a widened one: `java.util.Currency` has no instance for a ticker and carries two decimal places where a fractional share needs six, so shares are a `long` count of micro-units and the compiler, not a runtime guard, refuses to add 10.5 shares to $10.50. Excess precision is refused rather than rounded, and `(symbol, assetClass)` is the asset's whole identity because tickers repeat across instrument types. `TaxLot` holds the cost basis of the quantity *still held*, so both halves shrink together and a split rounds only the taken slice — the remainder absorbs it, which is why the double-entry equation in §2.5 holds by construction rather than by assertion. `TaxLotSelector` is a closed enum, `FIFO` and `HIFO`, ranking by cost **per unit** (a total-cost ranking hands HIFO the wrong lot whenever lot sizes differ) and breaking ties on `lotId` so a replay is reproducible. **Nothing reached the wire:** no endpoint, no event, no column, `MovementType` unchanged, `openapi.yaml` untouched — so §9.2b parity is structural here (no adapter, no profile branch) rather than tested, and §2.5 says which gate covers each claim and names the two it has no gate for, including the fact that wiring these types to an endpoint will require §6.5 rows for asset mismatch and excess precision, since a client-supplied ticker is untrusted input and must not answer 500 |
