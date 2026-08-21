@@ -402,57 +402,32 @@ class AccountTest {
         Quantity qty = Quantity.of("VOO", AssetClass.EQUITY_ETF, "5.000000");
 
         // Non-positive quantity
-        assertThatThrownBy(() -> account.transferAsset(
-                        new AssetTransfer(
-                                "alice",
-                                false,
-                                account.id(),
-                                UUID.randomUUID(),
-                                "IN",
-                                Quantity.zero("VOO", AssetClass.EQUITY_ETF),
-                                new Money(GBP, 100),
-                                null,
-                                null,
-                                null),
-                        T))
-                .isInstanceOf(InvalidAmountException.class);
+        AssetTransfer zeroQty = new AssetTransfer(
+                "alice",
+                false,
+                account.id(),
+                UUID.randomUUID(),
+                "IN",
+                Quantity.zero("VOO", AssetClass.EQUITY_ETF),
+                new Money(GBP, 100),
+                null,
+                null,
+                null);
+        assertThatThrownBy(() -> account.transferAsset(zeroQty, T)).isInstanceOf(InvalidAmountException.class);
 
         // Null or negative cost basis on IN
-        assertThatThrownBy(() -> account.transferAsset(
-                        new AssetTransfer(
-                                "alice", false, account.id(), UUID.randomUUID(), "IN", qty, null, null, null, null),
-                        T))
-                .isInstanceOf(InvalidAmountException.class);
-        assertThatThrownBy(() -> account.transferAsset(
-                        new AssetTransfer(
-                                "alice",
-                                false,
-                                account.id(),
-                                UUID.randomUUID(),
-                                "IN",
-                                qty,
-                                new Money(GBP, -100),
-                                null,
-                                null,
-                                null),
-                        T))
-                .isInstanceOf(InvalidAmountException.class);
+        AssetTransfer nullBasis =
+                new AssetTransfer("alice", false, account.id(), UUID.randomUUID(), "IN", qty, null, null, null, null);
+        assertThatThrownBy(() -> account.transferAsset(nullBasis, T)).isInstanceOf(InvalidAmountException.class);
+
+        AssetTransfer negBasis = new AssetTransfer(
+                "alice", false, account.id(), UUID.randomUUID(), "IN", qty, new Money(GBP, -100), null, null, null);
+        assertThatThrownBy(() -> account.transferAsset(negBasis, T)).isInstanceOf(InvalidAmountException.class);
 
         // Invalid direction
-        assertThatThrownBy(() -> account.transferAsset(
-                        new AssetTransfer(
-                                "alice",
-                                false,
-                                account.id(),
-                                UUID.randomUUID(),
-                                "INVALID",
-                                qty,
-                                new Money(GBP, 100),
-                                null,
-                                null,
-                                null),
-                        T))
-                .isInstanceOf(InvalidAmountException.class);
+        AssetTransfer invalidDir = new AssetTransfer(
+                "alice", false, account.id(), UUID.randomUUID(), "INVALID", qty, new Money(GBP, 100), null, null, null);
+        assertThatThrownBy(() -> account.transferAsset(invalidDir, T)).isInstanceOf(InvalidAmountException.class);
 
         // Empty book queries
         assertThat(account.lots("VOO", AssetClass.EQUITY_ETF)).isEmpty();

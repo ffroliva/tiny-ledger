@@ -153,8 +153,7 @@ public final class Account {
         } else if ("OUT".equalsIgnoreCase(cmd.direction())) {
             TaxLotAggregate book =
                     assetHoldings.get(qty.symbol() + ":" + qty.assetClass().name());
-            long available = book != null ? book.quantity().microUnits() : 0L;
-            if (available < qty.microUnits()) {
+            if (book == null || book.quantity().microUnits() < qty.microUnits()) {
                 return List.of(new MovementRejected(
                         id,
                         version + 1,
