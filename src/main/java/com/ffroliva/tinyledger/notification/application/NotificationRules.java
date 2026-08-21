@@ -30,6 +30,9 @@ public class NotificationRules {
             case MoneyWithdrawn w
             when isLarge(w.amount().minorUnits()) ->
                 Optional.of(notify(w.movementUid(), w, "LARGE_MOVEMENT", w.amount()));
+            case com.ffroliva.tinyledger.ledger.domain.AssetTransferred a
+            when isLarge(a.costBasis().minorUnits()) ->
+                Optional.of(notify(a.movementUid(), a, "LARGE_MOVEMENT", a.costBasis()));
             case AccountOpened _ -> Optional.empty();
             default -> Optional.empty();
         };

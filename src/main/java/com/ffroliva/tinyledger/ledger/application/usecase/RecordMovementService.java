@@ -36,7 +36,8 @@ public class RecordMovementService implements RecordMovementUseCase {
                 account -> account.deposit(cmd, clock.now()),
                 MovementType.DEPOSIT,
                 cmd.amount(),
-                cmd.reference());
+                cmd.reference(),
+                null);
     }
 
     @Override
@@ -49,7 +50,22 @@ public class RecordMovementService implements RecordMovementUseCase {
                 account -> account.withdraw(cmd, clock.now()),
                 MovementType.WITHDRAWAL,
                 cmd.amount(),
-                cmd.reference());
+                cmd.reference(),
+                null);
+    }
+
+    @Override
+    public MovementResult transferAsset(AssetTransfer cmd) {
+        return recordMovement(
+                cmd.caller(),
+                cmd.callerIsAdmin(),
+                cmd.accountId(),
+                cmd.movementUid(),
+                account -> account.transferAsset(cmd, clock.now()),
+                MovementType.ASSET_TRANSFER,
+                cmd.costBasis(),
+                cmd.reference(),
+                cmd.quantity());
     }
 
     private MovementResult recordMovement(
@@ -60,7 +76,8 @@ public class RecordMovementService implements RecordMovementUseCase {
             java.util.function.Function<Account, List<MovementEvent>> action,
             MovementType type,
             com.ffroliva.tinyledger.shared.Money amount,
-            String reference) {
+            String reference,
+            Quantity quantity) {
         List<LedgerEvent> history = store.read(accountId); // ①
         if (history.isEmpty()) throw new AccountNotFoundException(accountId);
         Account account = Account.rehydrate(history); // ②
@@ -69,12 +86,13 @@ public class RecordMovementService implements RecordMovementUseCase {
         // untouched: an admin without ledger:writer never reaches this line at all (N15, Task 5).
         if (!account.owner().equals(caller) && !callerIsAdmin) throw new OwnershipException(caller, accountId); // ③
         Optional<MovementEvent> existing = store.findByMovementUid(movementUid); // ④ (after authz)
-        if (existing.isPresent()) return replayOf(existing.get(), accountId, type, amount, reference);
+        if (existing.isPresent()) return replayOf(existing.get(), accountId, type, amount, reference, quantity);
         List<MovementEvent> events = action.apply(account); // ⑤
         try {
             store.append(accountId, account.version(), events); // ⑥
         } catch (DuplicateMovementException _) {
-            return replayOf(store.findByMovementUid(movementUid).orElseThrow(), accountId, type, amount, reference);
+            return replayOf(
+                    store.findByMovementUid(movementUid).orElseThrow(), accountId, type, amount, reference, quantity);
         }
         events.forEach(publisher::publish); // ⑦
         return resultOf(events.getFirst(), Outcome.CREATED, Outcome.REJECTED); // ⑧
@@ -85,7 +103,8 @@ public class RecordMovementService implements RecordMovementUseCase {
             AccountId requested,
             MovementType type,
             com.ffroliva.tinyledger.shared.Money amount,
-            String reference) {
+            String reference,
+            Quantity quantity) {
         boolean samePayload =
                 switch (event) {
                     case MoneyDeposited d ->
@@ -98,12 +117,16 @@ public class RecordMovementService implements RecordMovementUseCase {
                                 && type == MovementType.WITHDRAWAL
                                 && w.amount().equals(amount)
                                 && java.util.Objects.equals(w.reference(), reference);
-                    case MovementRejected r ->
-                        r.accountId().equals(requested)
-                                && r.type() == type
-                                && r.amount().equals(amount);
+                    case AssetTransferred a ->
+                        a.accountId().equals(requested)
+                                && type == MovementType.ASSET_TRANSFER
+                                && (quantity == null
+                                        || a.quantity().equals(quantity)
+                                        || a.quantity().negated().equals(quantity))
+                                && java.util.Objects.equals(a.reference(), reference);
+                    case MovementRejected r -> r.accountId().equals(requested) && r.type() == type;
                 };
-        // No AccountOpened arm to write: MovementEvent is sealed over exactly the three events that
+        // No AccountOpened arm to write: MovementEvent is sealed over exactly the four events that
         // carry a movementUid, so the compiler knows this switch is total. The uid comes straight off
         // the interface — the four-arm helper that threw for a case it could not receive is gone.
         if (!samePayload) throw new IdempotencyConflictException(event.movementUid());
@@ -134,6 +157,19 @@ public class RecordMovementService implements RecordMovementUseCase {
                         w.occurredAt(),
                         created,
                         null);
+            case AssetTransferred a ->
+                new MovementResult(
+                        a.accountId(),
+                        a.movementUid(),
+                        MovementType.ASSET_TRANSFER,
+                        a.version(),
+                        a.costBasis(),
+                        a.balanceAfter(),
+                        a.occurredAt(),
+                        created,
+                        null,
+                        a.quantity(),
+                        a.taxLots());
             case MovementRejected r ->
                 new MovementResult(
                         r.accountId(),

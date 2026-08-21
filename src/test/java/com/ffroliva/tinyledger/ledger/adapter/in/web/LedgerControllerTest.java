@@ -30,11 +30,14 @@ import com.ffroliva.tinyledger.ledger.application.port.in.RecordMovementUseCase;
 import com.ffroliva.tinyledger.ledger.application.port.in.StrongBalance;
 import com.ffroliva.tinyledger.ledger.application.port.in.Withdraw;
 import com.ffroliva.tinyledger.ledger.domain.MovementType;
+import com.ffroliva.tinyledger.ledger.domain.Quantity;
+import com.ffroliva.tinyledger.ledger.domain.TaxLot;
 import com.ffroliva.tinyledger.platform.CallerPrincipal;
 import com.ffroliva.tinyledger.shared.AccountId;
 import com.ffroliva.tinyledger.shared.CurrencyMismatchException;
 import com.ffroliva.tinyledger.shared.Money;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -362,6 +365,130 @@ class LedgerControllerTest {
                 .andExpect(jsonPath("$.amount.minorUnits").value(8000))
                 .andExpect(jsonPath("$.streamVersion").value(3))
                 .andExpect(jsonPath("$.asOf").exists());
+    }
+
+    @Test
+    void putAssetTransferInboundReturns201Created() throws Exception {
+        Quantity qty = Quantity.of("VOO", com.ffroliva.tinyledger.ledger.domain.AssetClass.EQUITY_ETF, "10.500000");
+        Money basis = Money.of("GBP", 450000);
+        TaxLot lot = new TaxLot("lot-1", qty, basis, NOW);
+        MovementResult res = new MovementResult(
+                new AccountId(ACCOUNT),
+                MOVEMENT,
+                MovementType.ASSET_TRANSFER,
+                2,
+                basis,
+                Money.of("GBP", 25000),
+                NOW,
+                Outcome.CREATED,
+                null,
+                qty,
+                List.of(lot));
+        given(recordMovement.transferAsset(any())).willReturn(res);
+
+        mvc.perform(put("/api/v1/accounts/{a}/asset-transfers/{t}", ACCOUNT, MOVEMENT)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "direction": "IN",
+                                  "assetSymbol": "VOO",
+                                  "assetClass": "EQUITY_ETF",
+                                  "quantity": "10.500000",
+                                  "costBasis": {"currency": "GBP", "minorUnits": 450000},
+                                  "lotId": "lot-1",
+                                  "reference": "initial buy"
+                                }"""))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.transactionUid").value(MOVEMENT.toString()))
+                .andExpect(jsonPath("$.accountUid").value(ACCOUNT.toString()))
+                .andExpect(jsonPath("$.type").value("ASSET_TRANSFER"))
+                .andExpect(jsonPath("$.direction").value("IN"))
+                .andExpect(jsonPath("$.assetSymbol").value("VOO"))
+                .andExpect(jsonPath("$.assetClass").value("EQUITY_ETF"))
+                .andExpect(jsonPath("$.quantity").value("10.500000"))
+                .andExpect(jsonPath("$.taxLots[0].lotId").value("lot-1"))
+                .andExpect(jsonPath("$.taxLots[0].quantity").value("10.500000"))
+                .andExpect(jsonPath("$.taxLots[0].costBasis.minorUnits").value(450000));
+    }
+
+    @Test
+    void putAssetTransferReplayReturns200Ok() throws Exception {
+        Quantity qty = Quantity.of("VOO", com.ffroliva.tinyledger.ledger.domain.AssetClass.EQUITY_ETF, "10.500000");
+        Money basis = Money.of("GBP", 450000);
+        TaxLot lot = new TaxLot("lot-1", qty, basis, NOW);
+        MovementResult res = new MovementResult(
+                new AccountId(ACCOUNT),
+                MOVEMENT,
+                MovementType.ASSET_TRANSFER,
+                2,
+                basis,
+                Money.of("GBP", 25000),
+                NOW,
+                Outcome.REPLAYED,
+                null,
+                qty,
+                List.of(lot));
+        given(recordMovement.transferAsset(any())).willReturn(res);
+
+        mvc.perform(put("/api/v1/accounts/{a}/asset-transfers/{t}", ACCOUNT, MOVEMENT)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "direction": "IN",
+                                  "assetSymbol": "VOO",
+                                  "assetClass": "EQUITY_ETF",
+                                  "quantity": "10.500000",
+                                  "costBasis": {"currency": "GBP", "minorUnits": 450000},
+                                  "lotId": "lot-1",
+                                  "reference": "initial buy"
+                                }"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.transactionUid").value(MOVEMENT.toString()))
+                .andExpect(jsonPath("$.type").value("ASSET_TRANSFER"));
+    }
+
+    @Test
+    void putAssetTransferExcessPrecisionReturnsBadRequest() throws Exception {
+        mvc.perform(put("/api/v1/accounts/{a}/asset-transfers/{t}", ACCOUNT, MOVEMENT)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "direction": "IN",
+                                  "assetSymbol": "VOO",
+                                  "assetClass": "EQUITY_ETF",
+                                  "quantity": "10.5000001",
+                                  "costBasis": {"currency": "GBP", "minorUnits": 450000}
+                                }"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.type").value("/errors/invalid-amount"));
+    }
+
+    @Test
+    void putAssetTransferInsufficientHoldingReturns422() throws Exception {
+        MovementResult res = new MovementResult(
+                new AccountId(ACCOUNT),
+                MOVEMENT,
+                MovementType.ASSET_TRANSFER,
+                2,
+                Money.of("GBP", 0),
+                null,
+                NOW,
+                Outcome.REJECTED,
+                "insufficient-holding");
+        given(recordMovement.transferAsset(any())).willReturn(res);
+
+        mvc.perform(put("/api/v1/accounts/{a}/asset-transfers/{t}", ACCOUNT, MOVEMENT)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "direction": "OUT",
+                                  "assetSymbol": "VOO",
+                                  "assetClass": "EQUITY_ETF",
+                                  "quantity": "10.000000",
+                                  "selector": "HIFO"
+                                }"""))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.type").value("/errors/insufficient-holding"));
     }
 
     private org.springframework.test.web.servlet.ResultActions deposit() throws Exception {

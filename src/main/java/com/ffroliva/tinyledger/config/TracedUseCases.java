@@ -91,6 +91,11 @@ final class TracedUseCases {
             return record(cmd.accountId().value().toString(), () -> delegate.withdraw(cmd));
         }
 
+        @Override
+        public MovementResult transferAsset(com.ffroliva.tinyledger.ledger.application.port.in.AssetTransfer cmd) {
+            return record(cmd.accountId().value().toString(), () -> delegate.transferAsset(cmd));
+        }
+
         private MovementResult record(String accountId, Supplier<MovementResult> call) {
             Span span = tracer.nextSpan().name("ledger.record-movement").start();
             // Tagged before the call, not after: if the delegate throws, this is the one attribute

@@ -299,6 +299,7 @@ public class LedgerSteps {
                 switch (eventType) {
                     case "MoneyDeposited" -> new String[] {"DEPOSIT", "IN"};
                     case "MoneyWithdrawn" -> new String[] {"WITHDRAWAL", "OUT"};
+                    case "AssetTransferred" -> new String[] {"ASSET_TRANSFER", "IN"};
                     default -> throw new IllegalArgumentException("unsupported event type: " + eventType);
                 };
         assertThat(text(lastResponse, "$.type")).isEqualTo(shape[0]);
@@ -306,6 +307,66 @@ public class LedgerSteps {
         assertThat(number(get(strongBalancePath(currentAccount)), "$.streamVersion"))
                 .isEqualTo(version);
         assertThat(transactionUids(currentAccount)).contains(lastMovementUid.toString());
+    }
+
+    @When("an asset transfer of {word} {string} of class {string} with cost basis {money} is requested into {string}")
+    public void anAssetTransferIsRequestedInto(
+            String quantity, String symbol, String assetClass, long costBasisMinorUnits, String name) {
+        anAssetTransferWithLotIdIsRequestedInto(quantity, symbol, assetClass, costBasisMinorUnits, name, null);
+    }
+
+    @When(
+            "an asset transfer of {word} {string} of class {string} with cost basis {money} is requested into {string} with lotId {string}")
+    public void anAssetTransferWithLotIdIsRequestedInto(
+            String quantity, String symbol, String assetClass, long costBasisMinorUnits, String name, String lotId) {
+        captureBefore(name);
+        lastMovementUid = UUID.randomUUID();
+        lastMovementPath = "/api/v1/accounts/%s/asset-transfers/%s".formatted(uid(name), lastMovementUid);
+        String lotIdPart = lotId != null ? ",\"lotId\":\"" + lotId + "\"" : "";
+        lastMovementBody =
+                """
+                {"direction":"IN","assetSymbol":"%s","assetClass":"%s","quantity":"%s","costBasis":{"currency":"%s","minorUnits":%d}%s}""".formatted(symbol, assetClass, quantity, currencyOf(name), costBasisMinorUnits, lotIdPart);
+        currentAccount = name;
+        lastResponse = put(lastMovementPath, lastMovementBody);
+    }
+
+    @When("an outbound asset transfer of {word} {string} of class {string} is requested from {string} using {string}")
+    public void anOutboundAssetTransferIsRequested(
+            String quantity, String symbol, String assetClass, String name, String selector) {
+        captureBefore(name);
+        lastMovementUid = UUID.randomUUID();
+        lastMovementPath = "/api/v1/accounts/%s/asset-transfers/%s".formatted(uid(name), lastMovementUid);
+        lastMovementBody = """
+                {"direction":"OUT","assetSymbol":"%s","assetClass":"%s","quantity":"%s","selector":"%s"}""".formatted(symbol, assetClass, quantity, selector);
+        currentAccount = name;
+        lastResponse = put(lastMovementPath, lastMovementBody);
+    }
+
+    @When("an asset transfer with raw quantity {string} of {string} of class {string} is requested into {string}")
+    public void anAssetTransferWithRawQuantityIsRequested(
+            String quantity, String symbol, String assetClass, String name) {
+        captureBefore(name);
+        lastMovementUid = UUID.randomUUID();
+        lastMovementPath = "/api/v1/accounts/%s/asset-transfers/%s".formatted(uid(name), lastMovementUid);
+        lastMovementBody = """
+                {"direction":"IN","assetSymbol":"%s","assetClass":"%s","quantity":"%s","costBasis":{"currency":"%s","minorUnits":1000}}""".formatted(symbol, assetClass, quantity, currencyOf(name));
+        currentAccount = name;
+        lastResponse = put(lastMovementPath, lastMovementBody);
+    }
+
+    @Then("the total quantity of {string} held in {string} is {word}")
+    public void theTotalQuantityOfHeldInIs(String symbol, String name, String expectedQuantity) {
+        var events = eventStore.read(new com.ffroliva.tinyledger.shared.AccountId(uid(name)));
+        var account = com.ffroliva.tinyledger.ledger.domain.Account.rehydrate(events);
+        var holding = account.holding(symbol, com.ffroliva.tinyledger.ledger.domain.AssetClass.EQUITY_ETF);
+        assertThat(holding.toDecimal().toPlainString()).isEqualTo(expectedQuantity);
+    }
+
+    @Then("the consumed tax lot is {string} with quantity {word} and cost basis {money}")
+    public void theConsumedTaxLotIs(String lotId, String quantity, long minorUnits) {
+        assertThat(text(lastResponse, "$.taxLots[0].lotId")).isEqualTo(lotId);
+        assertThat(text(lastResponse, "$.taxLots[0].quantity")).isEqualTo(quantity);
+        assertThat(number(lastResponse, "$.taxLots[0].costBasis.minorUnits")).isEqualTo(minorUnits);
     }
 
     @Then("the open response is 201 with a Location for the new account")

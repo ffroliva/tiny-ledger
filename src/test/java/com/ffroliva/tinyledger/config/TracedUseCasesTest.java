@@ -169,6 +169,11 @@ class TracedUseCasesTest {
         public MovementResult withdraw(Withdraw cmd) {
             return answer;
         }
+
+        @Override
+        public MovementResult transferAsset(com.ffroliva.tinyledger.ledger.application.port.in.AssetTransfer cmd) {
+            return answer;
+        }
     }
 
     private record ThrowingMovements(RuntimeException boom) implements RecordMovementUseCase {
@@ -179,6 +184,11 @@ class TracedUseCasesTest {
 
         @Override
         public MovementResult withdraw(Withdraw cmd) {
+            throw boom;
+        }
+
+        @Override
+        public MovementResult transferAsset(com.ffroliva.tinyledger.ledger.application.port.in.AssetTransfer cmd) {
             throw boom;
         }
     }

@@ -178,6 +178,42 @@ class RecordMovementServiceTest {
         assertThatThrownBy(() -> service.deposit(intoNothing)).isInstanceOf(AccountNotFoundException.class);
     }
 
+    @Test
+    void assetTransferInboundIsCreatedAndReplayed() {
+        UUID uid = UUID.randomUUID();
+        Quantity qty = Quantity.of("VOO", AssetClass.EQUITY_ETF, "10.500000");
+        Money costBasis = new Money(GBP, 450_000);
+        AssetTransfer cmd = new AssetTransfer("alice", false, opened, uid, "IN", qty, costBasis, "lot-1", null, "buy");
+
+        MovementResult created = service.transferAsset(cmd);
+        assertThat(created.outcome()).isEqualTo(Outcome.CREATED);
+        assertThat(created.quantity()).isEqualTo(qty);
+        assertThat(created.amount()).isEqualTo(costBasis);
+        assertThat(created.taxLots()).hasSize(1);
+        assertThat(published).hasSize(2); // AccountOpened + AssetTransferred
+
+        MovementResult replayed = service.transferAsset(cmd);
+        assertThat(replayed.outcome()).isEqualTo(Outcome.REPLAYED);
+        assertThat(replayed.quantity()).isEqualTo(qty);
+        assertThat(store.read(opened)).hasSize(2);
+    }
+
+    @Test
+    void assetTransferOutboundWithInsufficientHoldingIsRejectedAndReplaysAsRejected() {
+        UUID uid = UUID.randomUUID();
+        Quantity qty = Quantity.of("VOO", AssetClass.EQUITY_ETF, "10.000000");
+        AssetTransfer cmd =
+                new AssetTransfer("alice", false, opened, uid, "OUT", qty, null, null, TaxLotSelector.HIFO, "sell");
+
+        MovementResult rejected = service.transferAsset(cmd);
+        assertThat(rejected.outcome()).isEqualTo(Outcome.REJECTED);
+        assertThat(rejected.rejectionReason()).isEqualTo("insufficient-holding");
+
+        MovementResult replayed = service.transferAsset(cmd);
+        assertThat(replayed.outcome()).isEqualTo(Outcome.REJECTED_REPLAYED);
+        assertThat(replayed.rejectionReason()).isEqualTo("insufficient-holding");
+    }
+
     /** Minimal fake honouring the port contract; the real contract suite is Task 6. */
     static class FakeStore implements EventStorePort {
         final Map<AccountId, List<LedgerEvent>> streams = new HashMap<>();

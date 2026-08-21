@@ -4,4 +4,6 @@ public interface RecordMovementUseCase {
     MovementResult deposit(Deposit cmd);
 
     MovementResult withdraw(Withdraw cmd);
+
+    MovementResult transferAsset(AssetTransfer cmd);
 }

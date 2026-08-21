@@ -54,5 +54,11 @@ final class TransactionalUseCases {
         public MovementResult withdraw(Withdraw cmd) {
             return delegate.withdraw(cmd);
         }
+
+        @Override
+        @Transactional
+        public MovementResult transferAsset(com.ffroliva.tinyledger.ledger.application.port.in.AssetTransfer cmd) {
+            return delegate.transferAsset(cmd);
+        }
     }
 }
