@@ -52,7 +52,8 @@ class LedgerEventTypeTest {
         // A failure here is a rename of stored data, which is never what was intended: a genuinely new
         // shape is a NEW event type added alongside, never a new spelling of an existing one.
         assertThat(LedgerEventType.registered().keySet())
-                .containsExactlyInAnyOrder("AccountOpened", "MoneyDeposited", "MoneyWithdrawn", "MovementRejected");
+                .containsExactlyInAnyOrder(
+                        "AccountOpened", "MoneyDeposited", "MoneyWithdrawn", "AssetTransferred", "MovementRejected");
     }
 
     @Test

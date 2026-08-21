@@ -249,4 +249,247 @@ class AccountTest {
                 .deposit(new Deposit("alice", false, id, UUID.randomUUID(), new Money(GBP, 2_500), null), T));
         assertThat(Account.rehydrate(history).balance()).isEqualTo(new Money(GBP, 7_500));
     }
+
+    @Test
+    void inboundAssetTransferEmitsAssetTransferredWithTaxLotAndConservesHoldings() {
+        Account account = openedWith(10_000);
+        Quantity qty = Quantity.of("VOO", AssetClass.EQUITY_ETF, "10.500000");
+        Money costBasis = new Money(GBP, 450_000); // £4,500.00
+        AssetTransfer cmd = new AssetTransfer(
+                "alice", false, account.id(), UUID.randomUUID(), "IN", qty, costBasis, "lot-1", null, "VOO buy");
+
+        List<MovementEvent> events = account.transferAsset(cmd, T);
+        assertThat(events).singleElement().isInstanceOf(AssetTransferred.class);
+        AssetTransferred transferred = (AssetTransferred) events.getFirst();
+        assertThat(transferred.quantity()).isEqualTo(qty);
+        assertThat(transferred.costBasis()).isEqualTo(costBasis);
+        assertThat(transferred.taxLots()).hasSize(1);
+        assertThat(transferred.taxLots().getFirst().lotId()).isEqualTo("lot-1");
+        assertThat(transferred.actor()).isEqualTo("alice");
+
+        List<LedgerEvent> history = new ArrayList<>(historyWith(10_000));
+        history.addAll(events);
+        Account rehydrated = Account.rehydrate(history);
+        assertThat(rehydrated.holding("VOO", AssetClass.EQUITY_ETF)).isEqualTo(qty);
+        assertThat(rehydrated.costBasis("VOO", AssetClass.EQUITY_ETF)).isEqualTo(costBasis);
+    }
+
+    @Test
+    void outboundAssetTransferWithHifoSelectsHighestCostLotFirstAndCancelsMatchedQuantity() {
+        Account account = openedWith(10_000);
+        Quantity qty1 = Quantity.of("VOO", AssetClass.EQUITY_ETF, "10.000000");
+        Quantity qty2 = Quantity.of("VOO", AssetClass.EQUITY_ETF, "10.000000");
+        Money cost1 = new Money(GBP, 400_000); // £400/share
+        Money cost2 = new Money(GBP, 500_000); // £500/share
+
+        List<LedgerEvent> history = new ArrayList<>(historyWith(10_000));
+        history.addAll(account.transferAsset(
+                new AssetTransfer(
+                        "alice", false, account.id(), UUID.randomUUID(), "IN", qty1, cost1, "lot-cheap", null, "in 1"),
+                T));
+        account = Account.rehydrate(history);
+        history.addAll(account.transferAsset(
+                new AssetTransfer(
+                        "alice",
+                        false,
+                        account.id(),
+                        UUID.randomUUID(),
+                        "IN",
+                        qty2,
+                        cost2,
+                        "lot-expensive",
+                        null,
+                        "in 2"),
+                T));
+        account = Account.rehydrate(history);
+
+        // Outbound 5 shares using HIFO should consume from lot-expensive
+        Quantity disposeQty = Quantity.of("VOO", AssetClass.EQUITY_ETF, "5.000000");
+        AssetTransfer outCmd = new AssetTransfer(
+                "alice",
+                false,
+                account.id(),
+                UUID.randomUUID(),
+                "OUT",
+                disposeQty,
+                null,
+                null,
+                TaxLotSelector.HIFO,
+                "out 1");
+
+        List<MovementEvent> outEvents = account.transferAsset(outCmd, T);
+        assertThat(outEvents).singleElement().isInstanceOf(AssetTransferred.class);
+        AssetTransferred outTransferred = (AssetTransferred) outEvents.getFirst();
+        assertThat(outTransferred.quantity()).isEqualTo(Quantity.of("VOO", AssetClass.EQUITY_ETF, "-5.000000"));
+        assertThat(outTransferred.costBasis()).isEqualTo(new Money(GBP, 250_000));
+        assertThat(outTransferred.taxLots()).hasSize(1);
+        assertThat(outTransferred.taxLots().getFirst().lotId()).isEqualTo("lot-expensive");
+
+        history.addAll(outEvents);
+        Account rehydrated = Account.rehydrate(history);
+        assertThat(rehydrated.holding("VOO", AssetClass.EQUITY_ETF))
+                .isEqualTo(Quantity.of("VOO", AssetClass.EQUITY_ETF, "15.000000"));
+
+        // Dispose remaining 15.000000 shares to assert complete conservation (+20 - 5 - 15 == 0)
+        Quantity disposeRemaining = Quantity.of("VOO", AssetClass.EQUITY_ETF, "15.000000");
+        history.addAll(rehydrated.transferAsset(
+                new AssetTransfer(
+                        "alice",
+                        false,
+                        account.id(),
+                        UUID.randomUUID(),
+                        "OUT",
+                        disposeRemaining,
+                        null,
+                        null,
+                        TaxLotSelector.HIFO,
+                        "out 2"),
+                T));
+        Account emptyHoldings = Account.rehydrate(history);
+        assertThat(emptyHoldings.holding("VOO", AssetClass.EQUITY_ETF).isZero()).isTrue();
+    }
+
+    @Test
+    void outboundAssetTransferBeyondHeldQuantityEmitsInsufficientHolding() {
+        Account account = openedWith(10_000);
+        Quantity qty = Quantity.of("VOO", AssetClass.EQUITY_ETF, "5.000000");
+        Money costBasis = new Money(GBP, 200_000);
+
+        List<LedgerEvent> history = new ArrayList<>(historyWith(10_000));
+        history.addAll(account.transferAsset(
+                new AssetTransfer(
+                        "alice", false, account.id(), UUID.randomUUID(), "IN", qty, costBasis, "lot-1", null, "in"),
+                T));
+        account = Account.rehydrate(history);
+
+        Quantity excess = Quantity.of("VOO", AssetClass.EQUITY_ETF, "10.000000");
+        List<MovementEvent> outEvents = account.transferAsset(
+                new AssetTransfer(
+                        "alice",
+                        false,
+                        account.id(),
+                        UUID.randomUUID(),
+                        "OUT",
+                        excess,
+                        null,
+                        null,
+                        TaxLotSelector.HIFO,
+                        "out"),
+                T);
+        assertThat(outEvents).singleElement().isInstanceOf(MovementRejected.class);
+        MovementRejected rejected = (MovementRejected) outEvents.getFirst();
+        assertThat(rejected.reason()).isEqualTo("insufficient-holding");
+    }
+
+    @Test
+    void assetTransferWithMismatchedCostBasisCurrencyEmitsCurrencyMismatch() {
+        Account account = openedWith(10_000);
+        Quantity qty = Quantity.of("VOO", AssetClass.EQUITY_ETF, "5.000000");
+        Money eurBasis = Money.of("EUR", 200_00);
+
+        List<MovementEvent> events = account.transferAsset(
+                new AssetTransfer(
+                        "alice", false, account.id(), UUID.randomUUID(), "IN", qty, eurBasis, "lot-1", null, "in"),
+                T);
+        assertThat(events).singleElement().isInstanceOf(MovementRejected.class);
+        MovementRejected rejected = (MovementRejected) events.getFirst();
+        assertThat(rejected.reason()).isEqualTo("currency-mismatch");
+    }
+
+    @Test
+    void assetTransferGuardsAndBranches() {
+        Account account = openedWith(10_000);
+        Quantity qty = Quantity.of("VOO", AssetClass.EQUITY_ETF, "5.000000");
+
+        // Non-positive quantity
+        assertThatThrownBy(() -> account.transferAsset(
+                        new AssetTransfer(
+                                "alice",
+                                false,
+                                account.id(),
+                                UUID.randomUUID(),
+                                "IN",
+                                Quantity.zero("VOO", AssetClass.EQUITY_ETF),
+                                new Money(GBP, 100),
+                                null,
+                                null,
+                                null),
+                        T))
+                .isInstanceOf(InvalidAmountException.class);
+
+        // Null or negative cost basis on IN
+        assertThatThrownBy(() -> account.transferAsset(
+                        new AssetTransfer(
+                                "alice", false, account.id(), UUID.randomUUID(), "IN", qty, null, null, null, null),
+                        T))
+                .isInstanceOf(InvalidAmountException.class);
+        assertThatThrownBy(() -> account.transferAsset(
+                        new AssetTransfer(
+                                "alice",
+                                false,
+                                account.id(),
+                                UUID.randomUUID(),
+                                "IN",
+                                qty,
+                                new Money(GBP, -100),
+                                null,
+                                null,
+                                null),
+                        T))
+                .isInstanceOf(InvalidAmountException.class);
+
+        // Invalid direction
+        assertThatThrownBy(() -> account.transferAsset(
+                        new AssetTransfer(
+                                "alice",
+                                false,
+                                account.id(),
+                                UUID.randomUUID(),
+                                "INVALID",
+                                qty,
+                                new Money(GBP, 100),
+                                null,
+                                null,
+                                null),
+                        T))
+                .isInstanceOf(InvalidAmountException.class);
+
+        // Empty book queries
+        assertThat(account.lots("VOO", AssetClass.EQUITY_ETF)).isEmpty();
+        assertThat(account.holding("VOO", AssetClass.EQUITY_ETF))
+                .isEqualTo(Quantity.zero("VOO", AssetClass.EQUITY_ETF));
+        assertThat(account.costBasis("VOO", AssetClass.EQUITY_ETF)).isEqualTo(new Money(GBP, 0));
+
+        // Inbound with null lotId defaults to movementUid
+        UUID movementUid = UUID.randomUUID();
+        List<MovementEvent> inEvents = account.transferAsset(
+                new AssetTransfer(
+                        "alice",
+                        false,
+                        account.id(),
+                        movementUid,
+                        "IN",
+                        qty,
+                        new Money(GBP, 200_000),
+                        null,
+                        null,
+                        "in"),
+                T);
+        assertThat(((AssetTransferred) inEvents.getFirst()).taxLots().getFirst().lotId())
+                .isEqualTo(movementUid.toString());
+
+        List<LedgerEvent> history = new ArrayList<>(historyWith(10_000));
+        history.addAll(inEvents);
+        Account withLots = Account.rehydrate(history);
+        assertThat(withLots.lots("VOO", AssetClass.EQUITY_ETF)).hasSize(1);
+
+        // Outbound with null selector (defaults to HIFO in aggregate and rehydrate)
+        List<MovementEvent> outEvents = withLots.transferAsset(
+                new AssetTransfer(
+                        "alice", false, withLots.id(), UUID.randomUUID(), "OUT", qty, null, null, null, "out"),
+                T);
+        history.addAll(outEvents);
+        Account afterOut = Account.rehydrate(history);
+        assertThat(afterOut.holding("VOO", AssetClass.EQUITY_ETF).isZero()).isTrue();
+    }
 }

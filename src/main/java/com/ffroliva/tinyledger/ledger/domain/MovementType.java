@@ -2,5 +2,6 @@ package com.ffroliva.tinyledger.ledger.domain;
 
 public enum MovementType {
     DEPOSIT,
-    WITHDRAWAL
+    WITHDRAWAL,
+    ASSET_TRANSFER
 }

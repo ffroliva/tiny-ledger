@@ -60,6 +60,8 @@ class ErrorCodeTest {
                         "/errors/insufficient-funds",
                         "/errors/invalid-amount",
                         "/errors/currency-mismatch",
+                        "/errors/asset-mismatch",
+                        "/errors/insufficient-holding",
                         "/errors/version-conflict",
                         "/errors/idempotency-conflict",
                         "/errors/account-limit-reached",

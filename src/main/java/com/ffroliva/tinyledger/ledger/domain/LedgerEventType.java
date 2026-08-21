@@ -24,6 +24,7 @@ public final class LedgerEventType {
             AccountOpened.TYPE, AccountOpened.class,
             MoneyDeposited.TYPE, MoneyDeposited.class,
             MoneyWithdrawn.TYPE, MoneyWithdrawn.class,
+            AssetTransferred.TYPE, AssetTransferred.class,
             MovementRejected.TYPE, MovementRejected.class);
 
     private LedgerEventType() {}

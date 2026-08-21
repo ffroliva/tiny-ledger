@@ -19,6 +19,8 @@ public enum ErrorCode {
     ACCOUNT_LIMIT_REACHED(409, "/errors/account-limit-reached", "Account limit reached"),
     CURRENCY_MISMATCH(422, "/errors/currency-mismatch", "Currency mismatch"),
     INSUFFICIENT_FUNDS(422, "/errors/insufficient-funds", "Insufficient funds"),
+    ASSET_MISMATCH(422, "/errors/asset-mismatch", "Asset mismatch"),
+    INSUFFICIENT_HOLDING(422, "/errors/insufficient-holding", "Insufficient holding"),
     RATE_LIMIT_EXCEEDED(429, "/errors/rate-limit-exceeded", "Rate limit exceeded"),
     NOT_AVAILABLE_IN_STANDALONE(501, "/errors/not-available-in-standalone", "Not available in standalone"),
     EVENT_STORE_UNAVAILABLE(503, "/errors/event-store-unavailable", "Event store unavailable");
