@@ -81,6 +81,19 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
                         e.occurredAt(),
                         e.reference());
             }
+            case AssetTransferred e -> {
+                if (isAlreadyApplied(e.accountId(), e.version())) return;
+                updateBalance(e.accountId(), e.balanceAfter(), e.version(), e.occurredAt());
+                insertHistory(
+                        e.movementUid(),
+                        e.accountId(),
+                        MovementType.ASSET_TRANSFER,
+                        e.quantity().isPositive() ? TransactionView.IN : TransactionView.OUT,
+                        e.costBasis(),
+                        e.balanceAfter(),
+                        e.occurredAt(),
+                        e.reference());
+            }
             case MovementRejected e -> {
                 if (isAlreadyApplied(e.accountId(), e.version())) return;
                 jdbcTemplate.update(

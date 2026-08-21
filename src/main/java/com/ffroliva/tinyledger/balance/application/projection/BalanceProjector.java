@@ -26,6 +26,7 @@ public class BalanceProjector {
         switch (event) {
             case MoneyDeposited d -> cache.evict(d.accountId());
             case MoneyWithdrawn w -> cache.evict(w.accountId());
+            case com.ffroliva.tinyledger.ledger.domain.AssetTransferred a -> cache.evict(a.accountId());
             default -> {
                 /* AccountOpened has nothing to invalidate; MovementRejected moves no money */
             }

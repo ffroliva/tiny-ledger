@@ -92,6 +92,20 @@ public class InMemoryBalanceProjection implements BalanceProjectionPort {
                                 e.occurredAt(),
                                 e.reference()),
                         e.version());
+            case AssetTransferred e ->
+                settle(
+                        new TransactionView(
+                                e.movementUid(),
+                                e.accountId(),
+                                MovementType.ASSET_TRANSFER,
+                                e.quantity().isPositive() ? TransactionView.IN : TransactionView.OUT,
+                                e.costBasis(),
+                                e.balanceAfter(),
+                                TransactionView.SETTLED,
+                                e.occurredAt(),
+                                e.occurredAt(),
+                                e.reference()),
+                        e.version());
             // moves no money and never reaches the feed — the raw stream is the auditor's view.
             // The staleness markers still advance so a reader can tell the projection consumed it.
             case MovementRejected e ->

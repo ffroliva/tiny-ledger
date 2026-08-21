@@ -178,6 +178,113 @@ class RecordMovementServiceTest {
         assertThatThrownBy(() -> service.deposit(intoNothing)).isInstanceOf(AccountNotFoundException.class);
     }
 
+    @Test
+    void assetTransferInboundIsCreatedAndReplayed() {
+        UUID uid = UUID.randomUUID();
+        Quantity qty = Quantity.of("VOO", AssetClass.EQUITY_ETF, "10.500000");
+        Money costBasis = new Money(GBP, 450_000);
+        AssetTransfer cmd = new AssetTransfer("alice", false, opened, uid, "IN", qty, costBasis, "lot-1", null, "buy");
+
+        MovementResult created = service.transferAsset(cmd);
+        assertThat(created.outcome()).isEqualTo(Outcome.CREATED);
+        assertThat(created.quantity()).isEqualTo(qty);
+        assertThat(created.amount()).isEqualTo(costBasis);
+        assertThat(created.taxLots()).hasSize(1);
+        assertThat(published).hasSize(2); // AccountOpened + AssetTransferred
+
+        MovementResult replayed = service.transferAsset(cmd);
+        assertThat(replayed.outcome()).isEqualTo(Outcome.REPLAYED);
+        assertThat(replayed.quantity()).isEqualTo(qty);
+        assertThat(store.read(opened)).hasSize(2);
+    }
+
+    @Test
+    void assetTransferOutboundWithInsufficientHoldingIsRejectedAndReplaysAsRejected() {
+        UUID uid = UUID.randomUUID();
+        Quantity qty = Quantity.of("VOO", AssetClass.EQUITY_ETF, "10.000000");
+        AssetTransfer cmd =
+                new AssetTransfer("alice", false, opened, uid, "OUT", qty, null, null, TaxLotSelector.HIFO, "sell");
+
+        MovementResult rejected = service.transferAsset(cmd);
+        assertThat(rejected.outcome()).isEqualTo(Outcome.REJECTED);
+        assertThat(rejected.rejectionReason()).isEqualTo("insufficient-holding");
+
+        MovementResult replayed = service.transferAsset(cmd);
+        assertThat(replayed.outcome()).isEqualTo(Outcome.REJECTED_REPLAYED);
+        assertThat(replayed.rejectionReason()).isEqualTo("insufficient-holding");
+    }
+
+    @Test
+    void assetTransferUnknownAccountThrowsAccountNotFound() {
+        AssetTransfer cmd = new AssetTransfer(
+                "alice",
+                false,
+                AccountId.random(),
+                UUID.randomUUID(),
+                "IN",
+                Quantity.of("VOO", AssetClass.EQUITY_ETF, "1.000000"),
+                new Money(GBP, 100),
+                null,
+                null,
+                null);
+        assertThatThrownBy(() -> service.transferAsset(cmd)).isInstanceOf(AccountNotFoundException.class);
+    }
+
+    @Test
+    void assetTransferWrongOwnerThrowsOwnershipException() {
+        AssetTransfer cmd = new AssetTransfer(
+                "mallory",
+                false,
+                opened,
+                UUID.randomUUID(),
+                "IN",
+                Quantity.of("VOO", AssetClass.EQUITY_ETF, "1.000000"),
+                new Money(GBP, 100),
+                null,
+                null,
+                null);
+        assertThatThrownBy(() -> service.transferAsset(cmd)).isInstanceOf(OwnershipException.class);
+    }
+
+    @Test
+    void assetTransferAdminCanActOnBehalfOf() {
+        AssetTransfer cmd = new AssetTransfer(
+                "trent",
+                true,
+                opened,
+                UUID.randomUUID(),
+                "IN",
+                Quantity.of("VOO", AssetClass.EQUITY_ETF, "1.000000"),
+                new Money(GBP, 100),
+                null,
+                null,
+                null);
+        MovementResult result = service.transferAsset(cmd);
+        assertThat(result.outcome()).isEqualTo(Outcome.CREATED);
+    }
+
+    @Test
+    void assetTransferDifferentPayloadThrowsIdempotencyConflict() {
+        UUID uid = UUID.randomUUID();
+        Quantity qty = Quantity.of("VOO", AssetClass.EQUITY_ETF, "10.000000");
+        AssetTransfer cmd1 =
+                new AssetTransfer("alice", false, opened, uid, "IN", qty, new Money(GBP, 4000_00), null, null, "first");
+        service.transferAsset(cmd1);
+
+        AssetTransfer cmd2 = new AssetTransfer(
+                "alice",
+                false,
+                opened,
+                uid,
+                "IN",
+                Quantity.of("VOO", AssetClass.EQUITY_ETF, "5.000000"),
+                new Money(GBP, 2000_00),
+                null,
+                null,
+                "second");
+        assertThatThrownBy(() -> service.transferAsset(cmd2)).isInstanceOf(IdempotencyConflictException.class);
+    }
+
     /** Minimal fake honouring the port contract; the real contract suite is Task 6. */
     static class FakeStore implements EventStorePort {
         final Map<AccountId, List<LedgerEvent>> streams = new HashMap<>();

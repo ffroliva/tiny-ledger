@@ -98,6 +98,17 @@ public class LedgerController implements MovementsApi {
                 request);
     }
 
+    @Override
+    public ResponseEntity<com.ffroliva.tinyledger.api.generated.model.AssetTransaction> putAssetTransfer(
+            UUID accountUid,
+            UUID transferUid,
+            com.ffroliva.tinyledger.api.generated.model.AssetTransferRequest request) {
+        return respondAsset(
+                recordMovement.transferAsset(LedgerApiMapper.toCommand(
+                        accountUid, transferUid, request, callerPrincipal.current(), callerPrincipal.isAdmin())),
+                request);
+    }
+
     @GetMapping(
             path = "/api/v1/accounts/{accountUid}/balance",
             params = "consistency=strong",
@@ -117,6 +128,16 @@ public class LedgerController implements MovementsApi {
             case CREATED ->
                 ResponseEntity.status(HttpStatus.CREATED).body(LedgerApiMapper.toTransaction(result, request));
             case REPLAYED -> ResponseEntity.ok(LedgerApiMapper.toTransaction(result, request));
+            case REJECTED, REJECTED_REPLAYED -> throw LedgerApiMapper.rejection(result);
+        };
+    }
+
+    private static ResponseEntity<com.ffroliva.tinyledger.api.generated.model.AssetTransaction> respondAsset(
+            MovementResult result, com.ffroliva.tinyledger.api.generated.model.AssetTransferRequest request) {
+        return switch (result.outcome()) {
+            case CREATED ->
+                ResponseEntity.status(HttpStatus.CREATED).body(LedgerApiMapper.toAssetTransaction(result, request));
+            case REPLAYED -> ResponseEntity.ok(LedgerApiMapper.toAssetTransaction(result, request));
             case REJECTED, REJECTED_REPLAYED -> throw LedgerApiMapper.rejection(result);
         };
     }

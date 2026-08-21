@@ -257,6 +257,78 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/EventStoreUnavailable' }
 
+  /api/v1/accounts/{accountUid}/asset-transfers/{transferUid}:
+    parameters:
+      - $ref: '#/components/parameters/AccountUid'
+      - name: transferUid
+        in: path
+        required: true
+        description: Client-generated UUID — the asset transfer's identity and its dedup key (§6.3).
+        example: 3b2a19c7-4e82-4f06-b9d3-8e7d5c4b1a20
+        schema:
+          type: string
+          format: uuid
+    put:
+      tags: [movements]
+      operationId: putAssetTransfer
+      summary: Transfer ETF assets with tax-lot allocation
+      description: |
+        Idempotent by identity (§6.3). Supports inbound ETF asset transfer (acquisition with cost-basis and lot ID)
+        and outbound ETF asset transfer (disposal with tax-lot selection such as HIFO or FIFO).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetTransferRequest'
+      responses:
+        '201':
+          description: Asset transfer recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetTransaction'
+        '200':
+          description: Replay of an identical asset transfer — the original result, never re-applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetTransaction'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/AccountNotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: |
+            The movement was refused by a business invariant (§6.5) — insufficient asset holding, asset mismatch, or
+            cost basis currency mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                insufficientHolding:
+                  summary: Insufficient holding
+                  value:
+                    type: /errors/insufficient-holding
+                    title: Insufficient holding
+                    status: 422
+                    detail: The account asset holding is lower than the requested transfer.
+                    traceId: 7c6f2e1a9b4d5c30
+                currencyMismatch:
+                  $ref: '#/components/examples/CurrencyMismatch'
+                assetMismatch:
+                  summary: Asset mismatch
+                  value:
+                    type: /errors/asset-mismatch
+                    title: Asset mismatch
+                    status: 422
+                    detail: Asset class or symbol mismatch.
+                    traceId: 7c6f2e1a9b4d5c30
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/EventStoreUnavailable' }
+
   /api/v1/accounts/{accountUid}/balance:
     parameters:
       - $ref: '#/components/parameters/AccountUid'
@@ -755,7 +827,7 @@ components:
           example: f91e6c0e-1f3d-4b2a-9c77-0b1c2d3e4f50
         type:
           type: string
-          enum: [DEPOSIT, WITHDRAWAL]
+          enum: [DEPOSIT, WITHDRAWAL, ASSET_TRANSFER]
           example: DEPOSIT
         direction:
           type: string
@@ -834,7 +906,7 @@ components:
           example: 2
         type:
           type: string
-          enum: [AccountOpened, MoneyDeposited, MoneyWithdrawn, MovementRejected]
+          enum: [AccountOpened, MoneyDeposited, MoneyWithdrawn, AssetTransferred, MovementRejected]
           example: MoneyDeposited
         occurredAt:
           type: string
@@ -896,7 +968,7 @@ components:
           example: 2
         type:
           type: string
-          enum: [AccountOpened, MoneyDeposited, MoneyWithdrawn, MovementRejected]
+          enum: [AccountOpened, MoneyDeposited, MoneyWithdrawn, AssetTransferred, MovementRejected]
           example: MoneyDeposited
         occurredAt:
           type: string
@@ -940,6 +1012,129 @@ components:
               actor: alice
         links:
           $ref: '#/components/schemas/PageLinks'
+
+    AssetClassEnum:
+      type: string
+      enum: [EQUITY_ETF, BOND_ETF, CURRENCY]
+      example: EQUITY_ETF
+
+    TaxLotSelectorEnum:
+      type: string
+      enum: [HIFO, FIFO]
+      example: HIFO
+
+    TaxLotDto:
+      type: object
+      required: [lotId, quantity, costBasis, acquiredAt]
+      properties:
+        lotId:
+          type: string
+          example: lot-voo-001
+        quantity:
+          type: string
+          description: Fractional quantity with 6 decimal places (micro-units).
+          example: '10.500000'
+        costBasis:
+          $ref: '#/components/schemas/Money'
+        acquiredAt:
+          type: string
+          format: date-time
+          example: '2026-08-21T10:00:00Z'
+
+    AssetTransferRequest:
+      type: object
+      required: [direction, assetSymbol, assetClass, quantity]
+      properties:
+        direction:
+          type: string
+          enum: [IN, OUT]
+          example: IN
+        assetSymbol:
+          type: string
+          minLength: 1
+          maxLength: 10
+          example: VOO
+        assetClass:
+          $ref: '#/components/schemas/AssetClassEnum'
+        quantity:
+          type: string
+          description: Fractional share quantity with up to 6 decimal places.
+          example: '10.500000'
+        costBasis:
+          $ref: '#/components/schemas/Money'
+        lotId:
+          type: string
+          description: Optional acquisition lot ID (for IN direction).
+          example: lot-voo-001
+        selector:
+          $ref: '#/components/schemas/TaxLotSelectorEnum'
+        reference:
+          type: string
+          maxLength: 140
+          example: VOO ETF allocation
+
+    AssetTransaction:
+      type: object
+      required:
+        - transactionUid
+        - accountUid
+        - type
+        - direction
+        - assetSymbol
+        - assetClass
+        - quantity
+        - costBasis
+        - status
+        - transactionTime
+        - settlementTime
+      properties:
+        transactionUid:
+          type: string
+          format: uuid
+          example: 3b2a19c7-4e82-4f06-b9d3-8e7d5c4b1a20
+        accountUid:
+          type: string
+          format: uuid
+          example: f91e6c0e-1f3d-4b2a-9c77-0b1c2d3e4f50
+        type:
+          type: string
+          enum: [DEPOSIT, WITHDRAWAL, ASSET_TRANSFER]
+          example: ASSET_TRANSFER
+        direction:
+          type: string
+          enum: [IN, OUT]
+          example: IN
+        assetSymbol:
+          type: string
+          example: VOO
+        assetClass:
+          $ref: '#/components/schemas/AssetClassEnum'
+        quantity:
+          type: string
+          example: '10.500000'
+        costBasis:
+          $ref: '#/components/schemas/Money'
+        taxLots:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxLotDto'
+        balanceAfter:
+          $ref: '#/components/schemas/Money'
+        status:
+          type: string
+          enum: [SETTLED, PENDING, REVERSED]
+          example: SETTLED
+        transactionTime:
+          type: string
+          format: date-time
+          example: '2026-08-21T10:00:00Z'
+        settlementTime:
+          type: string
+          format: date-time
+          example: '2026-08-21T10:00:00Z'
+        reference:
+          type: string
+          example: VOO ETF allocation
 
     ProblemDetail:
       type: object

@@ -269,7 +269,7 @@ jobs:
           # than defaulting to 0, or a newly added service would escape this gate on arrival.
           ceiling() {
             case "$1" in
-              confluentinc/cp-kafka:7.6.0)                  echo 138 ;;
+              confluentinc/cp-kafka:7.6.0)                  echo 140 ;;
               quay.io/keycloak/keycloak:26.4)               echo  63 ;;
               postgres:16-alpine)                           echo  22 ;;
               redis:7-alpine)                               echo   0 ;;

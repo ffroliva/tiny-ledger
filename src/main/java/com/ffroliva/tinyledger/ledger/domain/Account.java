@@ -1,5 +1,6 @@
 package com.ffroliva.tinyledger.ledger.domain;
 
+import com.ffroliva.tinyledger.ledger.application.port.in.AssetTransfer;
 import com.ffroliva.tinyledger.ledger.application.port.in.Deposit;
 import com.ffroliva.tinyledger.ledger.application.port.in.OpenAccount;
 import com.ffroliva.tinyledger.ledger.application.port.in.Withdraw;
@@ -9,7 +10,9 @@ import com.ffroliva.tinyledger.shared.Money;
 import com.ffroliva.tinyledger.shared.error.InvalidAmountException;
 import java.time.Instant;
 import java.util.Currency;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class Account {
     private final AccountId id;
@@ -18,6 +21,7 @@ public final class Account {
     private final Currency currency;
     private long version;
     private long balanceMinorUnits;
+    private final Map<String, TaxLotAggregate> assetHoldings = new HashMap<>();
 
     /**
      * Takes the opening event, not a bare id, and that is the point: {@code owner}, {@code name} and
@@ -106,6 +110,81 @@ public final class Account {
                 id, version + 1, now, cmd.movementUid(), cmd.amount(), cmd.reference(), after, cmd.caller()));
     }
 
+    public List<MovementEvent> transferAsset(AssetTransfer cmd, Instant now) {
+        Quantity qty = cmd.quantity();
+        if (!qty.isPositive()) {
+            throw new InvalidAmountException("quantity must be positive");
+        }
+
+        if ("IN".equalsIgnoreCase(cmd.direction())) {
+            Money basis = cmd.costBasis();
+            if (basis == null || basis.isNegative()) {
+                throw new InvalidAmountException("cost basis must be non-negative");
+            }
+            if (!currency.equals(basis.currency())) {
+                return List.of(new MovementRejected(
+                        id,
+                        version + 1,
+                        now,
+                        cmd.movementUid(),
+                        MovementType.ASSET_TRANSFER,
+                        basis,
+                        "currency-mismatch",
+                        cmd.caller()));
+            }
+            String lotId = cmd.lotId() != null && !cmd.lotId().isBlank()
+                    ? cmd.lotId()
+                    : cmd.movementUid().toString();
+            TaxLot lot = new TaxLot(lotId, qty, basis, now);
+            TaxLotAggregate book = getOrCreateAggregate(qty.symbol(), qty.assetClass());
+            book.acquire(lot);
+            return List.of(new AssetTransferred(
+                    id,
+                    version + 1,
+                    now,
+                    cmd.movementUid(),
+                    qty,
+                    basis,
+                    List.of(lot),
+                    cmd.selector(),
+                    cmd.reference(),
+                    balance(),
+                    cmd.caller()));
+        } else if ("OUT".equalsIgnoreCase(cmd.direction())) {
+            TaxLotAggregate book =
+                    assetHoldings.get(qty.symbol() + ":" + qty.assetClass().name());
+            if (book == null || book.quantity().microUnits() < qty.microUnits()) {
+                return List.of(new MovementRejected(
+                        id,
+                        version + 1,
+                        now,
+                        cmd.movementUid(),
+                        MovementType.ASSET_TRANSFER,
+                        new Money(currency, 0),
+                        "insufficient-holding",
+                        cmd.caller()));
+            }
+            TaxLotSelector selector = cmd.selector() != null ? cmd.selector() : TaxLotSelector.HIFO;
+            List<TaxLot> consumed = book.dispose(qty, selector);
+            Money totalCostBasis = consumed.stream().map(TaxLot::costBasis).reduce(new Money(currency, 0), Money::plus);
+            Quantity disposedQty = qty.negated();
+            return List.of(new AssetTransferred(
+                    id,
+                    version + 1,
+                    now,
+                    cmd.movementUid(),
+                    disposedQty,
+                    totalCostBasis,
+                    consumed,
+                    selector,
+                    cmd.reference(),
+                    balance(),
+                    cmd.caller()));
+        } else {
+            throw new InvalidAmountException("direction must be IN or OUT");
+        }
+    }
+
     private void apply(LedgerEvent event) {
         if (event.version() != version + 1) {
             throw new IllegalStateException(
@@ -118,11 +197,42 @@ public final class Account {
             case AccountOpened e -> throw new IllegalStateException("a second AccountOpened at version " + e.version());
             case MoneyDeposited e -> balanceMinorUnits = e.balanceAfter().minorUnits();
             case MoneyWithdrawn e -> balanceMinorUnits = e.balanceAfter().minorUnits();
+            case AssetTransferred e -> {
+                if (e.quantity().isPositive()) {
+                    e.taxLots().forEach(lot -> getOrCreateAggregate(
+                                    e.quantity().symbol(), e.quantity().assetClass())
+                            .acquire(lot));
+                } else if (e.quantity().isNegative()) {
+                    TaxLotSelector sel = e.selector() != null ? e.selector() : TaxLotSelector.HIFO;
+                    getOrCreateAggregate(e.quantity().symbol(), e.quantity().assetClass())
+                            .dispose(e.quantity().negated(), sel);
+                }
+            }
             case MovementRejected _ -> {
                 /* recorded, no balance change */
             }
         }
         version = event.version();
+    }
+
+    private TaxLotAggregate getOrCreateAggregate(String symbol, AssetClass assetClass) {
+        return assetHoldings.computeIfAbsent(
+                symbol + ":" + assetClass.name(), _ -> TaxLotAggregate.of(symbol, assetClass, currency));
+    }
+
+    public Quantity holding(String symbol, AssetClass assetClass) {
+        TaxLotAggregate book = assetHoldings.get(symbol + ":" + assetClass.name());
+        return book != null ? book.quantity() : Quantity.zero(symbol, assetClass);
+    }
+
+    public Money costBasis(String symbol, AssetClass assetClass) {
+        TaxLotAggregate book = assetHoldings.get(symbol + ":" + assetClass.name());
+        return book != null ? book.costBasis() : new Money(currency, 0);
+    }
+
+    public List<TaxLot> lots(String symbol, AssetClass assetClass) {
+        TaxLotAggregate book = assetHoldings.get(symbol + ":" + assetClass.name());
+        return book != null ? book.lots() : List.of();
     }
 
     private static void requirePositive(Money amount) {

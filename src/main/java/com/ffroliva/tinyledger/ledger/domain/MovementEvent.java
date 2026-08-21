@@ -19,7 +19,8 @@ import java.util.UUID;
  * exhaustive over three arms, the impossible branch is gone rather than documented, and a future event
  * type carrying a movement UID has to say so by joining this interface.
  */
-public sealed interface MovementEvent extends LedgerEvent permits MoneyDeposited, MoneyWithdrawn, MovementRejected {
+public sealed interface MovementEvent extends LedgerEvent
+        permits MoneyDeposited, MoneyWithdrawn, AssetTransferred, MovementRejected {
 
     /** The client-supplied identity of the movement — its dedup key and its permanent name (§6.3). */
     UUID movementUid();
