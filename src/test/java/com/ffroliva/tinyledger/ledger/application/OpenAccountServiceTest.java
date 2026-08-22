@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.ffroliva.tinyledger.ledger.application.error.AccountLimitReachedException;
 import com.ffroliva.tinyledger.ledger.application.port.in.OpenAccount;
 import com.ffroliva.tinyledger.ledger.application.port.in.OpenedAccount;
+import com.ffroliva.tinyledger.ledger.application.port.out.EventPage;
 import com.ffroliva.tinyledger.ledger.application.port.out.EventStorePort;
 import com.ffroliva.tinyledger.ledger.application.usecase.OpenAccountService;
 import com.ffroliva.tinyledger.ledger.domain.AccountOpened;
@@ -94,6 +95,15 @@ class OpenAccountServiceTest {
         @Override
         public List<LedgerEvent> read(AccountId streamId) {
             return List.of();
+        }
+
+        /**
+         * Refuses rather than returning an empty page. This fake exists to record appends; a
+         * silent empty answer would let a future rebuild test pass while reading nothing.
+         */
+        @Override
+        public EventPage readAll(long fromGlobalIndex, int limit) {
+            throw new UnsupportedOperationException("RecordingStore does not implement readAll");
         }
 
         @Override

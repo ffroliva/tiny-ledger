@@ -105,10 +105,34 @@ public class PostgresBalanceProjection implements BalanceProjectionPort {
         }
     }
 
+    /**
+     * Idempotent on already-applied versions, and <strong>refuses</strong> anything ahead of the
+     * stream rather than applying it.
+     *
+     * <p>The refusal is the part worth explaining. Skipping {@code applied >= version} is ordinary
+     * idempotency. But the earlier guard stopped there, so an event arriving at v5 while the row sat
+     * at v2 was applied — writing the balance and jumping {@code stream_version} to 5, swallowing v3
+     * and v4 permanently with no exception, no counter and nothing to reconcile against.
+     *
+     * <p>That is safe only while delivery is in-process, in-order and inside the append transaction,
+     * where a gap can only mean the transaction failed and nothing was written at all. That is an
+     * assumption about the wiring, not an invariant this class enforces, and the day delivery becomes
+     * asynchronous it turns into silent data loss. {@code InMemoryBalanceProjection} already refuses
+     * the same input by buffering it. Failing loudly is the cheaper half of that difference: a gap
+     * that cannot happen costs nothing to check, and one that does must never be absorbed quietly.
+     */
     private boolean isAlreadyApplied(AccountId accountId, long version) {
         List<Long> versions = jdbcTemplate.queryForList(
                 "SELECT stream_version FROM balance_projections WHERE account_id = ?", Long.class, accountId.value());
-        return !versions.isEmpty() && versions.getFirst() >= version;
+        if (versions.isEmpty()) return false;
+        long applied = versions.getFirst();
+        if (applied >= version) return true;
+        if (version > applied + 1) {
+            throw new IllegalStateException("stream gap for account " + accountId.value() + ": projection is at v"
+                    + applied + " but received v" + version + "; versions " + (applied + 1) + ".." + (version - 1)
+                    + " never arrived");
+        }
+        return false;
     }
 
     private void updateBalance(AccountId accountId, Money balanceAfter, long version, Instant asOf) {

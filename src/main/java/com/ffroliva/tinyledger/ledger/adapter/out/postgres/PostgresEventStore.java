@@ -2,6 +2,7 @@ package com.ffroliva.tinyledger.ledger.adapter.out.postgres;
 
 import com.ffroliva.tinyledger.ledger.application.error.ConcurrencyConflictException;
 import com.ffroliva.tinyledger.ledger.application.error.DuplicateMovementException;
+import com.ffroliva.tinyledger.ledger.application.port.out.EventPage;
 import com.ffroliva.tinyledger.ledger.application.port.out.EventStorePort;
 import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
 import com.ffroliva.tinyledger.ledger.domain.LedgerEventType;
@@ -103,6 +104,30 @@ public class PostgresEventStore implements EventStorePort {
         String sql = "SELECT event_type, payload FROM events WHERE aggregate_id = ? ORDER BY sequence_number ASC";
         return jdbcTemplate.query(sql, eventRowMapper(), streamId.value());
     }
+
+    /**
+     * Pages the whole log on {@code global_index} — the BIGSERIAL that has been on the table since
+     * {@code 001-init-event-store.sql} and, until now, was written by the sequence and read by
+     * nobody. See {@link EventStorePort#readAll} for why this is bounded to offline use.
+     */
+    @Override
+    public EventPage readAll(long fromGlobalIndex, int limit) {
+        String sql = "SELECT event_type, payload, global_index FROM events "
+                + "WHERE global_index > ? ORDER BY global_index ASC LIMIT ?";
+        List<IndexedEvent> rows = jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new IndexedEvent(
+                        objectMapper.readValue(
+                                rs.getString("payload"), LedgerEventType.classOf(rs.getString("event_type"))),
+                        rs.getLong("global_index")),
+                fromGlobalIndex,
+                limit);
+        // An empty page must leave the cursor untouched, or a caller polling the tail rewinds.
+        long next = rows.isEmpty() ? fromGlobalIndex : rows.getLast().globalIndex();
+        return new EventPage(rows.stream().map(IndexedEvent::event).toList(), next);
+    }
+
+    private record IndexedEvent(LedgerEvent event, long globalIndex) {}
 
     @Override
     public Optional<MovementEvent> findByMovementUid(UUID movementUid) {

@@ -306,6 +306,14 @@ class RecordMovementServiceTest {
             return List.copyOf(streams.getOrDefault(id, List.of()));
         }
 
+        /**
+         * Refuses rather than returning an empty page: this fake keeps a per-stream map with no
+         * append order across streams, so it cannot answer a global read honestly.
+         */
+        public EventPage readAll(long fromGlobalIndex, int limit) {
+            throw new UnsupportedOperationException("FakeStore does not implement readAll");
+        }
+
         public Optional<MovementEvent> findByMovementUid(UUID uid) {
             // MovementEvent replaces the four-arm Optional<UUID> helper this fake used to carry:
             // "does this event have a movement uid" is now a type question, not a switch.
