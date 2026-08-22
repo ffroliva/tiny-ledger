@@ -3,6 +3,7 @@ package com.ffroliva.tinyledger.cucumber;
 import com.ffroliva.tinyledger.balance.application.port.out.BalanceCachePort;
 import com.ffroliva.tinyledger.balance.application.port.out.BalanceProjectionPort;
 import com.ffroliva.tinyledger.ledger.application.port.out.ClockPort;
+import com.ffroliva.tinyledger.ledger.application.port.out.EventPage;
 import com.ffroliva.tinyledger.ledger.application.port.out.EventStorePort;
 import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
 import com.ffroliva.tinyledger.ledger.domain.MovementEvent;
@@ -129,6 +130,12 @@ public class CucumberSpringConfig {
         public void disarm() {
             barrier.set(null);
             entrants.set(0);
+        }
+
+        /** Pure delegation: this decorator exists to inject a race into {@code read}, not here. */
+        @Override
+        public EventPage readAll(long fromGlobalIndex, int limit) {
+            return delegate.readAll(fromGlobalIndex, limit);
         }
 
         @Override
