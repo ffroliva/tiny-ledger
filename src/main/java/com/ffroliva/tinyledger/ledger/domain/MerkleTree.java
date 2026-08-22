@@ -92,20 +92,40 @@ public final class MerkleTree {
      */
     public static boolean verify(
             String leafHash, List<String> proofPath, String expectedRoot, int leafIndex, int treeSize) {
+        if (leafIndex < 0 || treeSize < 1 || leafIndex >= treeSize) {
+            return false;
+        }
         String current = leafHash;
         int index = leafIndex;
         int size = treeSize;
+        int consumed = 0;
 
-        for (String sibling : proofPath) {
-            if (index % 2 == 0) {
-                current = hashPair(current, sibling);
-            } else {
-                current = hashPair(sibling, current);
+        // WALK LEVELS, NOT PROOF ELEMENTS, and that distinction is the whole correctness argument.
+        // A previous version iterated `proofPath` and halved `index` once per sibling. That silently
+        // assumed every level contributes a sibling, which is false: `computeRoot` PROMOTES a lone
+        // odd node instead of pairing it, so that level emits no sibling while still halving the
+        // index. The two then disagreed about how far the index had been halved, the parity flipped,
+        // and `hashPair` was called with its operands the wrong way round — so a genuine proof for a
+        // genuine leaf returned false. It only showed up when a promotion sat below the level where
+        // a sibling was taken, which is why every power-of-two tree looked fine: sizes 1, 2, 4 and 8
+        // never promote. Sizes 3, 5, 6 and 7 do, and MerkleTreeTest now covers each of them.
+        //
+        // `treeSize` exists for exactly this and was previously computed into `size` and never read.
+        while (size > 1) {
+            boolean promoted = index == size - 1 && size % 2 == 1;
+            if (!promoted) {
+                if (consumed >= proofPath.size()) {
+                    return false; // the path is shorter than the tree's depth — not a valid proof
+                }
+                String sibling = proofPath.get(consumed++);
+                current = index % 2 == 0 ? hashPair(current, sibling) : hashPair(sibling, current);
             }
             index = index / 2;
             size = (size + 1) / 2;
         }
-        return current.equals(expectedRoot);
+        // A path with elements left over describes a different tree than the one claimed, so it is
+        // refused rather than ignored — an over-long proof must not verify by accident.
+        return consumed == proofPath.size() && current.equals(expectedRoot);
     }
 
     private static String computeRoot(List<String> hashes) {

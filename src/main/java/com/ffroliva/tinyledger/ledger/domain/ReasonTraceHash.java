@@ -38,6 +38,16 @@ public record ReasonTraceHash(String value) {
     public static ReasonTraceHash chain(String previousHash, String eventContent) {
         Objects.requireNonNull(previousHash, "previousHash");
         Objects.requireNonNull(eventContent, "eventContent");
+        // The fixed 64-character prefix is what makes the preimage unambiguous, and the "|" alone
+        // does NOT: with a free-length predecessor, ("a"*64, "|payload") and ("a"*64 + "|",
+        // "payload") build the identical preimage and therefore the identical digest — a collision
+        // an attacker chooses rather than finds. Found by ReasonTraceHashTest, which asserted the
+        // separator was sufficient and was wrong. Constraining the predecessor to the same shape
+        // this record already enforces on itself closes it by construction.
+        if (previousHash.length() != 64) {
+            throw new IllegalArgumentException(
+                    "previousHash must be a 64-character SHA-256 hex digest, got " + previousHash.length());
+        }
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             digest.update((previousHash + "|" + eventContent).getBytes(StandardCharsets.UTF_8));
