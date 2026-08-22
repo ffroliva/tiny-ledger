@@ -1,11 +1,13 @@
 package com.ffroliva.tinyledger.balance.adapter.out.postgres;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import com.ffroliva.tinyledger.ledger.domain.AssetClass;
@@ -34,6 +36,41 @@ class PostgresBalanceProjectionTest {
     void setUp() {
         jdbcTemplate = mock(JdbcTemplate.class);
         projection = new PostgresBalanceProjection(jdbcTemplate);
+    }
+
+    /**
+     * The guard skipped duplicates but applied anything <em>ahead</em> of the stream, jumping
+     * {@code stream_version} past the missing versions and swallowing them permanently — no
+     * exception, no counter, nothing to reconcile against. Safe only while delivery is in-process
+     * and in-order, which is an assumption rather than an enforced invariant, and the in-memory
+     * adapter refuses the same input. Refusing converts silent data loss into a loud failure.
+     */
+    @Test
+    void refusesAnEventAheadOfTheStreamRatherThanSwallowingTheGap() {
+        AccountId accountId = AccountId.random();
+        given(jdbcTemplate.queryForList(anyString(), eq(Long.class), eq(accountId.value())))
+                .willReturn(List.of(2L)); // projection sits at v2
+
+        AssetTransferred aheadByThree = new AssetTransferred(
+                accountId,
+                5, // v3 and v4 never arrived
+                NOW,
+                UUID.randomUUID(),
+                Quantity.of("VOO", AssetClass.EQUITY_ETF, "10.000000"),
+                new Money(GBP, 4000_00),
+                List.of(new TaxLot(
+                        "lot-1", Quantity.of("VOO", AssetClass.EQUITY_ETF, "10.000000"), new Money(GBP, 4000_00), NOW)),
+                TaxLotSelector.FIFO,
+                "buy VOO",
+                new Money(GBP, 5000_00),
+                "alice");
+
+        assertThatThrownBy(() -> projection.apply(aheadByThree))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("gap");
+
+        // and nothing was written: a refused event must not move the balance or the marker
+        verify(jdbcTemplate, never()).update(anyString(), any(), any(), any(), any(), any());
     }
 
     @Test
