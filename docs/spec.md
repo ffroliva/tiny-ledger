@@ -2352,6 +2352,43 @@ replica runs anywhere.
 | `GET /api/v1/accounts/{accountUid}/transactions` for an account that does not exist | 404 (§6.5) | **200 with an empty page** — the history service returns whatever the projection gives | **Unassigned.** As above |
 | §6.5's "no internal identifier crosses the API boundary" guarantee, for `/error` | Closed (v3.11: `ErrorMvcAutoConfiguration` excluded in both profiles) | **Only one instance is closed, not the class.** Excluding `ErrorMvcAutoConfiguration` removes Boot's `ErrorPageCustomizer`, so nothing escaping a filter reaches an error page this project owns — it falls through to Tomcat's own `ErrorReportValve`, which renders the path, the exception type, a **stack trace**, and the Tomcat version: strictly more than `BasicErrorController` ever leaked. No trigger is reachable today, so this is not live — but the guarantee now rests on "no filter throws" rather than on anything enforced, and `SecurityConfigIT#anErrorDispatchDoesNotEchoTheRequestPath` is a **MockMvc** test with no servlet container, structurally incapable of observing the valve | **Next plan.** Suggested remedy: a ~10-line `@RestController implements ErrorController` at `/error` returning a bare traced `ProblemDetail`, which keeps the container's dispatch pointed at code this project owns and closes the whole class |
 
+**Deferred with `EventStorePort.readAll`, opened 2026-08-22, not findings.** `readAll` delivers the
+*capability* a projection rebuild needs. Two things were deliberately left out of that change, each
+recorded with the condition that should reopen it — a deferral without a trigger is an omission with
+better manners.
+
+**1 · Snapshotting.** Not built, and not needed yet.
+
+*Measured:* in-memory replay is not the bottleneck — `docs/performance-findings.md` §2.1 records the
+fold at 0.036 µs for 10 events and 47.511 µs for 10,000 (~4.75 ns/event, linear), and
+`EventReplayBenchmark` states plainly that no snapshotting is exercised because none exists.
+
+*Not established:* the cost of the **fetch and deserialise** that precedes the fold. That is already
+this document's own top-priority unmeasured item, and it is the half that scales with stream length
+against the database rather than the CPU.
+
+*Trigger to reopen:* measure fetch-and-deserialise first. Snapshotting becomes justified when either a
+strong read (`?consistency=strong`) or a full rebuild exceeds its deadline **at a measured stream
+length**, not before. Building it earlier optimises a cost nobody has observed, and adds a second
+source of truth for balance to keep correct.
+
+**2 · A rebuild trigger — endpoint, CLI or startup hook.** Not built. `readAll` makes a rebuild
+*expressible*; nothing yet *performs* one.
+
+*Measured:* before this change a whole-projection rebuild was not reachable through the ports at all —
+`read(AccountId)` is single-stream and there was no global cursor, so scenario E8's "drop the
+projection entirely and replay" was asserted only against one account, in memory, in a test.
+
+*Not established:* who triggers a rebuild and under what authority; whether it runs online against a
+live projection or requires a quiesced window; how a partially-completed rebuild is made safe to
+resume; and what a caller reads while one is in flight.
+
+*Trigger to reopen:* the first time a rebuild must actually be **performed** — a corrupted or
+diverged projection, a schema migration that additive-only evolution cannot repair, or a backfill such
+as adding a tenant dimension. The port capability is what unblocks designs that depend on rebuild
+being *possible*; deciding who may invoke it is a separate decision with its own authorisation and
+availability questions, and it should not be smuggled in alongside a port method.
+
 ## Revision history
 
 | Version | Date | Change |
