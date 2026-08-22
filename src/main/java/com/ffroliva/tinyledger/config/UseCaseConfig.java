@@ -99,6 +99,16 @@ public class UseCaseConfig { // profile-independent — the whole trick of spec 
         return new StrongBalanceService(store, clock);
     }
 
+    // Reads the event stream directly, like strongBalance above and unlike the balance queries
+    // below — a proof computed from a projection would attest to the derivation rather than to the
+    // log. No transactional decorator: this only reads, in one call, and takes no ClockPort because
+    // nothing here is timestamped; the artefact is a function of the stream alone, which is what
+    // makes two callers on two days able to compare roots.
+    @Bean
+    QueryMerkleProofUseCase merkleProof(EventStorePort store) {
+        return new MerkleProofService(store);
+    }
+
     @Bean
     BalanceProjector balanceProjector(BalanceProjectionPort projection, BalanceCachePort cache) {
         return new BalanceProjector(projection, cache);
