@@ -15,9 +15,19 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
     ignore:
-      # Major bumps land as individual PRs, not in the group, because they need a human decision.
-      # Testcontainers 1.x -> 2.x was proposed on day one and would very likely have broken the
-      # integration suite: it is the base of every IT via AbstractIntegrationTest.
+      # Majors need a human decision — Testcontainers 1.x -> 2.x was proposed on day one and would
+      # very likely have broken the integration suite, being the base of every IT via
+      # AbstractIntegrationTest.
+      #
+      # CORRECTED: this comment used to read "Major bumps land as individual PRs, not in the group",
+      # which is not what the block below does. `ignore` SUPPRESSES them — majors are not proposed
+      # at all, in a group or otherwise, so the only signal that one exists is somebody noticing.
+      # That is a defensible policy and it is not the policy the comment described, which is the
+      # kind of gap AGENTS.md asks to be stated rather than left to be discovered.
+      #
+      # To get the behaviour the old comment claimed, delete this `ignore` block: with the group
+      # already restricted to minor+patch, majors then arrive as individual PRs. Left as a decision
+      # rather than made silently here.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
@@ -28,7 +38,31 @@ updates:
     open-pull-requests-limit: 3
     groups:
       actions:
+        # Minor and patch only, matching `maven` and `uv` above — this group used to match `*` with
+        # no restriction, so an action MAJOR rode in with the weekly batch.
+        #
+        # That matters more here than for a library. Two of this pipeline's gates ARE third-party
+        # actions: `trivy-action` carries the `exit-code: 1` that makes the image scan fail a
+        # required check, and `action-baseline` carries `fail_action: true`. A major of either can
+        # rename or re-default the very input that makes it a gate, turning it into a step that
+        # reports findings and exits 0 — the defect this repository has already shipped twice (the
+        # deleted stage 6, and Sonar before -Dsonar.qualitygate.wait=true). Reviewing that inside a
+        # four-action diff is how it goes unnoticed.
+        #
+        # Measured next door, not hypothesised: the same unrestricted group in ffroliva/agentic-wealth
+        # delivered three majors in one PR, including gitleaks-action v2 -> v3.0.0 — a SECRET SCANNER
+        # major batched with two routine bumps. It happened to be fine; that run was checked by hand.
+        # "We looked this time" is not a process.
+        #
+        # DELIBERATELY NO `ignore` BLOCK HERE, which makes this ecosystem behave differently from
+        # `maven` and `uv`: action majors are not suppressed, they arrive as individual PRs where
+        # the diff is the decision. Suppressing them would be the worse failure for this ecosystem
+        # specifically — every third-party action in this file is SHA-pinned
+        # (WorkflowGovernanceTest enforces it), and a pin that is never bumped is frozen on the
+        # commit it was pinned at, indefinitely. For libraries a missed major means staying on a
+        # working old version; for a SHA-pinned action it means never receiving a security fix.
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   # The Python CLI (spec §11, implementation-order step 10). `uv` reads pyproject.toml and uv.lock;
   # Dependabot's `uv` ecosystem understands both, so the lock stays authoritative rather than being
