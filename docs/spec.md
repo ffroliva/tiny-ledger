@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.56
+**Version:** 3.57
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -259,6 +259,64 @@ Named so the absence is visible rather than inferred:
 | Domain coverage ≥ 90% line / 85% branch | JaCoCo `check`, `PACKAGE` scope over `com.ffroliva.tinyledger.*.domain*` |
 | Dual-mode parity | **None, and none is needed** — the parity is structural (no adapter, no profile branch), so there is nothing a test could differentiate |
 | The scope boundary itself — that no endpoint gained an asset field | **None.** Nothing stops a later change wiring these types to the API without the §6.5 rows this section says they need |
+
+---
+
+### 2.6 Tamper evidence — the reason-trace chain and the Merkle root
+
+An event store is append-only by discipline, not by physics: whoever can write the table can edit
+it. This section is what makes an edit *detectable* rather than merely discouraged.
+
+`ReasonTraceHash.chain(previous, content)` computes `SHA-256(previous + "|" + content)` over each
+event in stream order, starting from a 64-zero genesis sentinel. Each hash therefore covers every
+event before it, so editing event 3 of 10 moves hashes 3 through 9. `MerkleTree` then summarises
+those hashes into one root and issues an O(log n) inclusion proof for any leaf.
+`QueryMerkleProofUseCase` returns the root, the full chain, the leaf count, and a proof for the
+latest event.
+
+#### The canonical form is a permanent contract
+
+The bytes an event is hashed as are defined by `EventCanonicalForm`, and **this is a wire contract,
+not an implementation detail**: once a stream has been hashed, changing what it produces changes
+every historical hash and invalidates every proof ever issued. Treat an edit the way
+`LedgerEvent.eventType()` treats a rename — the output is data, and a new shape is a field appended,
+never a reordering.
+
+| Decision | Why it is not the obvious alternative |
+|---|---|
+| **Not `toString()`** | Records generate one that looks identical, which is exactly the trap. Reordering two record components, renaming one, or adding a field silently rewrites the canonical form of every event already written — a refactor with no compile error and no test failure that retroactively breaks every proof. A named class puts that edit in a diff |
+| **Exhaustive switch, no `default` arm** | `LedgerEvent` is sealed, so a new event type fails to **compile** until it declares how it is hashed. A `default` arm would hash it by its common header alone, leaving the entire payload outside the digest and freely editable without detection. Same reasoning §2.3 records for `eventType()` |
+| **Fields are length-prefixed (`length:value`)** | `reference` and `reason` are caller-supplied free text. Delimiter-joining is not injective when a field can contain the delimiter, so an attacker picks content that re-splits into a different field layout and two distinct events hash alike — a collision *chosen* rather than found |
+| **Absent encodes differently from empty** (`-1:` vs `0:`) | §15.9 already treats an absent field as a meaningful state rather than a synonym for blank. Collapsing them would let a movement be stripped of its reference without moving its hash |
+| **Instants as seconds-and-nanos** | `Instant.toString()` omits trailing zeros, so one instant can render as two different strings depending on how the value was built, and which one a digest saw would depend on construction |
+
+#### What the proof does and does not attest to
+
+- It is computed from **`EventStorePort.read`, never from the balance projection.** A projection is
+  derived state, and a proof over derived state attests to the derivation rather than to the log.
+- The chain is **recomputed per call and never stored.** A stored chain is a second copy of the
+  truth that whoever can edit the events can edit alongside them.
+- The artefact carries **no timestamp and no randomness** — the service takes no `ClockPort` — so
+  the root is a function of the stream alone. That is what lets an auditor recompute it days later
+  and compare.
+- It attests to **this system's own log**. It is not a notarisation: nothing is published outside
+  the deployment, so an attacker who rewrites the events *and* recomputes the root leaves no
+  discrepancy here. Anchoring a root externally is the upgrade, and it is not built.
+
+#### Authorisation, stated because it is easy to assume otherwise
+
+`merkleProof` authorises by **ownership only**, exactly as `StrongBalanceService` does. An
+`ledger:auditor` is **not** admitted. No read in the `ledger` module admits one today, and widening
+§6.4 is a decision rather than a side effect of adding a query — recorded here rather than left for
+a reader to infer from the absence of a role check.
+
+| Claim | Gate |
+|---|---|
+| The chain detects an edit to any event, and to any successor | `MerkleProofServiceTest` — two stores, same account id, uids and timestamps, one edited reference; asserts the untouched first event hashes identically and every later hash moves |
+| Proofs verify at every stream length | `MerkleProofServiceTest` and `MerkleTreeTest` at sizes 1–8, so odd-node promotion is covered rather than avoided |
+| The canonical form is injective | `EventCanonicalFormTest` — each case changes exactly one field and requires the output to move |
+| A new event type cannot be added without declaring its canonical form | The compiler, via the sealed hierarchy and the `default`-free switch |
+| **The root is exposed to any caller** | **None — there is no endpoint.** §7 carries no route for this; the use case is wired and callable, and exposing it is a separate contract decision |
 
 ---
 
@@ -2483,3 +2541,4 @@ availability questions, and it should not be smuggled in alongside a port method
 | 3.54 | 2026-08-20 | **New §2.5: multi-asset positions and tax lots — domain types only, and the section says so before it says anything else.** `Quantity` is a second value type beside `Money` rather than a widened one: `java.util.Currency` has no instance for a ticker and carries two decimal places where a fractional share needs six, so shares are a `long` count of micro-units and the compiler, not a runtime guard, refuses to add 10.5 shares to $10.50. Excess precision is refused rather than rounded, and `(symbol, assetClass)` is the asset's whole identity because tickers repeat across instrument types. `TaxLot` holds the cost basis of the quantity *still held*, so both halves shrink together and a split rounds only the taken slice — the remainder absorbs it, which is why the double-entry equation in §2.5 holds by construction rather than by assertion. `TaxLotSelector` is a closed enum, `FIFO` and `HIFO`, ranking by cost **per unit** (a total-cost ranking hands HIFO the wrong lot whenever lot sizes differ) and breaking ties on `lotId` so a replay is reproducible. **Nothing reached the wire:** no endpoint, no event, no column, `MovementType` unchanged, `openapi.yaml` untouched — so §9.2b parity is structural here (no adapter, no profile branch) rather than tested, and §2.5 says which gate covers each claim and names the two it has no gate for, including the fact that wiring these types to an endpoint will require §6.5 rows for asset mismatch and excess precision, since a client-supplied ticker is untrusted input and must not answer 500 |
 | 3.55 | 2026-08-21 | **Wire-level multi-asset REST endpoint and tax-lot allocations delivered (§7, §6.5).** Extends `MovementType` with `ASSET_TRANSFER` and introduces `AssetTransferred` domain event. Exposes `PUT /api/v1/accounts/{accountUid}/asset-transfers/{transferUid}` supporting idempotent inbound ETF asset transfers (with acquisition cost basis and lot ID) and outbound ETF asset transfers (with HIFO/FIFO tax-lot consumption). §6.5 catalogue gains `/errors/asset-mismatch` and `/errors/insufficient-holding`. Exact fractional precision (+10.500000 VOO == -10.500000 VOO) conserved across aggregate and wire API with zero container starts. |
 | 3.56 | 2026-08-22 | **The pipeline is fenced by a test, the way `src/` already was (§12.1, "The pipeline is fenced too").** `ci.yml` was the last surface here with no gate behind it and had drifted accordingly: **no `permissions:` block at all**, so eleven jobs — two holding `SONAR_TOKEN` and `NVD_API_KEY` — ran on the repository's default `GITHUB_TOKEN` scopes, while `depcheck.yml` has had one since it was written; **one `timeout-minutes` across eleven jobs**, leaving GitHub's 360-minute default on the other ten, on *required* checks; and **five third-party actions on mutable tags** (`trivy-action`, `setup-uv` ×2, `action-baseline`, `setup-terraform`, `kind-action`), each repointable by its owner between two runs. `WorkflowGovernanceTest` now enforces all four rules at stage 3, and the timeouts are set from **measured** per-job durations on run `32582281310` rather than guessed. **Differential by construction (AGENTS.md trap 8)**: the same code path runs over synthetic workflows that must score hits and one that must score zero, because a checker only ever pointed at a passing tree scores the same whether its parser works or is inert — and this one's first bug proves the point, a timeout pattern anchored end-of-line that rejected the valid `timeout-minutes: 20   # measured 1m` and reported seven timed jobs as untimed. `continue-on-error` is allowlisted to `load` alone, with the Gatling reason recorded. **Two truth alignments carried in the same revision:** 11c named `action-baseline@v0.15.0`, a tag the file no longer uses, and **the header had been left at 3.54 while this table already reached 3.55** — the header is the version this document tells readers to trust, so it is corrected here rather than left to drift further. Practices adapted from `teng-lin/notebooklm-py`, which enforces the same invariants as three standalone `scripts/check_*.py`; here they are one test that `./mvnw verify` already runs. |
+| 3.57 | 2026-08-23 | **New §2.6: tamper evidence — the reason-trace chain and the Merkle root.** The types shipped in #57 and the use case in #60 with their reasoning in javadoc only, which left a **permanent wire contract** — the exact bytes an event is hashed as — documented nowhere the contract lives. §2.6 records it: not `toString()` (a record-component reorder silently rewrites every historical hash, with no compile error and no test failure), an exhaustive `default`-free switch (a new event type must fail to COMPILE rather than be hashed by its header alone), length-prefixed fields (`reference` and `reason` are caller-supplied, so delimiter-joining is not injective and the collision is chosen rather than found), absent encoded distinctly from empty (§15.9), and seconds-and-nanos instants (`Instant.toString()` drops trailing zeros). Also states what the proof does NOT attest to — it is computed from the log rather than a projection, recomputed rather than stored, carries no timestamp so an auditor can recompute and compare, and is **not a notarisation**: nothing is anchored outside the deployment, so an attacker who rewrites the events and recomputes the root leaves no discrepancy. Authorisation is **ownership only, auditors excluded**, recorded because the absence of a role check is easy to read as an oversight rather than as the §6.4 decision it is. The gates table names the one uncovered claim plainly: **there is no endpoint**, so no caller can obtain a root today. |
