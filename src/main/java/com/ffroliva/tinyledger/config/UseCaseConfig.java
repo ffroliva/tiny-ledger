@@ -97,8 +97,8 @@ public class UseCaseConfig { // profile-independent — the whole trick of spec 
     }
 
     @Bean
-    QueryStrongBalanceUseCase strongBalance(EventStorePort store, ClockPort clock) {
-        return new StrongBalanceService(store, clock);
+    QueryStrongBalanceUseCase strongBalance(EventStorePort store, ClockPort clock, TenantResolverPort tenantResolver) {
+        return new StrongBalanceService(store, clock, tenantResolver);
     }
 
     // Reads the event stream directly, like strongBalance above and unlike the balance queries

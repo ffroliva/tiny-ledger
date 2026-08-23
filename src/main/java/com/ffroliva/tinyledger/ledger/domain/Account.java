@@ -20,6 +20,7 @@ public final class Account {
     private final String owner;
     private final String name;
     private final Currency currency;
+    private final TenantId tenantId;
     private long version;
     private long balanceMinorUnits;
     private final Map<String, TaxLotAggregate> assetHoldings = new HashMap<>();
@@ -42,6 +43,7 @@ public final class Account {
         this.owner = opened.owner();
         this.name = opened.name();
         this.currency = opened.currency();
+        this.tenantId = opened.tenantId();
         this.version = opened.version();
     }
 
@@ -252,6 +254,14 @@ public final class Account {
 
     public String name() {
         return name;
+    }
+
+    /**
+     * The tenant this stream was bound to, or {@code null} for a stream opened before tenancy
+     * existed. Null is not "any tenant" — the authorisation path fails closed on it.
+     */
+    public TenantId tenantId() {
+        return tenantId;
     }
 
     public Currency currency() {
