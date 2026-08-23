@@ -16,8 +16,8 @@ class RecordMovementServiceTest {
     private static final Currency GBP = Currency.getInstance("GBP");
     private final FakeStore store = new FakeStore();
     private final List<LedgerEvent> published = new ArrayList<>();
-    private final RecordMovementService service =
-            new RecordMovementService(store, published::add, () -> Instant.parse("2026-08-03T12:00:00Z"));
+    private final RecordMovementService service = new RecordMovementService(
+            store, published::add, () -> Instant.parse("2026-08-03T12:00:00Z"), () -> TenantId.of("t-test"));
     // This suite is about movements, so the account limit is wired wide open: `owner -> 0` holdings
     // against a limit of 1 can never refuse, and no test here would notice if it did.
     private final OpenAccountService openService = new OpenAccountService(
