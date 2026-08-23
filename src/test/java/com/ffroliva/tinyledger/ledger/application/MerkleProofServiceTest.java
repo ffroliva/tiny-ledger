@@ -9,6 +9,7 @@ import com.ffroliva.tinyledger.ledger.application.error.OwnershipException;
 import com.ffroliva.tinyledger.ledger.application.port.in.QueryMerkleProofUseCase.MerkleProof;
 import com.ffroliva.tinyledger.ledger.application.usecase.MerkleProofService;
 import com.ffroliva.tinyledger.ledger.domain.AccountOpened;
+import com.ffroliva.tinyledger.ledger.domain.EventCanonicalForm;
 import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
 import com.ffroliva.tinyledger.ledger.domain.MerkleTree;
 import com.ffroliva.tinyledger.ledger.domain.MoneyDeposited;
@@ -152,5 +153,19 @@ class MerkleProofServiceTest {
 
         assertThat(service.merkleProof("alice", id).merkleRoot())
                 .isEqualTo(service.merkleProof("alice", id).merkleRoot());
+    }
+
+    @Test
+    void theProofStatesWhichCanonicalFormProducedIt() {
+        // A hash is opaque: a verifier cannot discover from the bytes which codec built them, so
+        // knowing the version is a PRECONDITION for recomputing, not something recomputation reveals.
+        // The version therefore travels on the artifact. Without it, a v1 proof and a future v2 proof
+        // over the same stream are indistinguishable artifacts that disagree.
+        AccountId id = AccountId.random();
+        store.append(id, 0, events(id, now, 2, -1));
+
+        MerkleProof proof = service.merkleProof("alice", id);
+
+        assertThat(proof.canonicalFormVersion()).isEqualTo(EventCanonicalForm.V1);
     }
 }

@@ -18,12 +18,23 @@ public interface QueryMerkleProofUseCase {
 
     /**
      * The response: the Merkle root, the per-event reason-trace hash chain, the leaf count,
-     * and an inclusion proof for the most recent event.
+     * an inclusion proof for the most recent event, and the version of the canonical form the
+     * hashes were computed from.
+     *
+     * <p>{@code canonicalFormVersion} sits <strong>outside</strong> the hashed bytes on purpose. A
+     * hash is opaque, so a verifier cannot discover from the digest which codec produced it —
+     * knowing the version is a precondition for recomputing, not something recomputation reveals.
+     * Putting a discriminator inside the preimage instead would also change every hash already
+     * computed, which is the one thing a permanent contract may not do.
+     *
+     * <p>Without this field a v1 proof and a future v2 proof over the same stream are
+     * indistinguishable artifacts that disagree.
      */
     record MerkleProof(
             String merkleRoot,
             List<String> eventHashes,
             int leafCount,
             List<String> latestEventProof,
-            boolean verified) {}
+            boolean verified,
+            int canonicalFormVersion) {}
 }
