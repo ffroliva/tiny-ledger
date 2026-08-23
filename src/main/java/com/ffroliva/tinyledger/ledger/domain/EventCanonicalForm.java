@@ -36,6 +36,20 @@ import java.util.List;
  */
 public final class EventCanonicalForm {
 
+    /**
+     * The version of the canonical form {@link #of} produces.
+     *
+     * <p>v1 carries no discriminator <em>inside</em> its bytes, and cannot be given one: prefixing
+     * the preimage would change every hash already computed and make every proof already issued
+     * unreproducible. The version therefore travels <strong>outside</strong> the preimage, on the
+     * proof artifact, which is what makes a v2 addable rather than breaking.
+     *
+     * <p>A v2 that includes the event envelope's tenant is anticipated by the ledger tenancy design.
+     * When it arrives it is a <em>new</em> method beside this one, never an edit to it, and both are
+     * retained permanently so historical proofs stay verifiable.
+     */
+    public static final int V1 = 1;
+
     private EventCanonicalForm() {}
 
     /** The canonical string for one event. Stable across JVMs, locales and releases. */

@@ -70,6 +70,12 @@ public class MerkleProofService implements QueryMerkleProofUseCase {
         boolean verified =
                 MerkleTree.verify(eventHashes.get(latest), latestEventProof, tree.root(), latest, eventHashes.size());
 
-        return new MerkleProof(tree.root(), List.copyOf(eventHashes), eventHashes.size(), latestEventProof, verified);
+        return new MerkleProof(
+                tree.root(),
+                List.copyOf(eventHashes),
+                eventHashes.size(),
+                latestEventProof,
+                verified,
+                EventCanonicalForm.V1);
     }
 }
