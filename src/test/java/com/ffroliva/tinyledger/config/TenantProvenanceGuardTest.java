@@ -61,6 +61,9 @@ class TenantProvenanceGuardTest {
     void fullRefusesToStartWithNoTenantClaimMapping() {
         // Absence of a claim mapping is a boot failure, never a default. A resolver with nothing to
         // read would fail every request closed, which reads as an outage rather than a misconfiguration.
+        // Honesty note: ApplicationContextRunner never loads application*.properties, so this test
+        // exercises the guard, not the packaging — the property itself is declared only in
+        // application-full.properties, and a base-file default would defeat the guard invisibly here.
         runner(WithJwtResolver.class)
                 .withPropertyValues("spring.profiles.active=full")
                 .run(context -> assertThat(context)

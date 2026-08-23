@@ -210,7 +210,7 @@ public class FullAdapterConfig {
      * never resolve to "no tenancy".
      */
     @Bean
-    TenantResolverPort tenantResolver(@Value("${ledger.tenant.claim}") String claimName) {
+    TenantResolverPort tenantResolver(@Value("${" + TenantProvenanceGuard.CLAIM_PROPERTY + "}") String claimName) {
         return new JwtClaimTenantResolver(claimName);
     }
 }
