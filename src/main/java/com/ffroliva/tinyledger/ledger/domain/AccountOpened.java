@@ -34,9 +34,8 @@ public record AccountOpened(
      * the point of construction covers every present and future reader, and a null-safe comparison at
      * each caller would have been two guards that both still permit an ownerless account to exist. Same
      * idiom as {@code Money}'s currency.
-     */
-    /**
-     * {@code tenantId} is deliberately <strong>absent</strong> from this guard, and that is a
+     *
+     * <p>{@code tenantId} is deliberately <strong>absent</strong> from this guard, and that is a
      * decision rather than an omission. Every account opened before tenancy existed reads back with
      * no tenant, so requiring one here would make every historical stream unrehydratable — the
      * fail-closed disposition for those accounts belongs on the authorisation path, where it can
