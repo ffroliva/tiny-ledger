@@ -38,9 +38,14 @@ import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Utils;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.http.HttpHeaders;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
@@ -75,6 +80,27 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
 
     /** §9.3 E6 asks for 50. Written through the use case, not HTTP, so no rate-limit budget is spent. */
     private static final int E6_MOVEMENTS = 50;
+
+    /**
+     * This suite drives writes through the use cases rather than HTTP (see above), so no filter chain
+     * ever establishes a caller — and the {@code full}-profile tenant resolver reads the security
+     * context and fails closed without one. Install the same tenant the realm fixture stamps on every
+     * real token ({@code t-integration}), so direct-call writes and real-token HTTP reads agree.
+     */
+    @BeforeEach
+    void authenticateDirectUseCaseCalls() {
+        Jwt jwt = Jwt.withTokenValue("fixture")
+                .header("alg", "none")
+                .subject("fixture")
+                .claim("tenant_id", "t-integration")
+                .build();
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
+    }
+
+    @AfterEach
+    void clearAuthentication() {
+        SecurityContextHolder.clearContext();
+    }
 
     /**
      * E6 — consumer outage and catch-up. Stop the audit consumer, write 50 movements, start it again:
