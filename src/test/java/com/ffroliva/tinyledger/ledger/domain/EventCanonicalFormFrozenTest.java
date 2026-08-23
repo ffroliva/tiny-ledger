@@ -60,6 +60,69 @@ class EventCanonicalFormFrozenTest {
     }
 
     @Test
+    void moneyWithdrawnIsFrozen() {
+        // reference is null here on purpose: it freezes the -1 sentinel in a full-event context,
+        // not just in the property test below.
+        MoneyWithdrawn event =
+                new MoneyWithdrawn(ID, 3, WHEN, MOVEMENT, new Money(GBP, 40), null, new Money(GBP, 460), "bob");
+
+        assertThat(EventCanonicalForm.of(event))
+                .isEqualTo("14:MoneyWithdrawn" + HEADER_ID + "1:3" + HEADER_WHEN + "3:bob"
+                        + "36:00000000-0000-0000-0000-0000000000ff"
+                        + "6:GBP 40"
+                        + "-1:"
+                        + "7:GBP 460");
+    }
+
+    @Test
+    void assetTransferredIsFrozen() {
+        // The most complex arm: nested lot encoding (count first, then each lot's four components),
+        // the Quantity triple, and the selector's enum name. The likeliest arm to be refactored, and
+        // therefore the one most in need of a hand-built vector.
+        TaxLot lot = new TaxLot(
+                "lot-1", new Quantity("VOO", AssetClass.EQUITY_ETF, 1_500_000), new Money(GBP, 60_000), WHEN);
+        AssetTransferred event = new AssetTransferred(
+                ID,
+                4,
+                WHEN,
+                MOVEMENT,
+                new Quantity("VOO", AssetClass.EQUITY_ETF, 2_500_000),
+                new Money(GBP, 100_000),
+                java.util.List.of(lot),
+                TaxLotSelector.HIFO,
+                "rebalance",
+                new Money(GBP, 500),
+                "carol");
+
+        assertThat(EventCanonicalForm.of(event))
+                .isEqualTo("16:AssetTransferred" + HEADER_ID + "1:4" + HEADER_WHEN + "5:carol"
+                        + "36:00000000-0000-0000-0000-0000000000ff"
+                        + "22:VOO EQUITY_ETF 2500000"
+                        + "10:GBP 100000"
+                        + "1:1" // lot count, then the lot's four components
+                        + "5:lot-1"
+                        + "22:VOO EQUITY_ETF 1500000"
+                        + "9:GBP 60000"
+                        + HEADER_WHEN
+                        + "4:HIFO"
+                        + "9:rebalance"
+                        + "7:GBP 500");
+    }
+
+    @Test
+    void movementRejectedIsFrozen() {
+        MovementRejected event = new MovementRejected(
+                ID, 5, WHEN, MOVEMENT, MovementType.WITHDRAWAL, new Money(GBP, 999_999), "insufficient funds", "dave");
+
+        assertThat(EventCanonicalForm.of(event))
+                .isEqualTo("16:MovementRejected" + HEADER_ID + "1:5" + HEADER_WHEN + "4:dave"
+                        + "36:00000000-0000-0000-0000-0000000000ff"
+                        + "10:WITHDRAWAL"
+                        + "10:GBP 999999"
+                        + "18:insufficient funds");
+    }
+
+    @Test
     void anAbsentFieldIsDistinctFromAnEmptyOne() {
         // The property the -1 sentinel exists for. Without it a movement with no reference and one
         // with "" would hash identically, and an absent field is a meaningful state here.
