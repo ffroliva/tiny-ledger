@@ -65,9 +65,7 @@ class RecordMovementTenantTest {
     void aCallerInTheAccountsTenantIsServed() {
         AccountId id = accountOwnedBy("alice", TENANT_A);
 
-        assertThat(servingTenant(TENANT_A)
-                        .deposit(deposit("alice", false, id))
-                        .outcome())
+        assertThat(servingTenant(TENANT_A).deposit(deposit("alice", false, id)).outcome())
                 .isEqualTo(Outcome.CREATED);
     }
 

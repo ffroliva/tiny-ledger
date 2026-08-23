@@ -15,11 +15,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ffroliva.tinyledger.ledger.adapter.out.tenant.TenantUnresolvableException;
 import com.ffroliva.tinyledger.ledger.application.error.AccountLimitReachedException;
 import com.ffroliva.tinyledger.ledger.application.error.AccountNotFoundException;
 import com.ffroliva.tinyledger.ledger.application.error.ConcurrencyConflictException;
 import com.ffroliva.tinyledger.ledger.application.error.IdempotencyConflictException;
-import com.ffroliva.tinyledger.ledger.adapter.out.tenant.TenantUnresolvableException;
 import com.ffroliva.tinyledger.ledger.application.error.OwnershipException;
 import com.ffroliva.tinyledger.ledger.application.error.TenantIsolationException;
 import com.ffroliva.tinyledger.ledger.application.port.in.Deposit;
@@ -164,7 +164,8 @@ class LedgerControllerTest {
     void crossTenantIsForbiddenAndIndistinguishableFromWrongOwner() throws Exception {
         given(recordMovement.deposit(any())).willThrow(new TenantIsolationException(new AccountId(ACCOUNT)));
 
-        deposit().andExpect(status().isForbidden())
+        deposit()
+                .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.type").value("/errors/forbidden"))
                 .andExpect(content().string(not(containsString("tenant"))));
     }
@@ -175,7 +176,8 @@ class LedgerControllerTest {
         given(recordMovement.deposit(any()))
                 .willThrow(new TenantUnresolvableException("token carries no 'tenant_id' claim"));
 
-        deposit().andExpect(status().isUnauthorized())
+        deposit()
+                .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.type").value("/errors/unauthenticated"))
                 .andExpect(content().string(not(containsString("tenant_id"))));
     }
