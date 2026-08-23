@@ -39,6 +39,7 @@ public class UseCaseConfig { // profile-independent — the whole trick of spec 
             ClockPort clock,
             IdGeneratorPort ids,
             QueryAccountsUseCase accounts,
+            TenantResolverPort tenantResolver,
             @Value("${ledger.accounts.max-per-owner}") int maxAccountsPerOwner) {
         return new OpenAccountService(
                 store,
@@ -46,6 +47,7 @@ public class UseCaseConfig { // profile-independent — the whole trick of spec 
                 clock,
                 ids,
                 owner -> accounts.accountsOwnedBy(owner).size(),
+                tenantResolver,
                 maxAccountsPerOwner);
     }
 

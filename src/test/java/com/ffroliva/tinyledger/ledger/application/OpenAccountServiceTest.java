@@ -13,6 +13,7 @@ import com.ffroliva.tinyledger.ledger.domain.AccountOpened;
 import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
 import com.ffroliva.tinyledger.ledger.domain.MovementEvent;
 import com.ffroliva.tinyledger.shared.AccountId;
+import com.ffroliva.tinyledger.shared.TenantId;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Currency;
@@ -23,6 +24,9 @@ import org.junit.jupiter.api.Test;
 
 /** §7: the {@code Account} response owes its caller a {@code createdAt}, and it must be the recorded one. */
 class OpenAccountServiceTest {
+
+    private static final com.ffroliva.tinyledger.ledger.application.port.out.TenantResolverPort TENANT =
+            () -> TenantId.of("t-test");
 
     private static final Instant NOW = Instant.parse("2026-08-03T12:00:00Z");
     private static final UUID ID = UUID.fromString("f91e6c0e-1f3d-4b2a-9c77-0b1c2d3e4f50");
@@ -35,7 +39,8 @@ class OpenAccountServiceTest {
 
     private OpenAccountService serviceHolding(int existingAccounts) {
         owned = existingAccounts;
-        return new OpenAccountService(new RecordingStore(), published::add, () -> NOW, () -> ID, owner -> owned, LIMIT);
+        return new OpenAccountService(
+                new RecordingStore(), published::add, () -> NOW, () -> ID, owner -> owned, TENANT, LIMIT);
     }
 
     private final OpenAccountService service = serviceHolding(0);
@@ -67,8 +72,8 @@ class OpenAccountServiceTest {
     @Test // §1/§6.5: `standalone` authenticates nobody and runs as ONE fixed principal, so a per-owner
     // cap there is a cap on the whole system. A negative limit turns the rule off; the profile sets it.
     void aNegativeLimitTurnsTheRuleOff() {
-        OpenAccountService unlimited =
-                new OpenAccountService(new RecordingStore(), published::add, () -> NOW, () -> ID, owner -> 9_999, -1);
+        OpenAccountService unlimited = new OpenAccountService(
+                new RecordingStore(), published::add, () -> NOW, () -> ID, owner -> 9_999, TENANT, -1);
 
         OpenedAccount opened = unlimited.open(new OpenAccount("local", "ACC-10000", Currency.getInstance("GBP")));
 

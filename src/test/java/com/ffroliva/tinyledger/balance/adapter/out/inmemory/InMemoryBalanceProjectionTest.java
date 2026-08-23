@@ -69,7 +69,7 @@ class InMemoryBalanceProjectionTest implements com.ffroliva.tinyledger.contract.
      */
     @Test
     void aFilterBoundInsideTheRowsMillisecondStillIncludesIt() {
-        projection.apply(new AccountOpened(account, 1, T0, "alice", "ACC-001", GBP));
+        projection.apply(new AccountOpened(account, 1, T0, "alice", "ACC-001", GBP, null));
         Instant storedAt = T0.plusSeconds(60).plusNanos(200_000); // …000200
         projection.apply(new MoneyDeposited(
                 account, 2, storedAt, UUID.randomUUID(), Money.of("GBP", 100), "tx", Money.of("GBP", 100), null));
@@ -89,7 +89,7 @@ class InMemoryBalanceProjectionTest implements com.ffroliva.tinyledger.contract.
      */
     @Test
     void aFilterMaxBoundInsideTheRowsMillisecondStillIncludesIt() {
-        projection.apply(new AccountOpened(account, 1, T0, "alice", "ACC-001", GBP));
+        projection.apply(new AccountOpened(account, 1, T0, "alice", "ACC-001", GBP, null));
         Instant storedAt = T0.plusSeconds(60).plusNanos(700_000); // …000700
         projection.apply(new MoneyDeposited(
                 account, 2, storedAt, UUID.randomUUID(), Money.of("GBP", 100), "tx", Money.of("GBP", 100), null));
@@ -101,7 +101,7 @@ class InMemoryBalanceProjectionTest implements com.ffroliva.tinyledger.contract.
     }
 
     private void seed() {
-        projection.apply(new AccountOpened(account, 1, T0, "alice", "ACC-001", GBP));
+        projection.apply(new AccountOpened(account, 1, T0, "alice", "ACC-001", GBP, null));
         long version = 2;
         // One millisecond, four movements: the uid is the only tie-break left.
         for (UUID uid : List.of(LSB_LOW, MSB_HIGH, LSB_HIGH, MSB_LOW)) {

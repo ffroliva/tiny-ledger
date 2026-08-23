@@ -30,7 +30,8 @@ class StrongBalanceServiceTest {
     @Test
     void throwsOwnershipExceptionWhenCallerIsNotOwner() {
         AccountId id = AccountId.random();
-        store.append(id, 0, List.of(new AccountOpened(id, 1, now, "owner1", "ACC-001", Currency.getInstance("GBP"))));
+        store.append(
+                id, 0, List.of(new AccountOpened(id, 1, now, "owner1", "ACC-001", Currency.getInstance("GBP"), null)));
 
         assertThatThrownBy(() -> service.strongBalance("wrong-user", id)).isInstanceOf(OwnershipException.class);
     }
@@ -43,7 +44,8 @@ class StrongBalanceServiceTest {
     // non-owner.
     void adminIsRefusedTheStrongReadOfAnAccountTheyDoNotOwn() {
         AccountId id = AccountId.random();
-        store.append(id, 0, List.of(new AccountOpened(id, 1, now, "alice", "ACC-001", Currency.getInstance("GBP"))));
+        store.append(
+                id, 0, List.of(new AccountOpened(id, 1, now, "alice", "ACC-001", Currency.getInstance("GBP"), null)));
 
         assertThatThrownBy(() -> service.strongBalance("trent", id)).isInstanceOf(OwnershipException.class);
     }
@@ -51,7 +53,8 @@ class StrongBalanceServiceTest {
     @Test
     void returnsStrongBalanceForAuthorizedOwner() {
         AccountId id = AccountId.random();
-        store.append(id, 0, List.of(new AccountOpened(id, 1, now, "owner1", "ACC-001", Currency.getInstance("GBP"))));
+        store.append(
+                id, 0, List.of(new AccountOpened(id, 1, now, "owner1", "ACC-001", Currency.getInstance("GBP"), null)));
 
         StrongBalance balance = service.strongBalance("owner1", id);
         assertThat(balance.accountId()).isEqualTo(id);

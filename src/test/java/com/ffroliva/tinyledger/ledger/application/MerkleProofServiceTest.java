@@ -40,7 +40,7 @@ class MerkleProofServiceTest {
      */
     private static List<LedgerEvent> events(AccountId id, Instant at, int deposits, int editedIndex) {
         List<LedgerEvent> events = new ArrayList<>();
-        events.add(new AccountOpened(id, 1, at, "alice", "ACC-001", GBP));
+        events.add(new AccountOpened(id, 1, at, "alice", "ACC-001", GBP, null));
         for (int i = 0; i < deposits; i++) {
             events.add(new MoneyDeposited(
                     id,

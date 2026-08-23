@@ -21,7 +21,13 @@ class RecordMovementServiceTest {
     // This suite is about movements, so the account limit is wired wide open: `owner -> 0` holdings
     // against a limit of 1 can never refuse, and no test here would notice if it did.
     private final OpenAccountService openService = new OpenAccountService(
-            store, published::add, () -> Instant.parse("2026-08-03T12:00:00Z"), UUID::randomUUID, owner -> 0, 1);
+            store,
+            published::add,
+            () -> Instant.parse("2026-08-03T12:00:00Z"),
+            UUID::randomUUID,
+            owner -> 0,
+            () -> TenantId.of("t-test"),
+            1);
 
     private AccountId opened;
 

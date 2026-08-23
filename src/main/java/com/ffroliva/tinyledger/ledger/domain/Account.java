@@ -7,6 +7,7 @@ import com.ffroliva.tinyledger.ledger.application.port.in.Withdraw;
 import com.ffroliva.tinyledger.ledger.domain.policy.OverdraftPolicy;
 import com.ffroliva.tinyledger.shared.AccountId;
 import com.ffroliva.tinyledger.shared.Money;
+import com.ffroliva.tinyledger.shared.TenantId;
 import com.ffroliva.tinyledger.shared.error.InvalidAmountException;
 import java.time.Instant;
 import java.util.Currency;
@@ -44,8 +45,10 @@ public final class Account {
         this.version = opened.version();
     }
 
-    public static List<LedgerEvent> open(AccountId id, OpenAccount cmd, Instant now) {
-        return List.of(new AccountOpened(id, 1, now, cmd.caller(), cmd.name(), cmd.currency()));
+    public static List<LedgerEvent> open(AccountId id, OpenAccount cmd, Instant now, TenantId tenantId) {
+        // tenant is a parameter, not a field on the command: it is resolved from authenticated
+        // context by the caller. A tenant that can name its own tenant can read another's accounts.
+        return List.of(new AccountOpened(id, 1, now, cmd.caller(), cmd.name(), cmd.currency(), tenantId));
     }
 
     public static Account rehydrate(List<LedgerEvent> history) {
