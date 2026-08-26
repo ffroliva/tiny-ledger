@@ -15,11 +15,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ffroliva.tinyledger.ledger.adapter.out.tenant.TenantUnresolvableException;
 import com.ffroliva.tinyledger.ledger.application.error.AccountLimitReachedException;
 import com.ffroliva.tinyledger.ledger.application.error.AccountNotFoundException;
 import com.ffroliva.tinyledger.ledger.application.error.ConcurrencyConflictException;
 import com.ffroliva.tinyledger.ledger.application.error.IdempotencyConflictException;
 import com.ffroliva.tinyledger.ledger.application.error.OwnershipException;
+import com.ffroliva.tinyledger.ledger.application.error.TenantIsolationException;
 import com.ffroliva.tinyledger.ledger.application.port.in.Deposit;
 import com.ffroliva.tinyledger.ledger.application.port.in.MovementResult;
 import com.ffroliva.tinyledger.ledger.application.port.in.OpenAccountUseCase;
@@ -155,6 +157,29 @@ class LedgerControllerTest {
         given(recordMovement.deposit(any())).willThrow(new OwnershipException("mallory", new AccountId(ACCOUNT)));
 
         deposit().andExpect(status().isForbidden()).andExpect(jsonPath("$.type").value("/errors/forbidden"));
+    }
+
+    @Test // a cross-tenant refusal must answer exactly like a non-owner one: same status, same type,
+    // and no "tenant" anywhere in the body — a distinct answer would be an existence oracle.
+    void crossTenantIsForbiddenAndIndistinguishableFromWrongOwner() throws Exception {
+        given(recordMovement.deposit(any())).willThrow(new TenantIsolationException(new AccountId(ACCOUNT)));
+
+        deposit()
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.type").value("/errors/forbidden"))
+                .andExpect(content().string(not(containsString("tenant"))));
+    }
+
+    @Test // an unresolvable tenant is an insufficient credential, not a server defect: 401, fail-closed,
+    // and the claim name stays in the log rather than the body.
+    void anUnresolvableTenantIsUnauthenticatedNotAServerError() throws Exception {
+        given(recordMovement.deposit(any()))
+                .willThrow(new TenantUnresolvableException("token carries no 'tenant_id' claim"));
+
+        deposit()
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.type").value("/errors/unauthenticated"))
+                .andExpect(content().string(not(containsString("tenant_id"))));
     }
 
     @Test // §6.5: unknown account

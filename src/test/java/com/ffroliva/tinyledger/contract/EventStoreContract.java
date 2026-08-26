@@ -20,7 +20,7 @@ public interface EventStoreContract {
 
     private AccountId newStream(EventStorePort store) {
         AccountId id = AccountId.random();
-        store.append(id, 0, List.of(new AccountOpened(id, 1, T, "alice", "ACC-001", GBP)));
+        store.append(id, 0, List.of(new AccountOpened(id, 1, T, "alice", "ACC-001", GBP, null)));
         return id;
     }
 

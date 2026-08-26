@@ -84,7 +84,7 @@ class NotificationRulesTest {
 
     @Test
     void accountOpenedProducesNoNotification() {
-        AccountOpened event = new AccountOpened(account, 1, T0, "alice", "ACC-alice", GBP);
+        AccountOpened event = new AccountOpened(account, 1, T0, "alice", "ACC-alice", GBP, null);
 
         assertThat(rules.evaluate(event)).isEmpty();
     }

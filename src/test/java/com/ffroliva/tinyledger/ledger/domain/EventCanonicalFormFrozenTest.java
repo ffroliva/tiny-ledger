@@ -37,7 +37,9 @@ class EventCanonicalFormFrozenTest {
 
     @Test
     void accountOpenedIsFrozen() {
-        AccountOpened event = new AccountOpened(ID, 1, WHEN, "alice", "ACC-001", GBP);
+        // Legacy null tenant on purpose: the vector's bytes must not change, proving tenant
+        // stays outside the v1 preimage.
+        AccountOpened event = new AccountOpened(ID, 1, WHEN, "alice", "ACC-001", GBP, null);
 
         assertThat(EventCanonicalForm.of(event))
                 .isEqualTo("13:AccountOpened" + HEADER_ID + "1:1" + HEADER_WHEN + "5:alice" // actor, derived from owner

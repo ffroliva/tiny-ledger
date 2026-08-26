@@ -67,7 +67,7 @@ public interface BalanceProjectionContract {
     default void applyingTheSameEventTwiceDoesNotDoubleCount() {
         AccountId id = AccountId.random();
         UUID movementUid = UUID.randomUUID();
-        projection().apply(new AccountOpened(id, 1, T0, "alice", "ACC-001", GBP));
+        projection().apply(new AccountOpened(id, 1, T0, "alice", "ACC-001", GBP, null));
         MoneyDeposited deposit = new MoneyDeposited(
                 id, 2, T0.plusSeconds(60), movementUid, Money.of("GBP", 5_000), "salary", Money.of("GBP", 5_000), null);
 
@@ -88,8 +88,8 @@ public interface BalanceProjectionContract {
     default void accountsOwnedByReturnsOnlyTheCallersAccounts() {
         AccountId mine = AccountId.random();
         AccountId theirs = AccountId.random();
-        projection().apply(new AccountOpened(mine, 1, T0, "alice", "ACC-MINE", GBP));
-        projection().apply(new AccountOpened(theirs, 1, T0, "mallory", "ACC-THEIRS", GBP));
+        projection().apply(new AccountOpened(mine, 1, T0, "alice", "ACC-MINE", GBP, null));
+        projection().apply(new AccountOpened(theirs, 1, T0, "mallory", "ACC-THEIRS", GBP, null));
 
         assertThat(projection().accountsOwnedBy("alice").stream()
                         .map(AccountView::accountId)
@@ -107,7 +107,7 @@ public interface BalanceProjectionContract {
     @Test
     default void pagingOneAtATimeDropsNoRowSharingAMillisecond() {
         AccountId id = AccountId.random();
-        projection().apply(new AccountOpened(id, 1, T0, "alice", "ACC-001", GBP));
+        projection().apply(new AccountOpened(id, 1, T0, "alice", "ACC-001", GBP, null));
         Instant sameMilli = T0.plusSeconds(60);
         List<UUID> uids = List.of(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
         long version = 2;
