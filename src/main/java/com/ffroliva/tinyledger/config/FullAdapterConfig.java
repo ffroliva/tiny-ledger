@@ -8,9 +8,11 @@ import com.ffroliva.tinyledger.balance.adapter.out.redis.RedisBalanceCache;
 import com.ffroliva.tinyledger.balance.application.port.out.BalanceCachePort;
 import com.ffroliva.tinyledger.balance.application.port.out.BalanceProjectionPort;
 import com.ffroliva.tinyledger.ledger.adapter.out.postgres.PostgresEventStore;
+import com.ffroliva.tinyledger.ledger.adapter.out.tenant.JwtClaimTenantResolver;
 import com.ffroliva.tinyledger.ledger.application.port.out.ClockPort;
 import com.ffroliva.tinyledger.ledger.application.port.out.EventStorePort;
 import com.ffroliva.tinyledger.ledger.application.port.out.IdGeneratorPort;
+import com.ffroliva.tinyledger.ledger.application.port.out.TenantResolverPort;
 import com.ffroliva.tinyledger.ledger.application.usecase.OpenAccountService;
 import com.ffroliva.tinyledger.ledger.application.usecase.RecordMovementService;
 import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
@@ -26,6 +28,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -196,5 +199,18 @@ public class FullAdapterConfig {
     @Bean
     public TransactionalUseCases.Movements transactionalRecordMovement(RecordMovementService delegate) {
         return new TransactionalUseCases.Movements(delegate);
+    }
+
+    /**
+     * The {@code full}-profile tenant resolver, and the only one this profile can compose:
+     * {@code FixedTenantResolver} is declared solely in {@code StandaloneAdapterConfig}, so a
+     * config-backed tenant cannot reach a Postgres-backed deployment by configuration alone.
+     *
+     * <p>A missing claim name is a startup failure, not a default — absence of a claim mapping must
+     * never resolve to "no tenancy".
+     */
+    @Bean
+    TenantResolverPort tenantResolver(@Value("${" + TenantProvenanceGuard.CLAIM_PROPERTY + "}") String claimName) {
+        return new JwtClaimTenantResolver(claimName);
     }
 }

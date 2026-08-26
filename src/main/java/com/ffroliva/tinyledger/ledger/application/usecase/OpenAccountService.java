@@ -9,6 +9,7 @@ import com.ffroliva.tinyledger.ledger.application.port.out.EventPublisherPort;
 import com.ffroliva.tinyledger.ledger.application.port.out.EventStorePort;
 import com.ffroliva.tinyledger.ledger.application.port.out.IdGeneratorPort;
 import com.ffroliva.tinyledger.ledger.application.port.out.OwnedAccountsPort;
+import com.ffroliva.tinyledger.ledger.application.port.out.TenantResolverPort;
 import com.ffroliva.tinyledger.ledger.domain.Account;
 import com.ffroliva.tinyledger.ledger.domain.LedgerEvent;
 import com.ffroliva.tinyledger.shared.AccountId;
@@ -20,6 +21,7 @@ public class OpenAccountService implements OpenAccountUseCase {
     private final ClockPort clock;
     private final IdGeneratorPort ids;
     private final OwnedAccountsPort ownedAccounts;
+    private final TenantResolverPort tenantResolver;
     private final int maxAccountsPerOwner;
 
     public OpenAccountService(
@@ -28,12 +30,14 @@ public class OpenAccountService implements OpenAccountUseCase {
             ClockPort clock,
             IdGeneratorPort ids,
             OwnedAccountsPort ownedAccounts,
+            TenantResolverPort tenantResolver,
             int maxAccountsPerOwner) {
         this.store = store;
         this.publisher = publisher;
         this.clock = clock;
         this.ids = ids;
         this.ownedAccounts = ownedAccounts;
+        this.tenantResolver = tenantResolver;
         this.maxAccountsPerOwner = maxAccountsPerOwner;
     }
 
@@ -47,7 +51,7 @@ public class OpenAccountService implements OpenAccountUseCase {
             throw new AccountLimitReachedException(maxAccountsPerOwner);
         }
         AccountId accountId = new AccountId(ids.next());
-        List<LedgerEvent> events = Account.open(accountId, cmd, clock.now());
+        List<LedgerEvent> events = Account.open(accountId, cmd, clock.now(), tenantResolver.currentTenant());
         store.append(accountId, 0, events);
         events.forEach(publisher::publish);
         return new OpenedAccount(

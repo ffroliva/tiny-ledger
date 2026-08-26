@@ -13,6 +13,7 @@ public class RecordMovementService implements RecordMovementUseCase {
     private final EventStorePort store;
     private final EventPublisherPort publisher;
     private final ClockPort clock;
+    private final TenantResolverPort tenantResolver;
 
     /**
      * No {@code IdGeneratorPort}, deliberately. It used to take one and never call it, which read as
@@ -20,10 +21,12 @@ public class RecordMovementService implements RecordMovementUseCase {
      * the {@code movementUid} and only account opening is server-uid'd (N22). A constructor parameter
      * that is never used is a claim about the design, and this one was false.
      */
-    public RecordMovementService(EventStorePort store, EventPublisherPort publisher, ClockPort clock) {
+    public RecordMovementService(
+            EventStorePort store, EventPublisherPort publisher, ClockPort clock, TenantResolverPort tenantResolver) {
         this.store = store;
         this.publisher = publisher;
         this.clock = clock;
+        this.tenantResolver = tenantResolver;
     }
 
     @Override
@@ -81,6 +84,13 @@ public class RecordMovementService implements RecordMovementUseCase {
         List<LedgerEvent> history = store.read(accountId); // ①
         if (history.isEmpty()) throw new AccountNotFoundException(accountId);
         Account account = Account.rehydrate(history); // ②
+        // Tenant first, and independently — the same term, in the same position, as the strong read
+        // (StrongBalanceService): evaluated before ownership so the admin disjunct below widens the
+        // ownership term only, never the tenant boundary. A null tenant (a stream opened before
+        // tenancy) fails closed rather than matching everyone.
+        if (!tenantResolver.currentTenant().equals(account.tenantId())) {
+            throw new TenantIsolationException(accountId);
+        }
         // §6.4 D1: the role check already ran in the filter chain (SecurityConfig, ledger:writer).
         // This is the ownership term alone — ledger:admin widens it, and only it. The role term is
         // untouched: an admin without ledger:writer never reaches this line at all (N15, Task 5).

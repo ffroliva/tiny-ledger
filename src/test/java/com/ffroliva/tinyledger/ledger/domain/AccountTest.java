@@ -15,7 +15,8 @@ class AccountTest {
 
     private List<LedgerEvent> historyWith(long minorUnits) {
         AccountId id = AccountId.random();
-        List<LedgerEvent> history = new ArrayList<>(Account.open(id, new OpenAccount("alice", "ACC-001", GBP), T));
+        List<LedgerEvent> history =
+                new ArrayList<>(Account.open(id, new OpenAccount("alice", "ACC-001", GBP), T, null));
         if (minorUnits > 0) {
             history.addAll(Account.rehydrate(history)
                     .deposit(new Deposit("alice", false, id, UUID.randomUUID(), new Money(GBP, minorUnits), null), T));
@@ -29,7 +30,7 @@ class AccountTest {
 
     @Test
     void openEmitsAccountOpenedAtVersionOneWithOwnerAndName() {
-        List<LedgerEvent> events = Account.open(AccountId.random(), new OpenAccount("alice", "ACC-001", GBP), T);
+        List<LedgerEvent> events = Account.open(AccountId.random(), new OpenAccount("alice", "ACC-001", GBP), T, null);
         assertThat(events).singleElement().isInstanceOf(AccountOpened.class);
         AccountOpened opened = (AccountOpened) events.getFirst();
         assertThat(opened.version()).isEqualTo(1);
@@ -58,7 +59,7 @@ class AccountTest {
 
     @Test // AccountOpened has no on-behalf-of form (§15.8) — actor is always the owner, never a component
     void accountOpenedDerivesActorFromOwner() {
-        List<LedgerEvent> events = Account.open(AccountId.random(), new OpenAccount("alice", "ACC-001", GBP), T);
+        List<LedgerEvent> events = Account.open(AccountId.random(), new OpenAccount("alice", "ACC-001", GBP), T, null);
         AccountOpened opened = (AccountOpened) events.getFirst();
         assertThat(opened.actor()).isEqualTo("alice");
     }
@@ -136,7 +137,7 @@ class AccountTest {
     void anAccountHoldsItsOwnCurrencyRatherThanAHardcodedOne() {
         Currency eur = Currency.getInstance("EUR");
         AccountId id = AccountId.random();
-        Account account = Account.rehydrate(Account.open(id, new OpenAccount("alice", "ACC-EUR", eur), T));
+        Account account = Account.rehydrate(Account.open(id, new OpenAccount("alice", "ACC-EUR", eur), T, null));
         assertThat(account.currency()).isEqualTo(eur);
 
         List<MovementEvent> accepted =
@@ -176,7 +177,7 @@ class AccountTest {
     @Test
     void anAccountCannotBeOpenedWithoutAnOwner() {
         AccountId id = AccountId.random();
-        assertThatThrownBy(() -> new AccountOpened(id, 1, T, null, "ACC-001", GBP))
+        assertThatThrownBy(() -> new AccountOpened(id, 1, T, null, "ACC-001", GBP, null))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("owner");
     }

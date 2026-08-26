@@ -101,8 +101,8 @@ class EventCanonicalFormTest {
 
     @Test
     void anAccountOpenedCarriesItsOwnerNameAndCurrency() {
-        AccountOpened opened = new AccountOpened(ACCOUNT, 0L, AT, "alice", "current", GBP);
-        AccountOpened renamed = new AccountOpened(ACCOUNT, 0L, AT, "alice", "savings", GBP);
+        AccountOpened opened = new AccountOpened(ACCOUNT, 0L, AT, "alice", "current", GBP, null);
+        AccountOpened renamed = new AccountOpened(ACCOUNT, 0L, AT, "alice", "savings", GBP, null);
 
         assertThat(EventCanonicalForm.of(opened)).contains("alice").isNotEqualTo(EventCanonicalForm.of(renamed));
     }

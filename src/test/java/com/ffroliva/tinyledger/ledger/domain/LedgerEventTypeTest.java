@@ -80,7 +80,8 @@ class LedgerEventTypeTest {
                 Instant.parse("2026-08-10T07:00:00Z"),
                 "alice",
                 "ACC-001",
-                Currency.getInstance("GBP"));
+                Currency.getInstance("GBP"),
+                null);
 
         assertThat(new ObjectMapper().writeValueAsString(opened)).doesNotContain("eventType");
     }

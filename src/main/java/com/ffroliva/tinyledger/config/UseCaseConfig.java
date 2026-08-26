@@ -39,6 +39,7 @@ public class UseCaseConfig { // profile-independent — the whole trick of spec 
             ClockPort clock,
             IdGeneratorPort ids,
             QueryAccountsUseCase accounts,
+            TenantResolverPort tenantResolver,
             @Value("${ledger.accounts.max-per-owner}") int maxAccountsPerOwner) {
         return new OpenAccountService(
                 store,
@@ -46,12 +47,14 @@ public class UseCaseConfig { // profile-independent — the whole trick of spec 
                 clock,
                 ids,
                 owner -> accounts.accountsOwnedBy(owner).size(),
+                tenantResolver,
                 maxAccountsPerOwner);
     }
 
     @Bean
-    RecordMovementService recordMovement(EventStorePort store, EventPublisherPort publisher, ClockPort clock) {
-        return new RecordMovementService(store, publisher, clock);
+    RecordMovementService recordMovement(
+            EventStorePort store, EventPublisherPort publisher, ClockPort clock, TenantResolverPort tenantResolver) {
+        return new RecordMovementService(store, publisher, clock, tenantResolver);
     }
 
     /**
@@ -95,8 +98,8 @@ public class UseCaseConfig { // profile-independent — the whole trick of spec 
     }
 
     @Bean
-    QueryStrongBalanceUseCase strongBalance(EventStorePort store, ClockPort clock) {
-        return new StrongBalanceService(store, clock);
+    QueryStrongBalanceUseCase strongBalance(EventStorePort store, ClockPort clock, TenantResolverPort tenantResolver) {
+        return new StrongBalanceService(store, clock, tenantResolver);
     }
 
     // Reads the event stream directly, like strongBalance above and unlike the balance queries

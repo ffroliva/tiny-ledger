@@ -189,7 +189,7 @@ class BalanceProjectorTest {
     }
 
     private static AccountOpened opened(AccountId id, String owner) {
-        return new AccountOpened(id, 1, T0, owner, "ACC-" + owner, GBP);
+        return new AccountOpened(id, 1, T0, owner, "ACC-" + owner, GBP, null);
     }
 
     private static MoneyDeposited deposit(AccountId id, long version, long amount, long balanceAfter, Instant at) {

@@ -46,7 +46,7 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest
         AccountId id = AccountId.random();
         Instant now = Instant.parse("2026-08-04T12:00:00Z");
 
-        projection.apply(new AccountOpened(id, 1, now, "alice", "ACC-001", GBP));
+        projection.apply(new AccountOpened(id, 1, now, "alice", "ACC-001", GBP, null));
 
         Optional<BalanceView> balance = projection.balance(id);
         assertThat(balance).isPresent();
@@ -66,7 +66,7 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest
         Instant t1 = Instant.parse("2026-08-04T12:01:00Z");
         UUID movementUid = UUID.randomUUID();
 
-        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
+        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP, null));
         projection.apply(new MoneyDeposited(
                 id, 2, t1, movementUid, Money.of("GBP", 5000), "salary", Money.of("GBP", 5000), null));
 
@@ -86,10 +86,10 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest
         Instant t0 = Instant.parse("2026-08-04T12:00:00Z");
         Instant t1 = Instant.parse("2026-08-04T12:01:00Z");
 
-        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
+        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP, null));
         projection.apply(new MoneyDeposited(
                 id, 2, t1, UUID.randomUUID(), Money.of("GBP", 5000), "salary", Money.of("GBP", 5000), null));
-        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP)); // replay of the opening
+        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP, null)); // replay of the opening
 
         BalanceView balance = projection.balance(id).orElseThrow();
         assertThat(balance.amount().minorUnits()).isEqualTo(5000);
@@ -102,7 +102,7 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest
     void sameMillisecondTiesBreakOnUuidBytewiseUnsigned() {
         AccountId id = AccountId.random();
         Instant t0 = Instant.parse("2026-08-04T12:00:00Z");
-        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
+        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP, null));
 
         // Straddling the sign boundary of the most, then the least, significant bits.
         List<UUID> descending = List.of(
@@ -126,7 +126,7 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest
     void historyMinBoundIncludesTheRowItNames() {
         AccountId id = AccountId.random();
         Instant t0 = Instant.parse("2026-08-04T12:00:00Z");
-        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
+        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP, null));
 
         Instant microsecondPrecision = t0.plusSeconds(60).plusNanos(500_000);
         projection.apply(new MoneyDeposited(
@@ -151,7 +151,7 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest
     void historyMaxBoundIncludesTheRowItNames() {
         AccountId id = AccountId.random();
         Instant t0 = Instant.parse("2026-08-04T12:00:00Z");
-        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
+        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP, null));
 
         Instant storedAt = t0.plusSeconds(60).plusNanos(700_000);
         projection.apply(new MoneyDeposited(
@@ -167,7 +167,7 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest
     void historySupportsKeysetPagination() {
         AccountId id = AccountId.random();
         Instant t0 = Instant.parse("2026-08-04T12:00:00Z");
-        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
+        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP, null));
 
         for (int i = 0; i < 5; i++) {
             Instant t = t0.plusSeconds(60 * (i + 1));
@@ -203,7 +203,7 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest
     void historyPaginationDoesNotDropRowsSharingAMillisecond() {
         AccountId id = AccountId.random();
         Instant t0 = Instant.parse("2026-08-04T12:00:00Z");
-        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP));
+        projection.apply(new AccountOpened(id, 1, t0, "alice", "ACC-001", GBP, null));
 
         Instant sameMillis = t0.plusSeconds(60);
         List<UUID> uids = new ArrayList<>();
@@ -239,8 +239,8 @@ class PostgresBalanceProjectionIT extends AbstractIntegrationTest
         AccountId id2 = AccountId.random();
         Instant t0 = Instant.parse("2026-08-04T12:00:00Z");
 
-        projection.apply(new AccountOpened(id1, 1, t0, "alice", "ACC-001", GBP));
-        projection.apply(new AccountOpened(id2, 1, t0.plusSeconds(1), "bob", "ACC-002", GBP));
+        projection.apply(new AccountOpened(id1, 1, t0, "alice", "ACC-001", GBP, null));
+        projection.apply(new AccountOpened(id2, 1, t0.plusSeconds(1), "bob", "ACC-002", GBP, null));
 
         List<AccountView> aliceAccounts = projection.accountsOwnedBy("alice");
         assertThat(aliceAccounts).hasSize(1);
