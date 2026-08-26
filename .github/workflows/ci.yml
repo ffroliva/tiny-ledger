@@ -291,10 +291,10 @@ jobs:
             case "$1" in
               confluentinc/cp-kafka:7.6.0)                  echo 140 ;;
               quay.io/keycloak/keycloak:26.4)               echo  63 ;;
-              postgres:16-alpine)                           echo  22 ;;
+              postgres:16-alpine)                           echo  24 ;;  # re-pinned: run 33011759422 measured 24 (2026-08-26)
               redis:7-alpine)                               echo   0 ;;
               otel/opentelemetry-collector-contrib:0.158.0) echo  10 ;;
-              traefik:v3.7.10@sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac) echo 10 ;;
+              traefik:v3.7.10@sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac) echo 12 ;;  # re-pinned: run 33011759422 measured 12 (2026-08-26)
               *)                                            echo  -1 ;;
             esac
           }
