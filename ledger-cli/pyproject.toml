@@ -16,7 +16,7 @@ dependencies = [
   "structlog>=24.1",
   "pydantic>=2.6",
   "pydantic-settings>=2.15.0",
-  "platformdirs>=4.11.3",
+  "platformdirs>=4.11.4",
   # DECLARED, not inherited. `scripts/e2e/https-check.py` imports certifi directly to build the
   # PUBLIC trust store for its differential TLS control — the half that proves verification is ON
   # rather than merely that a request succeeded. It resolves today only because httpx happens to
