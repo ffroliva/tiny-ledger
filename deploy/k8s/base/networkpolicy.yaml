@@ -17,7 +17,22 @@ spec:
     - ports:
         - protocol: TCP
           port: 8080
-    # Allow management port scrapes (kubelet health checks, internal prometheus)
+    # Management port. THIS RULE HAS NO `from:` SELECTOR, so it admits every pod in the cluster —
+    # not only the kubelet and Prometheus an earlier version of this comment named. The wording is
+    # corrected rather than the rule narrowed, because the narrowing is not free: kubelet probes
+    # originate from the NODE address, not from a pod, so a podSelector/namespaceSelector here
+    # silences liveness and readiness on the CNIs that enforce node-to-pod traffic, and the ipBlock
+    # that would keep them working has to name a node CIDR this repository cannot know.
+    #
+    # What actually bounds this port is not the policy: SecurityConfig#managementChain permits
+    # exactly /actuator/health/liveness and /actuator/health/readiness and denyAll()s the rest, the
+    # Service is ClusterIP so nothing outside the cluster reaches it, and docker-compose.yml refuses
+    # to publish 9090 for the same reason. This rule is the outermost of those three, and it is the
+    # loosest — worth knowing before someone reads it as the control.
+    #
+    # Found by BootUI's pentest advisor (PT-A05-043) during the 30 Aug 2026 evaluation: it flagged
+    # the management connector as potentially externally reachable, and the finding was mitigated
+    # everywhere the comment claimed except here.
     - ports:
         - protocol: TCP
           port: 9090
