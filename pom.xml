@@ -14,11 +14,11 @@
   <version>0.1.0-SNAPSHOT</version>
   <properties>
     <java.version>25</java.version>
-    <spring-modulith.version>2.1.0</spring-modulith.version>
+    <spring-modulith.version>2.1.1</spring-modulith.version>
     <testcontainers.version>1.21.4</testcontainers.version>
     <archunit.version>1.5.0</archunit.version>
     <cucumber.version>7.34.7</cucumber.version>
-    <openapi-generator.version>7.24.0</openapi-generator.version>
+    <openapi-generator.version>7.25.0</openapi-generator.version>
     <!-- AGENTS.md trap 4: surefire's failIfNoSpecifiedTests defaults to FALSE, so `-Dtest=Typo`
          matches nothing and the build exits 0 - a red step can "pass" having executed nothing, which
          this repository has already shipped once. Only applies when `-Dtest` is given, so full runs
@@ -495,7 +495,7 @@
             <!-- Newest available on Maven Central as of this task (checked via maven-metadata.xml;
                  the plan's suggested 1.20.4 is several releases behind). Confirmed it loads on
                  JDK 25: `./mvnw org.pitest:pitest-maven:help` succeeds. -->
-            <version>1.25.9</version>
+            <version>1.30.0</version>
             <dependencies>
               <dependency>
                 <groupId>org.pitest</groupId>

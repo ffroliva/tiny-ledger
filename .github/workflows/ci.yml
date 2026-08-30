@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with: { distribution: corretto, java-version: '25', cache: maven }
       - name: "Stage 1 — lint & format"
         # Stage 6 (docs governance) used to run here. Removed 2026-08-06: the check it wrapped
@@ -100,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with: { distribution: corretto, java-version: '25', cache: maven }
       - name: "Stages 2-3 — compile, unit, JaCoCo gates, architecture"
         # Stages 4-5 (OpenAPI contract generation, @standalone Cucumber) run inside verify — the
@@ -136,7 +136,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with: { distribution: corretto, java-version: '25', cache: maven }
       - name: "Stage 7 — integration suite against real Postgres/Redis/Kafka"
         # Named for what it runs, and ONLY what it runs. The old "Stages 7-12" label claimed stages
@@ -224,7 +224,7 @@ jobs:
       # It cannot go in `unit`: that job runs on a runner with no Docker on purpose (ADR 0003), and
       # build-image drives a Docker daemon build. gitleaks stays above this so the fast secret check
       # still reports first.
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with: { distribution: corretto, java-version: '25', cache: maven }
 
       - name: "Stage 11 — build the image, so there is something to scan"
@@ -426,7 +426,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: corretto
           java-version: 25
@@ -547,7 +547,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: corretto
           java-version: 25
@@ -810,7 +810,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: corretto
           java-version: 25
@@ -904,7 +904,7 @@ jobs:
           # Sonar needs full history for blame — new-code detection and issue authorship are wrong
           # on a shallow clone, and it degrades silently rather than failing.
           fetch-depth: 0
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with: { distribution: corretto, java-version: '25', cache: maven }
       - name: Cache SonarCloud packages
         uses: actions/cache@v6
@@ -1036,7 +1036,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: corretto
           java-version: 25
