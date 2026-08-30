@@ -1,0 +1,74 @@
+# Self-hosted Renovate.
+#
+# The Mend-hosted Renovate GitHub App is the lower-maintenance path and Renovate's own docs
+# recommend it for github.com. This runs it self-hosted instead, which means this repository owns
+# the token, the schedule and the Renovate version rather than delegating them.
+#
+# WHY RENOVATE AT ALL is argued in renovate.json5: Dependabot is blind to three of the five places a
+# container image is named here — Java string literals in AbstractIntegrationTest, the buildpack
+# digests in pom.xml, and stage 11d's ceiling table — so its PRs move one site and fail
+# ContainerImageMatrixTest. Renovate sees all five and moves them in one PR.
+#
+# THE TOKEN NEEDS `workflow` PERMISSION, AND THAT IS NOT OPTIONAL HERE. One of the custom managers
+# in renovate.json5 edits `.github/workflows/ci.yml` (the stage-11d ceiling table). A token without
+# it fails on exactly that manager, and the failure looks like a Renovate bug rather than a missing
+# scope. See the PAT setup notes in the PR that introduced this file.
+#
+# A PAT is used rather than GITHUB_TOKEN deliberately: pull requests opened with GITHUB_TOKEN do NOT
+# trigger other workflows, so Renovate's PRs would never run `ci` — and the whole point is that
+# ContainerImageMatrixTest runs on them and goes green.
+name: renovate
+
+on:
+  schedule:
+    # Weekly, Monday early. renovate.json5 carries its own `schedule` too; this cron decides when
+    # Renovate WAKES, that config decides whether it is allowed to act when it does.
+    # 05:41 rather than on the hour, for the reason depcheck.yml already states.
+    - cron: '41 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: 'Run without opening or updating any PR'
+        type: boolean
+        default: true
+      logLevel:
+        description: 'Renovate log level'
+        type: choice
+        options: [info, debug]
+        default: info
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate
+  # NOT cancel-in-progress. A half-finished Renovate run can leave branches without their PRs;
+  # letting one finish and skipping the overlap is the safe direction.
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    # Renovate on this repository has five managers and a handful of images. 30 is well above the
+    # expected run and well below GitHub's 360-minute default, which is what the bound is for.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Self-hosted Renovate
+        # SHA-pinned because WorkflowGovernanceTest requires it of third-party actions, and for the
+        # reason that test exists: a mutable ref means a different action can run tomorrow than the
+        # one reviewed today. v46.2.3.
+        uses: renovatebot/github-action@0a7b68676027570f113b1d6e7b69b231b56167ab
+        with:
+          token: ${{ secrets.RENOVATE_TOKEN }}
+        env:
+          RENOVATE_PLATFORM: github
+          # Scoped to this repository only. The token may be able to reach others; this makes sure
+          # a self-hosted run cannot wander into them by accident.
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          # 'full' on a manual dry run, 'null' (Renovate's off value) on the schedule. The default
+          # for a manual run is dryRun=true on purpose: the first execution should be readable
+          # before it is allowed to write.
+          RENOVATE_DRY_RUN: ${{ inputs.dryRun && 'full' || 'null' }}
+          LOG_LEVEL: ${{ inputs.logLevel || 'info' }}
