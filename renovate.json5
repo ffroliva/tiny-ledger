@@ -1,0 +1,129 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  // WHY RENOVATE EXISTS HERE ALONGSIDE DEPENDABOT, AND WHAT IT IS NOT FOR.
+  //
+  // Dependabot keeps maven, github-actions and uv. It handles those well and this file
+  // deliberately does not touch them: two bots proposing the same update is duplicate PRs and a
+  // second tangle, which is the thing being untangled rather than added to.
+  //
+  // Renovate is here for one reason — a CAPABILITY gap Dependabot cannot close with any amount of
+  // configuration. Container images in this repository live in four places, and Dependabot can see
+  // two of them:
+  //
+  //   docker/docker-compose.yml                       docker-compose ecosystem      SEEN
+  //   deploy/k8s/overlays/local-kind/*.yaml           docker ecosystem              SEEN
+  //   AbstractIntegrationTest.java                    Java string literals          BLIND
+  //   pom.xml <builder>/<runImage>                    Maven plugin XML              BLIND
+  //   .github/workflows/ci.yml stage-11d ceilings     a bash case statement         BLIND
+  //
+  // That blindness had a cost measured on 2026-08-30: Dependabot opened six image PRs, and every
+  // one failed ContainerImageMatrixTest because it moved a single site while the gate requires all
+  // of them to agree. The gate is right — a split between what the ITs prove and what Compose runs
+  // is a defect with no symptom — so the fix is a bot that can see every site and move them in one
+  // PR. Renovate's custom managers do exactly that, and those PRs then go GREEN instead of red.
+  //
+  // The `buildpacks` manager was checked and does NOT apply: it reads project.toml only, and this
+  // project has no Dockerfile and no project.toml — the base images are Maven plugin XML.
+  extends: ["config:recommended"],
+
+  // Scoped hard. If this list ever grows to include maven/npm/uv, delete the corresponding
+  // ecosystem from .github/dependabot.yml in the SAME commit, or both bots will file the same PR.
+  enabledManagers: ["docker-compose", "kubernetes", "custom.regex"],
+
+  // Matching Dependabot's cadence rather than inventing a second rhythm.
+  schedule: ["before 6am on monday"],
+  prConcurrentLimit: 5,
+  timezone: "Europe/London",
+
+  // Kubernetes YAML is ambiguous by shape, so Renovate needs to be told which files are manifests.
+  // Only the local-kind overlay: deploy/k8s/base/deployment.yaml carries `tiny-ledger:local`, this
+  // application's own locally built tag, which has no registry to poll and must not be chased.
+  kubernetes: {
+    managerFilePatterns: ["/^deploy/k8s/overlays/local-kind/.+\\.yaml$/"],
+  },
+
+  customManagers: [
+    {
+      // The Testcontainers base class. These are plain Java string literals, which is precisely
+      // what no Dependabot ecosystem can read. Verified against the real file: matches exactly the
+      // four images it starts — postgres, redis, confluentinc/cp-kafka, quay.io/keycloak/keycloak.
+      customType: "regex",
+      description: "Container images inside AbstractIntegrationTest",
+      managerFilePatterns: ["/AbstractIntegrationTest\\.java$/"],
+      matchStringsStrategy: "any",
+      matchStrings: [
+        "DockerImageName\\.parse\\(\"(?<depName>[a-z0-9][a-z0-9._/-]*):(?<currentValue>[A-Za-z0-9][A-Za-z0-9._-]*)\"\\)",
+      ],
+      datasourceTemplate: "docker",
+    },
+    {
+      // The Cloud Native Buildpacks base images, pinned by digest in the spring-boot-maven-plugin
+      // configuration. Both were BEHIND on 2026-08-30 — upstream moved them two days earlier and
+      // nothing said anything, because nothing could. `.github/workflows/base-image-currency.yml`
+      // detects that nightly; this is what proposes the fix.
+      //
+      // currentValueTemplate is "latest" because the pin carries a digest and no tag, and `latest`
+      // is the tag spring-boot-buildpack-platform itself defaults to (recorded in pom.xml, read
+      // from the shipped jar's constant pool).
+      customType: "regex",
+      description: "Buildpack builder and run images in pom.xml",
+      managerFilePatterns: ["/^pom\\.xml$/"],
+      matchStringsStrategy: "any",
+      matchStrings: [
+        "<(?:builder|runImage)>(?<depName>[^@<]+)@(?<currentDigest>sha256:[a-f0-9]{64})</",
+      ],
+      datasourceTemplate: "docker",
+      currentValueTemplate: "latest",
+    },
+    {
+      // Stage 11d's per-image CVE ceilings, keyed by exact `image:tag` in a bash case statement.
+      // This is a real fourth site, not bookkeeping: a ceiling keyed to an image nobody runs is
+      // dead, and an image with no ceiling fails that stage with "no pinned ceiling".
+      //
+      // RENOVATE MOVES THE KEY. ONLY A HUMAN CAN MOVE THE NUMBER. The ceiling beside each key was
+      // measured against the OLD image, so after a bump it is stale by construction. Stage 11d
+      // says so itself when the new count exceeds it — "bump the image, or re-pin with the run
+      // that measures the new number" — and that message is the prompt to re-measure. A ceiling
+      // that is too high permits more than was measured, so treat a green stage 11d on a bumped
+      // image as unfinished work rather than as a verdict.
+      customType: "regex",
+      description: "Trivy per-image ceilings in ci.yml stage 11d",
+      managerFilePatterns: ["/^\\.github/workflows/ci\\.yml$/"],
+      matchStringsStrategy: "any",
+      matchStrings: [
+        "\\n\\s+(?<depName>[a-z0-9][a-z0-9._/-]*):(?<currentValue>[A-Za-z0-9][A-Za-z0-9._-]*)(?:@(?<currentDigest>sha256:[a-f0-9]{64}))?\\)\\s+echo",
+      ],
+      datasourceTemplate: "docker",
+    },
+  ],
+
+  packageRules: [
+    {
+      // THE POINT OF THE WHOLE FILE. One image, one PR, every site it appears in. Without this a
+      // bump lands as several single-site PRs and each one fails ContainerImageMatrixTest — which
+      // is exactly the state Dependabot leaves behind and the reason Renovate is being adopted.
+      matchDatasources: ["docker"],
+      groupName: "{{{depName}}} image",
+      groupSlug: "{{{depNameSanitized}}}-image",
+    },
+    {
+      // Majors stay on their own, matching the reasoning already written into
+      // .github/dependabot.yml for the `actions` group: an image major is a decision a human
+      // should see. postgres 16 -> 18 changes on-disk defaults; it does not belong in a batch.
+      matchDatasources: ["docker"],
+      matchUpdateTypes: ["major"],
+      groupName: "{{{depName}}} image (MAJOR)",
+      groupSlug: "{{{depNameSanitized}}}-image-major",
+    },
+    {
+      // The buildpack images are digest-only, so every update is a digest update. Kept separate
+      // from the backing services: these rebuild the shipped artefact, the others only support
+      // tests and local runs.
+      matchDatasources: ["docker"],
+      matchPackageNames: ["paketobuildpacks/**"],
+      groupName: "buildpack base images",
+      groupSlug: "buildpack-base-images",
+    },
+  ],
+}
