@@ -50,7 +50,15 @@
       // four images it starts — postgres, redis, confluentinc/cp-kafka, quay.io/keycloak/keycloak.
       customType: "regex",
       description: "Container images inside AbstractIntegrationTest",
-      managerFilePatterns: ["/AbstractIntegrationTest\\.java$/"],
+      // ANCHORED FULL PATH, and that is not tidiness. The 2026-08-30 dry run loaded this manager
+      // and matched ZERO files with the unanchored form `/AbstractIntegrationTest\\.java$/`, while
+      // the three `^`-anchored patterns beside it matched fine. A custom manager that silently
+      // matches nothing is the exact failure this repository keeps deleting, and here it would have
+      // been invisible: the run went green, five other images resolved, and only the missing
+      // "Matched 1 file(s)" line gave it away. Keep the anchor.
+      managerFilePatterns: [
+        "/^src/test/java/com/ffroliva/tinyledger/testsupport/AbstractIntegrationTest\\.java$/",
+      ],
       matchStringsStrategy: "any",
       matchStrings: [
         "DockerImageName\\.parse\\(\"(?<depName>[a-z0-9][a-z0-9._/-]*):(?<currentValue>[A-Za-z0-9][A-Za-z0-9._-]*)\"\\)",
