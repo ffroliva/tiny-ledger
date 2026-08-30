@@ -80,6 +80,51 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
 
+  # Container images. NOTHING tracked these until now. The three ecosystems above cover Java,
+  # Actions and Python, and every image in this repository sat outside all of them — so an image
+  # moved only when a human noticed. keycloak went 26.4 -> 26.7.2 by hand on 2026-08-30, after
+  # Trivy stage 11d's CVE ceiling caught up with it, and that is the wrong instrument for the job:
+  # stage 11d measures the vulnerabilities in the image you ARE running. It can never tell you a
+  # newer image exists. At the time of writing, redis was a major behind and postgres two.
+  #
+  # TWO ecosystems, because `docker` does not read Compose files. Per GitHub's supported-ecosystems
+  # reference: `docker` covers Dockerfiles and Kubernetes manifests (Deployment YAML and Helm
+  # charts), while `docker-compose` is a separate ecosystem of its own. Declaring only `docker`
+  # would leave docker/docker-compose.yml untracked while looking covered, which is the failure
+  # mode this file already argues against elsewhere.
+  #
+  # NOT COVERED BY ANY ECOSYSTEM, and no configuration can fix it: the images in
+  # AbstractIntegrationTest are Java string literals — DockerImageName.parse("postgres:16-alpine").
+  # Dependabot cannot see them. SpecVersionTableTest ties the POSTGRES tag across the Compose file
+  # and that class, so a Compose-only bump fails the build rather than silently splitting the two;
+  # redis, kafka and keycloak have no such tie and are moved by hand.
+  #
+  # NO `ignore` BLOCK, matching `github-actions` rather than `maven`. An image major is exactly the
+  # decision a human should see — postgres 16 -> 18 changes on-disk defaults — so it arrives as its
+  # own PR instead of being suppressed into silence.
+  - package-ecosystem: "docker-compose"
+    directory: "/docker"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      compose-images:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Only the local-kind overlay, deliberately. deploy/k8s/base/deployment.yaml carries
+  # `tiny-ledger:local` — this application's own locally-built tag, which has no registry to poll
+  # and must not be chased. The overlay is where the four third-party images live.
+  - package-ecosystem: "docker"
+    directory: "/deploy/k8s/overlays/local-kind"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      k8s-images:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
   # The Python CLI (spec §11, implementation-order step 10). `uv` reads pyproject.toml and uv.lock;
   # Dependabot's `uv` ecosystem understands both, so the lock stays authoritative rather than being
   # bypassed by a bare pyproject edit.
