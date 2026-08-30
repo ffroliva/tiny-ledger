@@ -78,7 +78,7 @@ jobs:
       # next step: two differently-aged copies of the same H2 database merged file-by-file on
       # restore, and a real chance of saving a multi-gigabyte NVD database into the shared Maven
       # cache that every other job downloads on every push for data none of them use.
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with: { distribution: corretto, java-version: '25' }
 
       - name: Cache the NVD data directory
