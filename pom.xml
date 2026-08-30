@@ -308,6 +308,7 @@
               <documentationProvider>none</documentationProvider>
               <annotationLibrary>none</annotationLibrary>
               <openApiNullable>false</openApiNullable>
+              <useJspecify>true</useJspecify>
             </configOptions>
           </configuration>
         </execution></executions>
