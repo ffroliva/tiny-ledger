@@ -163,7 +163,7 @@ final class LedgerApiMapper {
      */
     static ErrorResponseException rejection(MovementResult result) {
         return problem(
-                HttpStatus.UNPROCESSABLE_ENTITY,
+                HttpStatus.UNPROCESSABLE_CONTENT,
                 "/errors/" + result.rejectionReason(),
                 switch (result.rejectionReason()) {
                     case "insufficient-funds" -> "Insufficient funds";
