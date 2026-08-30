@@ -84,7 +84,10 @@ jobs:
 
             # The plugin's own default tag is `latest` (pom.xml records that, read from the shipped
             # spring-boot-buildpack-platform jar), so `latest` is the right thing to compare against.
-            body=$(curl -fsSL --max-time 30 \
+            # --proto '=https' constrains curl to HTTPS for the redirects -L follows, not only the
+            # first hop. Without it a redirect could downgrade this to plain HTTP, and the answer it
+            # returns is what decides whether a base image is declared current — githubactions:S6506.
+            body=$(curl -fsSL --proto '=https' --tlsv1.2 --max-time 30 \
               "https://hub.docker.com/v2/repositories/${repo}/tags/latest" || true)
             current=$(printf '%s' "$body" | jq -r '.digest // empty' 2>/dev/null || true)
 
