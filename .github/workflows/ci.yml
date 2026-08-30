@@ -952,8 +952,36 @@ jobs:
         # maintainability, and 85% coverage, asserted on **both new and overall** code — the overall
         # half is deliberate, because that is what the README badges show and a gate that judges only
         # new code lets a badge go red while every build passes.
+        #
+        # THE SKIP IS ACCEPTABLE EXCEPT ON ONE PR. This job's `if:` already excludes fork PRs, so a
+        # missing SONAR_TOKEN here means a SAME-REPO run without the secret — in practice a
+        # Dependabot branch, which GitHub serves from a separate Dependabot secret store rather than
+        # the Actions one. Usually harmless. Not harmless when the PR is the one moving
+        # `sonar-maven-plugin` itself: the plugin carrying `-Dsonar.qualitygate.wait=true` then
+        # changes version on a pipeline that never ran it. That has already happened —
+        # 5.1.0.4751 -> 5.7.0.6970 merged green with this job reporting success and scanning nothing.
+        #
+        # Refused for that PR and no other. The fix when it fires is SONAR_TOKEN in the repository's
+        # DEPENDABOT secret store (Settings -> Secrets and variables -> Dependabot), a different
+        # store from Actions — or a deliberate merge, knowing the scanner was never exercised.
+        #
+        # The base-ref check is not defensive noise. Without it a shallow or renamed base makes the
+        # `git diff` empty, the `grep` fail, and this guard pass while checking nothing — which is
+        # the exact defect it exists to close, rebuilt one level down.
         run: |
           if [ -z "$SONAR_TOKEN" ]; then
+            if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+              if ! git rev-parse --verify --quiet "origin/$GITHUB_BASE_REF" >/dev/null; then
+                echo "::error::cannot resolve origin/$GITHUB_BASE_REF, so this guard cannot tell whether the PR moves the scanner. It needs the job's fetch-depth: 0. Failing rather than passing without checking."
+                exit 1
+              fi
+              if git diff "origin/$GITHUB_BASE_REF...HEAD" -- pom.xml \
+                 | grep -q 'sonar-maven-plugin.version'; then
+                echo "::error::this PR changes sonar-maven-plugin — the plugin that CARRIES the quality gate — and SONAR_TOKEN is unavailable, so the gate did not run against it. Add SONAR_TOKEN to the Dependabot secret store, or merge deliberately knowing the scanner was never exercised."
+                echo "### Sonar: REFUSED — the PR moves the scanner and the scanner did not run" >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+            fi
             echo "::warning::SONAR_TOKEN is not set — analysis skipped, NOT passed"
             echo "### Sonar: skipped (no SONAR_TOKEN)" >> "$GITHUB_STEP_SUMMARY"
             exit 0

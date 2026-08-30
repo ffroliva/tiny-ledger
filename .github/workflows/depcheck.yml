@@ -62,6 +62,11 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Needed by the missing-key guard below, which diffs this PR against its base to tell
+          # whether the suppression file changed. A shallow clone cannot resolve the base, and the
+          # guard fails loudly rather than passing blind — so the depth is load-bearing, not tidy.
+          fetch-depth: 0
 
       # NO `cache: maven` here, deliberately. dependency-check's data directory lives INSIDE
       # ~/.m2/repository, so setup-java's cache would strictly contain the NVD store cached by the
@@ -106,8 +111,31 @@ jobs:
         # The gate is failBuildOnCVSS=7 in pom.xml, not a flag here, so
         # `./mvnw org.owasp:dependency-check-maven:check` reproduces this verdict on a laptop — this
         # pipeline's stated rule for what a gate must be (§12.1's closing note).
+        #
+        # Same single exception as ci.yml's Sonar job. This workflow triggers on `pull_request` with
+        # `paths: ['pom.xml']`, so it fires on exactly the dependency PRs whose verdict it exists to
+        # give — and on a Dependabot branch it reaches the `exit 0` below, because GitHub withholds
+        # repository secrets there. A PR editing the suppression file is the one PR where "skipped"
+        # must not read as "passed": that file decides what this gate ignores, so a change to it,
+        # unscanned, is a gate rewriting its own terms unobserved.
+        #
+        # The fix when it fires is NVD_API_KEY in the repository's DEPENDABOT secret store, a
+        # different store from Actions. The base-ref check is what stops this guard from passing
+        # while checking nothing — the defect it exists to close, one level down.
         run: |
           if [ -z "$NVD_API_KEY" ]; then
+            if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+              if ! git rev-parse --verify --quiet "origin/$GITHUB_BASE_REF" >/dev/null; then
+                echo "::error::cannot resolve origin/$GITHUB_BASE_REF, so this guard cannot tell whether the PR edits the suppressions. It needs the checkout's fetch-depth: 0. Failing rather than passing without checking."
+                exit 1
+              fi
+              if ! git diff --quiet "origin/$GITHUB_BASE_REF...HEAD" \
+                   -- .github/owasp-suppressions.xml; then
+                echo "::error::this PR edits the CVE suppression file and NVD_API_KEY is unavailable, so Dependency-Check never ran against the change. Add NVD_API_KEY to the Dependabot secret store, or merge deliberately knowing the suppressions were never exercised."
+                echo "### Dependency-Check: REFUSED — suppressions changed and the scan did not run" >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+            fi
             echo "::warning::NVD_API_KEY is not set — Dependency-Check skipped, NOT passed"
             echo "### Dependency-Check: skipped (no NVD_API_KEY)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
