@@ -157,11 +157,24 @@
   <suppress until="2027-02-08Z">
     <notes>
       httpcore5 5.0.2, TEST SCOPE ONLY. It is not a declared dependency at all — it is a POM
-      embedded inside docker-java-transport-zerodep-3.4.1.jar, which Testcontainers uses to talk to
-      the Docker daemon during the integration suite. It is never packaged into the image and never
-      runs outside a CI runner or a developer laptop. The version cannot be bumped from this pom
-      either: it is shaded inside another artifact, so the fix is a Testcontainers upgrade, not a
-      dependencyManagement entry. Re-check when the testcontainers BOM moves past 1.20.5.
+      embedded inside docker-java-transport-zerodep, which Testcontainers uses to talk to the Docker
+      daemon during the integration suite. It is never packaged into the image and never runs
+      outside a CI runner or a developer laptop.
+
+      This note used to say "the fix is a Testcontainers upgrade … re-check when the testcontainers
+      BOM moves past 1.20.5". The BOM moved to 1.21.4 on 2026-08-30 and nothing re-checked, so the
+      prescription was never tested. It has now been measured, and it is wrong: zerodep 3.4.1
+      (testcontainers 1.20.5) and 3.4.2 (1.21.4) shade the SAME 5.0.2, so a Testcontainers upgrade
+      does not move it.
+
+      What would move it: zerodep 3.7.1 shades a fixed 5.3.6, and the zerodep ARTIFACT can be pinned
+      from this pom even though the httpcore5 inside it cannot — the old note conflated those two.
+      Not taken here, because testcontainers 1.21.4 version-locks docker-java-api and the transport
+      together at 3.4.2, so pinning the transport alone skews that pair by three minor lines and
+      needs the full IT suite to justify. That is the deliberate follow-up.
+
+      Re-check is no longer a sentence: ShadedHttpcore5RecordTest fails the moment the shaded
+      version moves, which is the moment this entry may be deletable rather than re-dated.
     </notes>
     <packageUrl regex="true">^pkg:maven/org\.apache\.httpcomponents\.core5/httpcore5.*@5\.0\.2$</packageUrl>
     <cve>CVE-2026-54399</cve>
