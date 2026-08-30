@@ -43,7 +43,12 @@ on:
     - cron: '17 3 * * *'
   workflow_dispatch:
   pull_request:
-    paths: ['pom.xml']
+    # The suppression file is an input to the verdict, not documentation about it: it decides which
+    # findings this gate is allowed to ignore. A PR that edits it changes what a scan would REPORT
+    # while the dependency set stands still, so scanning only on pom.xml left the one change that
+    # can weaken this gate unable to trigger it. PR #76 edited that file and this workflow did not
+    # run — which is also why the missing-key guard below could never have fired without this line.
+    paths: ['pom.xml', '.github/owasp-suppressions.xml']
   push:
     branches: [main]
     paths: ['pom.xml']
