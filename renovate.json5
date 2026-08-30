@@ -31,6 +31,26 @@
   // ecosystem from .github/dependabot.yml in the SAME commit, or both bots will file the same PR.
   enabledManagers: ["docker-compose", "kubernetes", "custom.regex"],
 
+  // `config:recommended` ships an ignorePaths list that contains `**/test/**`, and this is a Maven
+  // project: AbstractIntegrationTest lives at src/test/java/... So Renovate discarded that file
+  // BEFORE any manager pattern was applied, and the Testcontainers manager matched nothing while
+  // reporting no error at all. Two dry runs were needed to see it, because the first misread the
+  // cause as a missing `^` anchor — the anchor was never relevant.
+  //
+  // The list below is the recommended default MINUS `**/test/**`. The other seven are kept: they
+  // exclude vendored trees and fixtures that nothing here needs scanned. Dropping only the one that
+  // collides with Maven's standard layout is narrower than `ignorePaths: []`, which would put
+  // node_modules back in scope.
+  ignorePaths: [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__tests__/**",
+    "**/tests/**",
+    "**/__fixtures__/**",
+  ],
+
   // Matching Dependabot's cadence rather than inventing a second rhythm.
   schedule: ["before 6am on monday"],
   prConcurrentLimit: 5,
