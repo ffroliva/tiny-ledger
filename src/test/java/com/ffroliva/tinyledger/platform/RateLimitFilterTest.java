@@ -153,6 +153,38 @@ class RateLimitFilterTest {
         assertThat(response.getStatus()).isNotEqualTo(429);
     }
 
+    /**
+     * The other half of I2, and the one that was missing: a broken store must not become an <em>absent</em>
+     * limiter. The test above proves the request still flows; this one proves it is still counted.
+     *
+     * <p>Capacity is 1, so the first write consumes the fallback bucket and the second must be refused.
+     * Red proof, run against the previous {@code ConsumptionProbe.consumed(Long.MAX_VALUE, 0)}:
+     * {@code expected: 1 but was: 2} — the chain was reached twice, because under that version the store
+     * could fail and every subsequent request passed unmetered. A §9.7 load run showed that branch being
+     * taken 1,388 times in three minutes.
+     *
+     * <p>A distinct principal from the test above, deliberately: {@link RateLimitFilter} holds one static
+     * fallback store for the whole process, so a shared subject would let that test's consumption decide
+     * this one's outcome.
+     */
+    @Test // I2, completed: degraded to per-instance, not degraded to nothing
+    void aBrokenStoreStillCountsAgainstAPerInstanceBucket() throws Exception {
+        RateLimiterStore brokenStore = (key, configuration) -> {
+            throw new RedisException("connection reset (simulated)");
+        };
+        RateLimitFilter filter = new RateLimitFilter(
+                brokenStore, properties(limit(1, 0), GENEROUS, GENEROUS, GENEROUS), fullPrincipal(), MAPPER);
+        authenticateAs("bob");
+        CountingChain chain = new CountingChain();
+
+        filter.doFilter(request("POST", "203.0.113.9"), new MockHttpServletResponse(), chain);
+        MockHttpServletResponse second = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "203.0.113.9"), second, chain);
+
+        assertThat(chain.count).isEqualTo(1);
+        assertThat(second.getStatus()).isEqualTo(429);
+    }
+
     @Test // §6.1 row 3: no principal resolves (CallerPrincipal throws outside standalone) — per-IP, not per-principal
     void withNoAuthenticatedPrincipalTheUnauthenticatedPerIpBucketApplies() throws Exception {
         RateLimitFilter filter = new RateLimitFilter(

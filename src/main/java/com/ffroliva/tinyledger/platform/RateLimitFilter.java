@@ -54,6 +54,16 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
 
+    /**
+     * Where a bucket goes when the shared one is unreachable. Static, and shared by this filter and
+     * {@link IpBackstopFilter}, because it is process-local by definition — a per-instance limit is
+     * the thing being fallen back to, so one per process is not a shortcut but the correct scope.
+     * {@link LocalRateLimiterStore} is already bounded (10k keys) and expiring (10 min idle), which
+     * is what makes it safe to reach for on a path an attacker can trigger: a flood of distinct
+     * source addresses during a Redis outage evicts, it does not grow.
+     */
+    private static final RateLimiterStore FALLBACK = new LocalRateLimiterStore();
+
     private final RateLimiterStore store;
     private final RateLimitProperties properties;
     private final CallerPrincipal callerPrincipal;
@@ -145,10 +155,26 @@ public class RateLimitFilter extends OncePerRequestFilter {
      * <p>Review I2: a Lettuce {@link RedisException} from the {@code full}-profile store is not a
      * reason to fail the request. A rate limiter is an abuse control, not a source of truth —
      * {@code RedisBalanceCache} already degrades the same way for the same reason (see its javadoc)
-     * — so a storage hiccup fails <strong>open</strong>, loudly logged, rather than surfacing as an
-     * uncaught exception that {@code ErrorHandlingAdvice} (a {@code @ControllerAdvice}, blind to
-     * filter exceptions) cannot translate and that would otherwise fall through to Boot's default
-     * error page — the exact request-path leak Task 2 closed.
+     * — so a storage hiccup must not surface as an uncaught exception that
+     * {@code ErrorHandlingAdvice} (a {@code @ControllerAdvice}, blind to filter exceptions) cannot
+     * translate and that would otherwise fall through to Boot's default error page — the exact
+     * request-path leak Task 2 closed.
+     *
+     * <p><strong>But "not a 500" was read as "unmetered", and those are not the same choice.</strong>
+     * I2 weighed exactly two options, failing the request and allowing it, and took the second. There
+     * is a third: {@link #FALLBACK}, the same in-memory store {@code standalone} runs on all the
+     * time. It keeps the request path alive — I2's whole concern — while still counting, so the
+     * limit degrades from cluster-wide to per-instance rather than from enforced to absent. With
+     * <em>n</em> instances the effective ceiling becomes <em>n</em> &times; capacity, which is bounded;
+     * unmetered is not bounded by anything.
+     *
+     * <p><strong>Measured, not theorised</strong> (BootUI evaluation, 30 Aug 2026): a §9.7 load run
+     * against the real stack logged this branch <strong>1,388</strong> times in ~3 minutes, and a
+     * second run 1,198, against zero in an unloaded run. Redis was never down — {@code full} sets a
+     * deliberate 250ms command timeout, and a saturated Redis exceeds it exactly as an outage does.
+     * So the branch that existed for a rare failure was being taken thousands of times per flood,
+     * which is to say: the IP backstop switched itself off precisely when it was needed, and said so
+     * only in a WARN. That is the case for counting locally rather than not counting.
      *
      * <p><strong>Corrected failure mode</strong> (the first version of this fix understated it): the
      * {@code RedisClient} {@code RateLimitConfig} builds sets a 250ms command timeout, so a Redis
@@ -170,10 +196,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return bucket.tryConsumeAndReturnRemaining(1);
         } catch (RedisException storageUnavailable) {
             log.warn(
-                    "rate limiter storage unavailable for key '{}', allowing the request unmetered",
+                    "rate limiter storage unavailable for key '{}', degrading to per-instance limits",
                     key,
                     storageUnavailable);
-            return ConsumptionProbe.consumed(Long.MAX_VALUE, 0);
+            return FALLBACK.resolveBucket(key, configuration).tryConsumeAndReturnRemaining(1);
         }
     }
 

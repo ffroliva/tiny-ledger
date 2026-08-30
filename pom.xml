@@ -308,6 +308,7 @@
               <documentationProvider>none</documentationProvider>
               <annotationLibrary>none</annotationLibrary>
               <openApiNullable>false</openApiNullable>
+              <useJspecify>true</useJspecify>
             </configOptions>
           </configuration>
         </execution></executions>
@@ -523,6 +524,21 @@
           </plugin>
         </plugins>
       </build>
+    </profile>
+    <profile>
+      <!-- Evaluation only: BootUI's local developer console + MCP server, kept out of every normal
+           build so the starter jar never reaches the image. Run it with
+           `./mvnw -Pbootui spring-boot:run` plus the bootui.enabled=ON and bootui.mcp.enabled=ON
+           arguments, then point an MCP client at http://127.0.0.1:8080/bootui/api/mcp -->
+      <id>bootui</id>
+      <dependencies>
+        <dependency>
+          <groupId>com.julien-dubois.bootui</groupId>
+          <artifactId>bootui-spring-boot-starter</artifactId>
+          <version>1.15.0</version>
+          <scope>runtime</scope>
+        </dependency>
+      </dependencies>
     </profile>
   </profiles>
 </project>

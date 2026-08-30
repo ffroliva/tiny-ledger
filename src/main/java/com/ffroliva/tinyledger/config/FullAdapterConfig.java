@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ThreadPoolExecutor;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -41,6 +42,7 @@ import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.modulith.events.EventExternalizationConfiguration;
 import org.springframework.modulith.events.RoutingTarget;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.util.backoff.FixedBackOff;
 import tools.jackson.databind.ObjectMapper;
 
@@ -50,6 +52,59 @@ public class FullAdapterConfig {
 
     /** Spec §14 step 7: the one stream the audit module consumes. */
     public static final String LEDGER_EVENTS_TOPIC = "ledger.events";
+
+    /**
+     * <strong>The pool the Kafka leg of every write runs on, sized on purpose rather than inherited.</strong>
+     *
+     * <p>Found by BootUI's Spring advisor (SPRING-PERF-003 / SPRING-PERF-006, 30 Aug 2026), and the finding
+     * was easy to dismiss and wrong to: no class in this repository declares {@code @Async} at all. The
+     * executor arrives with Spring Modulith, and something does dispatch to it — {@code DelegatingEventExternalizer}
+     * carries {@code @ApplicationModuleListener}, which is {@code @Async} plus
+     * {@code @TransactionalEventListener(AFTER_COMMIT)}. That is the externalisation of every ledger event.
+     * Modulith's own {@code AsyncPropertiesDefaulter} sets exactly one thing, shutdown await-termination, and
+     * never touches the pool, so it sat at Boot's default: eight threads and an <strong>unbounded</strong> queue.
+     *
+     * <p><strong>Unbounded is the part that matters.</strong> Durability was never at risk — publications are
+     * rows, and {@code spring.modulith.events.republish-outstanding-events-on-restart} is set — but a broker
+     * that stops accepting while writes keep arriving grows that queue in heap for as long as the outage lasts,
+     * with nothing to stop it. {@code KafkaOutageIT} proves the write path survives a broker outage; it does
+     * not prove the queue behind it does.
+     *
+     * <p><strong>Why {@code CallerRunsPolicy} and not the default.</strong> Bounding the queue forces a choice
+     * about the task that arrives when it is full. The default {@code AbortPolicy} throws, which drops that
+     * externalisation: the publication row stays incomplete and is only retried on the next restart, which for
+     * an audit stream is a silent, arbitrarily long gap. {@code CallerRunsPolicy} runs it on the thread that
+     * committed instead — the write is already durable at that point, so the cost is latency on that one
+     * request rather than a lost event. Backpressure is the correct trade for a ledger; dropping is not.
+     *
+     * <p><strong>Measured, both sides</strong> ({@code KafkaOutageIT}, the bounded-stall assertion this repo
+     * already had): a write with the broker paused took <b>300 ms</b> before this bean existed and
+     * <b>204 ms</b> after, against a 2,000 ms bound — and the externaliser now runs on a thread this class
+     * names, which is how the bean was confirmed to be the one in the path rather than assumed to be. The
+     * queue depth below is not
+     * reached by that test and is not claimed to be — what the test proves is that adding the bound and the
+     * policy costs the write path nothing in the outage this system actually expects.
+     *
+     * <p><strong>500 is a starting bound, not a derived one</strong>, and it is written here rather than in a
+     * properties file so this reasoning travels with it. It is roughly two orders of magnitude above the burst
+     * this system produces and small enough to fail loudly. What would change it: a sustained write rate that
+     * reaches caller-runs during a healthy Kafka, which would show as write latency tracking broker latency —
+     * measure before moving it, and prefer more brokers to a deeper queue.
+     */
+    @Bean(name = "applicationTaskExecutor")
+    ThreadPoolTaskExecutor applicationTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(8);
+        executor.setMaxPoolSize(8);
+        executor.setQueueCapacity(500);
+        executor.setThreadNamePrefix("ledger-async-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        // Modulith's AsyncPropertiesDefaulter would have set these on the auto-configured executor; defining
+        // our own backs that off, so they are restored here rather than silently lost.
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(2);
+        return executor;
+    }
 
     /** Where a record the audit consumer cannot process is parked instead of skipped. */
     public static final String LEDGER_EVENTS_DLT = LEDGER_EVENTS_TOPIC + ".DLT";
