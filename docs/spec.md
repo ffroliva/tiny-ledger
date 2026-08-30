@@ -43,16 +43,16 @@ architecture tests in §9.2 fail the build.
 
 ## 1.5 Stack and conventions
 
-Versions are governed by **`dr-jskill`'s `versions.json`**, not chosen ad hoc.
+Versions live in `pom.xml` — the Spring Boot parent for everything it manages, `<properties>` for the rest — and move through Dependabot PRs. The rows below that name an exact version are checked against it by `SpecVersionTableTest`; the rows that name a line rather than a version are not, and say so.
 
 | Component | Version | Note |
 |---|---|---|
 | Java | **25** (LTS, Corretto) | Records, sealed interfaces, pattern matching and virtual threads are all load-bearing below |
-| Spring Boot | **4.1.0** (Spring Framework 7.0) | `ProblemDetail`, Modulith integration and `@ServiceConnection` come free |
+| Spring Boot | **4.1.1** (Spring Framework 7.0) | `ProblemDetail`, Modulith integration and `@ServiceConnection` come free |
 | Spring Modulith | Boot-4 line | Module verification, event publication registry, programmatic event externalisation (§4.3) |
 | PostgreSQL | **16** | Event store + projections. `postgres:16-alpine` in **both** `docker/docker-compose.yml` and `AbstractIntegrationTest`, so Compose and the ITs exercise one version. (This row read **18** until 2026-08-08; nothing ever ran 18) |
 | Hibernate | **7.4** | Outbound persistence adapter only — managed by the Boot parent, not pinned here |
-| Testcontainers | **1.20.5** | Integration and e2e (`<testcontainers.version>` in `pom.xml`). This row read **2.0.5** until 2026-08-08 |
+| Testcontainers | **1.21.4** | Integration and e2e (`<testcontainers.version>` in `pom.xml`). This row read **2.0.5** until 2026-08-08 and **1.20.5** until 2026-08-30 |
 | Maven wrapper | 3.8+ | `./mvnw` — a JDK is the only prerequisite |
 
 **Jackson 3** ships with Boot 4; annotation imports differ from Jackson 2 and the DTO layer must be
@@ -67,7 +67,6 @@ and internally consistent.
 
 **Adopted as-is:**
 
-- **Bump `versions.json` first**, then propagate. Never edit a version directly in `pom.xml`.
 - **`.properties`, not YAML.** `@ConfigurationProperties` for type safety.
 - **`.env` is the single local secret store — never read, never printed.** Only `.env.example`, with
   placeholder values, is displayed or committed.
@@ -78,6 +77,8 @@ and internally consistent.
 - Docker asset set: standard, AOT, native and CRaC variants; devcontainer; `.editorconfig`;
   `.gitattributes`.
 - **Ask before running git commands.** The human reviews before anything is committed.
+
+**Not adopted — `versions.json`.** `dr-jskill` bumps a `versions.json` first and propagates into `pom.xml`. No such file has ever existed in this tree, so the rule read as a contract that every Dependabot PR broke by construction. Revision 3.12 already withdrew the identical claim from §8.5 ("versions do not derive from `versions.json`") and left it standing here.
 
 **Deliberately overridden — the package layout (ADR-003).** `dr-jskill` mandates a flat, layer-first
 structure — `config/`, `controller/`, `service/`, `repository/`, `domain/` — with the explicit rule
