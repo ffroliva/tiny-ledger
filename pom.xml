@@ -266,8 +266,8 @@
               keycloak:26.4, otel-collector:0.158.0, gitleaks by sha256. This is now consistent.
               Bumping means changing the digests deliberately, which is the point.
             -->
-            <builder>paketobuildpacks/builder-noble-java-tiny@sha256:5d484671a3472dc6dd323c297923f33262aa0d4dbcbbcceac3d6c69586d140be</builder>
-            <runImage>paketobuildpacks/ubuntu-noble-run-tiny@sha256:f67248664fcdbea6537c8e5cb3b5a22f3262a93d7623cb090db634e2b7a27a21</runImage>
+            <builder>paketobuildpacks/builder-noble-java-tiny@sha256:3a9f6efa2351dba2492a9c6eb28b3bf52b5f930832a20c39b6261ed7c1a0a085</builder>
+            <runImage>paketobuildpacks/ubuntu-noble-run-tiny@sha256:c32333227b6dfbc2a4a93b03ee6d3475cfe152468c7d396bf22f06099bb0ecc9</runImage>
             <env>
               <!--
                 Spec v3.36 / #11. The CURRENT names — BP_JVM_CDS_ENABLED and
