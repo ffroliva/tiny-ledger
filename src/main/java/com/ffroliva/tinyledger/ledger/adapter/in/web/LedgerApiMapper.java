@@ -35,6 +35,25 @@ import org.springframework.web.ErrorResponseException;
  * Spec §4.6: the inbound web adapter owns wire DTO ↔ command and result ↔ response DTO, as hand-written
  * static functions. The generated {@code model.Money} and the domain {@code shared.Money} are different
  * shapes with the same fields; this is the only place that knows both.
+ *
+ * <p><strong>On {@code java:S4449} and the three suppressions below.</strong> Switching the generator to
+ * {@code useJspecify} stamps the generated API package {@code @NullMarked}, which is the point — it makes
+ * nullness an explicit contract instead of an assumption. It also makes every unannotated parameter
+ * implicitly non-null, and openapi-generator 7.24.0 does not yet annotate constructor parameters or fluent
+ * setters for properties the schema marks optional (upstream: OpenAPITools/openapi-generator#23683 and
+ * #24338). So the generated declaration is stricter than {@code docs/api/openapi.yaml} actually is, and
+ * Sonar reads six correct calls as violations.
+ *
+ * <p>Suppressed rather than worked around, because both alternatives are worse. Guarding the fluent
+ * setters would only silence the three call sites that <em>are</em> optional and would leave the
+ * constructor arguments, which cannot be skipped, still flagged; passing a non-null placeholder instead
+ * would change the response body. {@code reference} and {@code balanceAfter} are optional in the spec and
+ * null is their correct value.
+ *
+ * <p><strong>What invalidates these suppressions:</strong> the generator learning to emit
+ * {@code @Nullable} on optional constructor parameters and setters. When that lands, delete all three and
+ * let the rule answer again — if it stays quiet, the contract finally matches the schema; if it fires, the
+ * finding is real and this comment was wrong.
  */
 final class LedgerApiMapper {
 
@@ -64,6 +83,7 @@ final class LedgerApiMapper {
         return money == null ? null : new Money(money.currency().getCurrencyCode(), money.minorUnits());
     }
 
+    @SuppressWarnings("java:S4449")
     static Balance toBalance(StrongBalance balance) {
         return new Balance(
                 balance.accountId().value(), toMoney(balance.amount()), at(balance.asOf()), balance.streamVersion());
@@ -109,6 +129,7 @@ final class LedgerApiMapper {
                 request.getReference());
     }
 
+    @SuppressWarnings("java:S4449")
     static Transaction toTransaction(MovementResult result, MovementRequest request) {
         return new Transaction(
                         result.movementUid(),
@@ -123,6 +144,7 @@ final class LedgerApiMapper {
                 .reference(request.getReference());
     }
 
+    @SuppressWarnings("java:S4449")
     static AssetTransaction toAssetTransaction(MovementResult result, AssetTransferRequest request) {
         AssetClass assetClass = AssetClass.valueOf(request.getAssetClass().name());
         Quantity qty = result.quantity() != null
