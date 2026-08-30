@@ -49,10 +49,10 @@ public abstract class AbstractIntegrationTest {
 
     public static final RedisContainer REDIS = new RedisContainer(DockerImageName.parse("redis:7-alpine"));
 
-    public static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.0"));
+    public static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.9.9"));
 
     public static final GenericContainer<?> KEYCLOAK = new GenericContainer<>(
-                    DockerImageName.parse("quay.io/keycloak/keycloak:26.4"))
+                    DockerImageName.parse("quay.io/keycloak/keycloak:26.7.2"))
             .withEnv("KC_BOOTSTRAP_ADMIN_USERNAME", "admin")
             .withEnv("KC_BOOTSTRAP_ADMIN_PASSWORD", "admin")
             .withCopyFileToContainer(

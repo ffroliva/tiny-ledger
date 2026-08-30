@@ -289,8 +289,8 @@ jobs:
           # than defaulting to 0, or a newly added service would escape this gate on arrival.
           ceiling() {
             case "$1" in
-              confluentinc/cp-kafka:7.6.0)                  echo 140 ;;
-              quay.io/keycloak/keycloak:26.4)               echo  63 ;;
+              confluentinc/cp-kafka:7.9.9)                  echo 140 ;;
+              quay.io/keycloak/keycloak:26.7.2)             echo  63 ;;
               postgres:16-alpine)                           echo  24 ;;  # re-pinned: run 33011759422 measured 24 (2026-08-26)
               redis:7-alpine)                               echo   0 ;;
               otel/opentelemetry-collector-contrib:0.158.0) echo  10 ;;

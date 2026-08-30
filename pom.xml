@@ -69,8 +69,19 @@
                                            checked against Boot's BOM, found absent, and removed
                                            rather than shipped as a line that does nothing.
 
-         The residue is RECORDED, not suppressed. See §12.1 stage 11b. -->
-    <tomcat.version>11.0.24</tomcat.version>
+         The residue is RECORDED, not suppressed. See §12.1 stage 11b.
+
+         SECOND BUMP, 30 Aug 2026: 11.0.24 -> 11.0.25, and the reason is the same shape as the
+         first. Dependency-Check failed again with NINE CVEs at CVSS >= 7 against
+         tomcat-embed-core-11.0.24 alone (CVE-2026-65905 and CVE-2026-65637 at 9.8, CVE-2026-68525
+         and CVE-2026-65182 at 9.1, four at 8.1, two at 7.5). Nothing in this repository changed to
+         cause it: the CVEs were published after the pin, which is precisely the drift the gate
+         exists to catch, and it was already failing on `main` before this branch existed.
+
+         11.0.25 is the current release of the same patch line, so this is the same clean, stable
+         upgrade the first bump took rather than a version chosen to satisfy a scanner. The
+         measurement that matters is the next Dependency-Check run, not this comment. -->
+    <tomcat.version>11.0.25</tomcat.version>
 
     <sonar.host.url>https://sonarcloud.io</sonar.host.url>
     <sonar.organization>ffroliva-github</sonar.organization>
