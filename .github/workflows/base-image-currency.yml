@@ -1,0 +1,122 @@
+# Base-image currency — the layer nothing else covers.
+#
+# This repository has NO Dockerfile. The application image is built by Cloud Native Buildpacks
+# through spring-boot-maven-plugin, and its two base images are named in pom.xml, pinned by digest:
+#
+#     <builder>paketobuildpacks/builder-noble-java-tiny@sha256:...</builder>
+#     <runImage>paketobuildpacks/ubuntu-noble-run-tiny@sha256:...</runImage>
+#
+# Pinning them was a review fix and the pom says why at length: unpinned, the plugin defaults to a
+# MUTABLE `:latest` feeding a required status check, so `security` and `e2e` could scan and test
+# different base layers on the same push.
+#
+# But a digest pin that nobody moves is frozen, and .github/dependabot.yml already argues this case
+# for SHA-pinned actions: "a pin that is never bumped is frozen on the commit it was pinned at,
+# indefinitely ... for a SHA-pinned action it means never receiving a security fix." The run image is
+# the stronger version of that argument — it is the base of the shipped artefact.
+#
+# NOTHING ELSE WATCHES IT, and no configuration can make something else watch it:
+#   - Dependabot's `docker` ecosystem reads Dockerfiles and Kubernetes manifests. These are Maven
+#     plugin XML, so no ecosystem can see them. There is nothing to add to dependabot.yml.
+#   - The `maven` ecosystem reads dependency and plugin VERSIONS, not a <builder> digest.
+#   - Trivy on tiny-ledger:local (ci.yml stage 11c) does catch CVEs in the frozen base — but only
+#     once enough accumulate to cross a threshold. That is the same instrument that let
+#     keycloak:26.4 sit until its CVE ceiling caught up: it measures the image you ARE running and
+#     can never tell you a newer one exists.
+#
+# So this job asks the only question none of them ask: has upstream moved?
+#
+# SCHEDULE AND DISPATCH ONLY, DELIBERATELY. It never runs on a pull request, so it can never block a
+# merge on something outside the author's control — upstream publishing a new digest is not a defect
+# in someone's diff. A red nightly is a to-do, and the summary carries the exact digests to paste.
+#
+# It FAILS rather than warns when behind. A step that reports drift and exits 0 is the defect this
+# pipeline has already deleted once as stage 6: "a green check that verifies nothing is worse than
+# no check" (spec §12.1).
+name: base-image-currency
+
+on:
+  schedule:
+    # 04:23 UTC, after depcheck's 03:17 so the two do not contend, and off the hour for the same
+    # reason depcheck states: GitHub queues heavily at :00.
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: base-image-currency
+  cancel-in-progress: true
+
+jobs:
+  currency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: "Are the pinned buildpack base images still current?"
+        run: |
+          set -uo pipefail
+
+          # Read the pins out of pom.xml rather than restating them here. A copy in this file would
+          # be a fifth place to forget, and this check would then compare two stale values and pass.
+          builder=$(grep -oP '(?<=<builder>)[^<]+' pom.xml || true)
+          runimg=$(grep -oP '(?<=<runImage>)[^<]+' pom.xml || true)
+
+          if [ -z "$builder" ] || [ -z "$runimg" ]; then
+            echo "::error::could not read <builder>/<runImage> from pom.xml — the buildpack config moved, and this check was comparing nothing"
+            exit 1
+          fi
+
+          {
+            echo "### Base-image currency"
+            echo ""
+            echo "| Image | Pinned | Upstream \`latest\` | Status |"
+            echo "|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          fail=0
+          for ref in "$builder" "$runimg"; do
+            repo="${ref%@*}"
+            pinned="${ref#*@}"
+
+            # The plugin's own default tag is `latest` (pom.xml records that, read from the shipped
+            # spring-boot-buildpack-platform jar), so `latest` is the right thing to compare against.
+            # --proto '=https' constrains curl to HTTPS for the redirects -L follows, not only the
+            # first hop. Without it a redirect could downgrade this to plain HTTP, and the answer it
+            # returns is what decides whether a base image is declared current — githubactions:S6506.
+            body=$(curl -fsSL --proto '=https' --tlsv1.2 --max-time 30 \
+              "https://hub.docker.com/v2/repositories/${repo}/tags/latest" || true)
+            current=$(printf '%s' "$body" | jq -r '.digest // empty' 2>/dev/null || true)
+
+            if [ -z "$current" ]; then
+              # An unreadable registry response is not evidence of currency. Same rule stage 11d
+              # applies to a missing Trivy report: absent data must not read as a clean result.
+              echo "::error::${repo}: no digest returned by the registry — that is not 'up to date'"
+              echo "| \`$repo\` | \`${pinned:0:19}…\` | **unreadable** | **FAIL** |" >> "$GITHUB_STEP_SUMMARY"
+              fail=1
+              continue
+            fi
+
+            if [ "$current" = "$pinned" ]; then
+              echo "$repo: current"
+              echo "| \`$repo\` | \`${pinned:0:19}…\` | same | ok |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::${repo} has moved upstream. Pinned ${pinned}, latest ${current}. Update pom.xml deliberately, then re-measure the Trivy ceiling for tiny-ledger:local."
+              echo "$repo: BEHIND (pinned $pinned, latest $current)"
+              {
+                echo "| \`$repo\` | \`${pinned:0:19}…\` | \`${current:0:19}…\` | **BEHIND** |"
+                echo ""
+                echo "Paste into \`pom.xml\`:"
+                echo ""
+                echo '```xml'
+                echo "$repo@$current"
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              fail=1
+            fi
+          done
+
+          exit "$fail"
