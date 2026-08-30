@@ -13,6 +13,22 @@ updates:
     groups:
       maven-minor-patch:
         patterns: ["*"]
+        # The `actions` group below argues that a dependency which CARRIES a gate must not be
+        # reviewed inside a batch diff, because a major can re-default the very input that makes it
+        # a gate. That reasoning was never applied here, and this ecosystem has the same shape:
+        # sonar-maven-plugin runs `-Dsonar.qualitygate.wait=true`, this pipeline's stage-13 gate.
+        #
+        # It last moved 5.1.0.4751 -> 5.7.0.6970 as one line inside a routine batch — six minors,
+        # including SCANMAVEN-317 / SCANMAVEN-341 (encrypted-property support reworked) and
+        # SCANMAVEN-281 (property filtering), against a pom that supplies five `sonar.*` properties.
+        # A scanner that quietly stops reading sonar.coverage.jacoco.xmlReportPaths reports 0%
+        # coverage: either it reddens the gate, or it passes it on the wrong measurement.
+        #
+        # Excluded rather than ignored: it still gets proposed, as its own PR, where the diff is the
+        # decision. No gate enforces this exclusion — it is a config line, and the `actions` group
+        # above rests on the same kind of stated reasoning.
+        exclude-patterns:
+          - "org.sonarsource.scanner.maven:sonar-maven-plugin"
         update-types: ["minor", "patch"]
     ignore:
       # Majors need a human decision — Testcontainers 1.x -> 2.x was proposed on day one and would
