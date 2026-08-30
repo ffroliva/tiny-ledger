@@ -30,8 +30,8 @@ class SpecVersionTableTest {
     private static final Path SPEC = Path.of("docs", "spec.md");
     private static final Path POM = Path.of("pom.xml");
     private static final Path COMPOSE = Path.of("docker", "docker-compose.yml");
-    private static final Path IT_BASE = Path.of(
-            "src/test/java/com/ffroliva/tinyledger/testsupport/AbstractIntegrationTest.java");
+    private static final Path IT_BASE =
+            Path.of("src/test/java/com/ffroliva/tinyledger/testsupport/AbstractIntegrationTest.java");
 
     private static String read(Path file) {
         try {
@@ -43,9 +43,7 @@ class SpecVersionTableTest {
 
     /** The bolded version in §1.5's table row for {@code component}. */
     private static String specRow(String component) {
-        Matcher m = Pattern.compile(
-                        "^\\| " + Pattern.quote(component) + " \\| \\*\\*([^*]+)\\*\\*",
-                        Pattern.MULTILINE)
+        Matcher m = Pattern.compile("^\\| " + Pattern.quote(component) + " \\| \\*\\*([^*]+)\\*\\*", Pattern.MULTILINE)
                 .matcher(read(SPEC));
         assertThat(m.find())
                 .as("§1.5 has a bolded-version row for %s — did the table shape change?", component)
@@ -56,7 +54,9 @@ class SpecVersionTableTest {
     /** First capture of {@code regex} in {@code file}, asserted present so a rename fails loudly. */
     private static String capture(Path file, String regex) {
         Matcher m = Pattern.compile(regex).matcher(read(file));
-        assertThat(m.find()).as("%s no longer matches anything in %s", regex, file).isTrue();
+        assertThat(m.find())
+                .as("%s no longer matches anything in %s", regex, file)
+                .isTrue();
         return m.group(1);
     }
 
@@ -69,9 +69,8 @@ class SpecVersionTableTest {
 
     @Test
     void springBootRowMatchesTheParentVersion() {
-        String parent = capture(
-                POM,
-                "<artifactId>spring-boot-starter-parent</artifactId>\\s*<version>([^<]+)</version>");
+        String parent =
+                capture(POM, "<artifactId>spring-boot-starter-parent</artifactId>\\s*<version>([^<]+)</version>");
         assertThat(specRow("Spring Boot"))
                 .as("§1.5 Spring Boot row vs the <parent> version")
                 .isEqualTo(parent);
