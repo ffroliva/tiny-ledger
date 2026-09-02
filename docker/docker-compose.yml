@@ -85,7 +85,7 @@ services:
   #
   # TEST FIXTURE realm: dev-only credentials, pinned user ids, never deploy.
   keycloak:
-    image: quay.io/keycloak/keycloak:26.7.2
+    image: quay.io/keycloak/keycloak:26.7.3
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
@@ -163,7 +163,7 @@ services:
   # NOTHING IN CI RUNS THIS. Step 9's gate is OtlpExportIT, which starts its own Collector with a file
   # exporter and no credential at all.
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.158.0
+    image: otel/opentelemetry-collector-contrib:0.159.0
     profiles: [observability]
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
@@ -282,7 +282,7 @@ services:
   # survived the decision that reversed it. Replaced rather than amended: two accounts of the same
   # fact in one file is how a reader ends up restoring the published port this file removed.
   traefik:
-    image: traefik:v3.7.10@sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac
+    image: traefik:v3.7.12@sha256:9c2a54d87f76f5c2f5f2682c68394af92fb12c0a2686798d6462a3f84bd78eaf
     profiles: [app]
     # NO depends_on. Traefik used to wait for `app`, which was harmless until E2E_MODE=jar needed
     # the proxy WITHOUT the container -- the application runs on the host in that mode, while
