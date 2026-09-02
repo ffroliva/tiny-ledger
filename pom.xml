@@ -314,7 +314,7 @@
         </execution></executions>
       </plugin>
       <plugin>
-        <groupId>com.diffplug.spotless</groupId><artifactId>spotless-maven-plugin</artifactId><version>3.10.0</version>
+        <groupId>com.diffplug.spotless</groupId><artifactId>spotless-maven-plugin</artifactId><version>3.10.1</version>
         <configuration><java><palantirJavaFormat/></java></configuration>
         <executions><execution><goals><goal>check</goal></goals></execution></executions>
       </plugin>
