@@ -17,7 +17,7 @@
     <spring-modulith.version>2.1.1</spring-modulith.version>
     <testcontainers.version>1.21.4</testcontainers.version>
     <archunit.version>1.5.0</archunit.version>
-    <cucumber.version>7.34.7</cucumber.version>
+    <cucumber.version>7.34.8</cucumber.version>
     <openapi-generator.version>7.25.0</openapi-generator.version>
     <!-- AGENTS.md trap 4: surefire's failIfNoSpecifiedTests defaults to FALSE, so `-Dtest=Typo`
          matches nothing and the build exits 0 - a red step can "pass" having executed nothing, which
@@ -314,7 +314,7 @@
         </execution></executions>
       </plugin>
       <plugin>
-        <groupId>com.diffplug.spotless</groupId><artifactId>spotless-maven-plugin</artifactId><version>3.10.0</version>
+        <groupId>com.diffplug.spotless</groupId><artifactId>spotless-maven-plugin</artifactId><version>3.10.2</version>
         <configuration><java><palantirJavaFormat/></java></configuration>
         <executions><execution><goals><goal>check</goal></goals></execution></executions>
       </plugin>
@@ -535,7 +535,7 @@
         <dependency>
           <groupId>com.julien-dubois.bootui</groupId>
           <artifactId>bootui-spring-boot-starter</artifactId>
-          <version>1.15.0</version>
+          <version>1.17.0</version>
           <scope>runtime</scope>
         </dependency>
       </dependencies>
