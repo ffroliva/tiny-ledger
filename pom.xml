@@ -86,7 +86,7 @@
     <sonar.host.url>https://sonarcloud.io</sonar.host.url>
     <sonar.organization>ffroliva-github</sonar.organization>
     <sonar.projectKey>ffroliva_tiny-ledger</sonar.projectKey>
-    <sonar-maven-plugin.version>5.7.0.6970</sonar-maven-plugin.version>
+    <sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
 
     <!-- TWO paths, comma-separated, and that is the whole reason the `it` profile writes its JaCoCo
          data to a separate file. CI runs unit and integration on different runners, so neither ever
