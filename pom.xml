@@ -16,9 +16,9 @@
     <java.version>25</java.version>
     <spring-modulith.version>2.1.1</spring-modulith.version>
     <testcontainers.version>1.21.4</testcontainers.version>
-    <archunit.version>1.5.0</archunit.version>
-    <cucumber.version>7.34.7</cucumber.version>
-    <openapi-generator.version>7.25.0</openapi-generator.version>
+    <archunit.version>1.5.1</archunit.version>
+    <cucumber.version>7.34.9</cucumber.version>
+    <openapi-generator.version>7.26.0</openapi-generator.version>
     <!-- AGENTS.md trap 4: surefire's failIfNoSpecifiedTests defaults to FALSE, so `-Dtest=Typo`
          matches nothing and the build exits 0 - a red step can "pass" having executed nothing, which
          this repository has already shipped once. Only applies when `-Dtest` is given, so full runs
@@ -157,9 +157,9 @@
          bucket4j-core alone runs the local, in-memory `standalone` bucket; the two redis artifacts
          add Bucket4jLettuce's distributed proxy for `full`, reusing the lettuce-core already on the
          classpath via spring-boot-starter-data-redis rather than adding a second Redis client. -->
-    <dependency><groupId>com.bucket4j</groupId><artifactId>bucket4j_jdk17-core</artifactId><version>8.19.0</version></dependency>
-    <dependency><groupId>com.bucket4j</groupId><artifactId>bucket4j_jdk17-redis-common</artifactId><version>8.19.0</version></dependency>
-    <dependency><groupId>com.bucket4j</groupId><artifactId>bucket4j_jdk17-lettuce</artifactId><version>8.19.0</version></dependency>
+    <dependency><groupId>com.bucket4j</groupId><artifactId>bucket4j_jdk17-core</artifactId><version>8.21.0</version></dependency>
+    <dependency><groupId>com.bucket4j</groupId><artifactId>bucket4j_jdk17-redis-common</artifactId><version>8.21.0</version></dependency>
+    <dependency><groupId>com.bucket4j</groupId><artifactId>bucket4j_jdk17-lettuce</artifactId><version>8.21.0</version></dependency>
     <!-- Spec §6.1: the bounded, expiring store backing standalone's per-key buckets — version
          supplied by spring-boot-starter-parent's dependency management, same as every other
          Boot-covered dependency in this file. -->
@@ -314,7 +314,7 @@
         </execution></executions>
       </plugin>
       <plugin>
-        <groupId>com.diffplug.spotless</groupId><artifactId>spotless-maven-plugin</artifactId><version>3.10.0</version>
+        <groupId>com.diffplug.spotless</groupId><artifactId>spotless-maven-plugin</artifactId><version>3.10.4</version>
         <configuration><java><palantirJavaFormat/></java></configuration>
         <executions><execution><goals><goal>check</goal></goals></execution></executions>
       </plugin>
@@ -535,7 +535,7 @@
         <dependency>
           <groupId>com.julien-dubois.bootui</groupId>
           <artifactId>bootui-spring-boot-starter</artifactId>
-          <version>1.15.0</version>
+          <version>1.21.0</version>
           <scope>runtime</scope>
         </dependency>
       </dependencies>
