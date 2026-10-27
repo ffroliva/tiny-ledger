@@ -11,7 +11,7 @@ import java.util.List;
  * <p>An enum rather than an interface with two implementations: the method <em>is</em> the strategy, the
  * set is closed, and it has to survive a round-trip through configuration or an API field as a name.
  *
- * <p>Both orderings break ties on {@code lotId}. Without that, two lots bought in the same instant — or
+ * <p>Every ordering breaks ties on {@code lotId}. Without that, two lots bought in the same instant — or
  * at the same price — would consume in whatever order the list happened to hold them, and the same
  * disposal would produce a different cost basis on a replay.
  */
@@ -20,7 +20,10 @@ public enum TaxLotSelector {
     FIFO(Comparator.comparing(TaxLot::acquiredAt).thenComparing(TaxLot::lotId)),
 
     /** Highest cost per unit first, which realises the smallest gain — hence the smallest tax — on a sale. */
-    HIFO(Comparator.comparing(TaxLot::unitCost, Comparator.reverseOrder()).thenComparing(TaxLot::lotId));
+    HIFO(Comparator.comparing(TaxLot::unitCost, Comparator.reverseOrder()).thenComparing(TaxLot::lotId)),
+
+    /** Newest first, by {@code acquiredAt}; the mirror of FIFO, with the same {@code lotId} tie-break. */
+    LIFO(Comparator.comparing(TaxLot::acquiredAt, Comparator.reverseOrder()).thenComparing(TaxLot::lotId));
 
     private final Comparator<TaxLot> ordering;
 
