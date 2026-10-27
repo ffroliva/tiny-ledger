@@ -122,6 +122,39 @@ class MerkleTreeTest {
         assertThatThrownBy(() -> tree.proof(-1)).isInstanceOf(IndexOutOfBoundsException.class);
     }
 
+    @ParameterizedTest(name = "proofFor matches proof(index) and verifies in a {0}-leaf tree")
+    @ValueSource(ints = {1, 2, 3, 4, 5, 6, 7, 8})
+    void proofForMatchesProofByIndexAndVerifies(int size) {
+        List<String> leaves = leaves(size);
+        MerkleTree tree = MerkleTree.of(leaves);
+
+        for (int index = 0; index < size; index++) {
+            List<String> proof = tree.proofFor(leaves.get(index));
+
+            assertThat(proof).isEqualTo(tree.proof(index));
+            assertThat(MerkleTree.verify(leaves.get(index), proof, tree.root(), index, size))
+                    .isTrue();
+        }
+    }
+
+    @Test
+    void proofForResolvesDuplicateLeavesToTheFirst() {
+        List<String> distinct = leaves(3);
+        List<String> withDuplicate = List.of(distinct.get(0), distinct.get(1), distinct.get(2), distinct.get(1));
+        MerkleTree tree = MerkleTree.of(withDuplicate);
+
+        assertThat(tree.proofFor(distinct.get(1))).isEqualTo(tree.proof(1)).isNotEqualTo(tree.proof(3));
+    }
+
+    @Test
+    void proofForAnUnknownHashNamesTheHash() {
+        MerkleTree tree = MerkleTree.of(leaves(3));
+
+        assertThatThrownBy(() -> tree.proofFor("unknown-hash"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unknown-hash");
+    }
+
     @Test
     void theLeavesAreExposedAsAnUnmodifiableCopy() {
         List<String> source = new ArrayList<>(leaves(3));

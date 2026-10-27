@@ -88,6 +88,20 @@ public final class MerkleTree {
     }
 
     /**
+     * Produces the same inclusion proof as {@link #proof(int)} for the first leaf equal to
+     * {@code leafHash}.
+     *
+     * @throws IllegalArgumentException if no leaf matches
+     */
+    public List<String> proofFor(String leafHash) {
+        int index = leaves.indexOf(leafHash);
+        if (index < 0) {
+            throw new IllegalArgumentException("no leaf matches hash " + leafHash);
+        }
+        return proof(index);
+    }
+
+    /**
      * Verifies that a given leaf hash, combined with the proof path, reconstructs the expected root.
      */
     public static boolean verify(
