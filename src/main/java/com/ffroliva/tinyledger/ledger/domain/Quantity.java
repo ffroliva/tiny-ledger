@@ -17,7 +17,8 @@ import java.util.Objects;
  *
  * <p>Arithmetic overflow raises {@link ArithmeticException} rather than a §6.5 catalogued error, because
  * no asset symbol reaches this type from the wire yet: getting here is a bug in a caller, and AGENTS.md
- * reserves exceptions for exactly that. The same reasoning covers the asset-mismatch guard.
+ * reserves exceptions for exactly that. Asset mismatch and excess precision are the §6.5 errors, raised as
+ * {@link AssetMismatchException} and {@link ExcessPrecisionException}.
  *
  * @param symbol the instrument's ticker, e.g. {@code VOO} — or the ISO code when the class is
  *     {@link AssetClass#CURRENCY}
@@ -43,7 +44,7 @@ public record Quantity(String symbol, AssetClass assetClass, long microUnits) {
     public static Quantity of(String symbol, AssetClass assetClass, String decimalAmount) {
         BigDecimal parsed = new BigDecimal(decimalAmount);
         if (parsed.scale() > SCALE) {
-            throw new IllegalArgumentException(
+            throw new ExcessPrecisionException(
                     "quantity carries more than %d decimal places: %s".formatted(SCALE, decimalAmount));
         }
         return new Quantity(symbol, assetClass, parsed.movePointRight(SCALE).longValueExact());
@@ -90,7 +91,7 @@ public record Quantity(String symbol, AssetClass assetClass, long microUnits) {
      */
     void requireSameAsset(Quantity other) {
         if (!symbol.equals(other.symbol) || assetClass != other.assetClass) {
-            throw new IllegalArgumentException(
+            throw new AssetMismatchException(
                     "asset mismatch: %s %s vs %s %s".formatted(symbol, assetClass, other.symbol, other.assetClass));
         }
     }
