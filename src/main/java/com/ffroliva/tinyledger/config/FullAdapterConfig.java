@@ -151,8 +151,10 @@ public class FullAdapterConfig {
     public EventExternalizationConfiguration ledgerEventExternalization() {
         return EventExternalizationConfiguration.externalizing()
                 .selectByType(LedgerEvent.class)
-                .route(LedgerEvent.class, event -> RoutingTarget.forTarget(LEDGER_EVENTS_TOPIC)
-                        .andKey(event.accountId().value().toString()))
+                .route(
+                        LedgerEvent.class,
+                        event -> RoutingTarget.forTarget(LEDGER_EVENTS_TOPIC)
+                                .andKey(event.accountId().value().toString()))
                 // Headers, not payload parsing: the audit module never has to know the JSON shape
                 // of a ledger event, which is what keeps the module boundary real.
                 .headers(

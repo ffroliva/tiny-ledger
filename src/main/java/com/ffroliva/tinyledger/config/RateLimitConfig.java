@@ -6,8 +6,10 @@ import com.ffroliva.tinyledger.platform.RateLimiterStore;
 import io.github.bucket4j.distributed.ExpirationAfterWriteStrategy;
 import io.github.bucket4j.distributed.proxy.ProxyManager;
 import io.github.bucket4j.redis.lettuce.Bucket4jLettuce;
+import io.lettuce.core.ClientOptions;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
+import io.lettuce.core.TimeoutOptions;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.codec.RedisCodec;
@@ -84,15 +86,24 @@ public class RateLimitConfig {
      * every request's path — long enough to absorb ordinary network jitter to a same-network Redis,
      * short enough that a real outage costs one bounded stall per request, not sixty. <strong>Do not
      * "fix" this by adding a Bucket4j request timeout instead</strong> — see the paragraph above.
+     *
+     * <p>The 250ms is a COMMAND bound, set through {@code TimeoutOptions}, not the {@code RedisURI}
+     * timeout: Lettuce also applies the URI timeout to the connection handshake, so 250ms there killed
+     * the application on boot whenever Redis was slow to answer {@code HELLO} (CI run 41504195375,
+     * 2026-11-02). The handshake gets its own 10s; requests still stall at most 250ms.
      */
     @Bean(destroyMethod = "shutdown")
     @Profile("full")
     RedisClient rateLimitRedisClient(
             @Value("${spring.data.redis.host}") String host, @Value("${spring.data.redis.port}") int port) {
         RedisURI uri = RedisURI.Builder.redis(host, port)
-                .withTimeout(Duration.ofMillis(250))
+                .withTimeout(Duration.ofSeconds(10))
                 .build();
-        return RedisClient.create(uri);
+        RedisClient client = RedisClient.create(uri);
+        client.setOptions(ClientOptions.builder()
+                .timeoutOptions(TimeoutOptions.enabled(Duration.ofMillis(250)))
+                .build());
+        return client;
     }
 
     @Bean(destroyMethod = "close")

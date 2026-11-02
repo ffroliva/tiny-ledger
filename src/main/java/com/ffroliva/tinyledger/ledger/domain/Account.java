@@ -204,9 +204,10 @@ public final class Account {
             case MoneyWithdrawn e -> balanceMinorUnits = e.balanceAfter().minorUnits();
             case AssetTransferred e -> {
                 if (e.quantity().isPositive()) {
-                    e.taxLots().forEach(lot -> getOrCreateAggregate(
-                                    e.quantity().symbol(), e.quantity().assetClass())
-                            .acquire(lot));
+                    e.taxLots()
+                            .forEach(lot -> getOrCreateAggregate(
+                                            e.quantity().symbol(), e.quantity().assetClass())
+                                    .acquire(lot));
                 } else if (e.quantity().isNegative()) {
                     TaxLotSelector sel = e.selector() != null ? e.selector() : TaxLotSelector.HIFO;
                     getOrCreateAggregate(e.quantity().symbol(), e.quantity().assetClass())

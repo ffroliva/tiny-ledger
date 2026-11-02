@@ -10,9 +10,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
@@ -49,10 +49,11 @@ public abstract class AbstractIntegrationTest {
 
     public static final RedisContainer REDIS = new RedisContainer(DockerImageName.parse("redis:7-alpine"));
 
-    public static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.9.9"));
+    public static final ConfluentKafkaContainer KAFKA =
+            new ConfluentKafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:8.4.0"));
 
     public static final GenericContainer<?> KEYCLOAK = new GenericContainer<>(
-                    DockerImageName.parse("quay.io/keycloak/keycloak:26.7.2"))
+                    DockerImageName.parse("quay.io/keycloak/keycloak:26.8.1"))
             .withEnv("KC_BOOTSTRAP_ADMIN_USERNAME", "admin")
             .withEnv("KC_BOOTSTRAP_ADMIN_PASSWORD", "admin")
             .withCopyFileToContainer(
