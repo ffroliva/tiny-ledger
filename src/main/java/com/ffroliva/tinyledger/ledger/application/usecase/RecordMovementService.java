@@ -115,27 +115,26 @@ public class RecordMovementService implements RecordMovementUseCase {
             com.ffroliva.tinyledger.shared.Money amount,
             String reference,
             Quantity quantity) {
-        boolean samePayload =
-                switch (event) {
-                    case MoneyDeposited d ->
-                        d.accountId().equals(requested)
-                                && type == MovementType.DEPOSIT
-                                && d.amount().equals(amount)
-                                && java.util.Objects.equals(d.reference(), reference);
-                    case MoneyWithdrawn w ->
-                        w.accountId().equals(requested)
-                                && type == MovementType.WITHDRAWAL
-                                && w.amount().equals(amount)
-                                && java.util.Objects.equals(w.reference(), reference);
-                    case AssetTransferred a ->
-                        a.accountId().equals(requested)
-                                && type == MovementType.ASSET_TRANSFER
-                                && (quantity == null
-                                        || a.quantity().equals(quantity)
-                                        || a.quantity().negated().equals(quantity))
-                                && java.util.Objects.equals(a.reference(), reference);
-                    case MovementRejected r -> r.accountId().equals(requested) && r.type() == type;
-                };
+        boolean samePayload = switch (event) {
+            case MoneyDeposited d ->
+                d.accountId().equals(requested)
+                        && type == MovementType.DEPOSIT
+                        && d.amount().equals(amount)
+                        && java.util.Objects.equals(d.reference(), reference);
+            case MoneyWithdrawn w ->
+                w.accountId().equals(requested)
+                        && type == MovementType.WITHDRAWAL
+                        && w.amount().equals(amount)
+                        && java.util.Objects.equals(w.reference(), reference);
+            case AssetTransferred a ->
+                a.accountId().equals(requested)
+                        && type == MovementType.ASSET_TRANSFER
+                        && (quantity == null
+                                || a.quantity().equals(quantity)
+                                || a.quantity().negated().equals(quantity))
+                        && java.util.Objects.equals(a.reference(), reference);
+            case MovementRejected r -> r.accountId().equals(requested) && r.type() == type;
+        };
         // No AccountOpened arm to write: MovementEvent is sealed over exactly the four events that
         // carry a movementUid, so the compiler knows this switch is total. The uid comes straight off
         // the interface — the four-arm helper that threw for a case it could not receive is gone.

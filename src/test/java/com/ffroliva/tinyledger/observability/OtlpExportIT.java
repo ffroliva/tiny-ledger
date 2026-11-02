@@ -43,12 +43,12 @@ class OtlpExportIT {
 
     /**
      * Pinned, like every other version here, and <strong>checked to exist</strong> rather than guessed:
-     * {@code 0.158.0} is the current release, published 2026-08-04. The plan's draft named a tag from
+     * {@code 0.164.0} is the pinned release (bumped 2026-11-02; was 0.158.0, published 2026-08-04). The plan's draft named a tag from
      * 2024 that also exists — which is exactly why "it resolves" is not the same check as "it is the
      * one you meant".
      */
     static final GenericContainer<?> COLLECTOR = new GenericContainer<>(
-                    DockerImageName.parse("otel/opentelemetry-collector-contrib:0.158.0"))
+                    DockerImageName.parse("otel/opentelemetry-collector-contrib:0.164.0"))
             .withCopyFileToContainer(
                     MountableFile.forClasspathResource("otel-collector-test.yaml"), "/etc/otelcol/config.yaml")
             .withCommand("--config=/etc/otelcol/config.yaml")

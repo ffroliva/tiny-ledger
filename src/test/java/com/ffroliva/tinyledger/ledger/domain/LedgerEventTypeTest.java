@@ -58,8 +58,9 @@ class LedgerEventTypeTest {
 
     @Test
     void namesRoundTripBackToTheirClass() {
-        LedgerEventType.registered().forEach((name, type) -> assertThat(LedgerEventType.classOf(name))
-                .isEqualTo(type));
+        LedgerEventType.registered()
+                .forEach((name, type) ->
+                        assertThat(LedgerEventType.classOf(name)).isEqualTo(type));
     }
 
     @Test

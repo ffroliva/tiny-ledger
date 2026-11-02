@@ -208,12 +208,13 @@ class SecurityConfigIT extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.amount.minorUnits").value(6000));
 
-        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> mvc.perform(get("/api/v1/audit/entries")
-                        .param("accountUid", alicesAccount.toString())
-                        .header("Authorization", bearer("dave")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.auditEntries[?(@.type == 'MoneyDeposited')].actor")
-                        .value(hasItem(KeycloakTokens.SUBJECTS.get("trent")))));
+        await().atMost(Duration.ofSeconds(30))
+                .untilAsserted(() -> mvc.perform(get("/api/v1/audit/entries")
+                                .param("accountUid", alicesAccount.toString())
+                                .header("Authorization", bearer("dave")))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.auditEntries[?(@.type == 'MoneyDeposited')].actor")
+                                .value(hasItem(KeycloakTokens.SUBJECTS.get("trent")))));
     }
 
     /**

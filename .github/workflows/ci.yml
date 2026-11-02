@@ -289,12 +289,12 @@ jobs:
           # than defaulting to 0, or a newly added service would escape this gate on arrival.
           ceiling() {
             case "$1" in
-              confluentinc/cp-kafka:7.9.9)                  echo  18 ;;  # re-pinned: run 33302869643 measured 18, down from 142 on 7.6.0 (2026-08-30)
-              quay.io/keycloak/keycloak:26.7.2)             echo   1 ;;  # re-pinned: run 33302869643 measured 1, down from 66 on 26.4 (2026-08-30)
-              postgres:16-alpine)                           echo  24 ;;  # re-pinned: run 33011759422 measured 24 (2026-08-26)
+              confluentinc/cp-kafka:8.4.0)                  echo  16 ;;  # re-pinned: run 41486008014 measured 16 on 8.4.0, down from 73 on 7.9.9 (2026-11-02)
+              quay.io/keycloak/keycloak:26.8.1)             echo   1 ;;  # re-pinned: run 41486008014 measured 1 on 26.8.1, down from 24 on 26.7.2 (2026-11-02)
+              postgres:16-alpine)                           echo  26 ;;  # re-pinned: run 41486008014 measured 26, up from 24 — CVEs published upstream against the floating tag (2026-11-02)
               redis:7-alpine)                               echo   0 ;;
-              otel/opentelemetry-collector-contrib:0.158.0) echo  10 ;;
-              traefik:v3.7.10@sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac) echo 12 ;;  # re-pinned: run 33011759422 measured 12 (2026-08-26)
+              otel/opentelemetry-collector-contrib:0.164.0) echo   1 ;;  # re-pinned: run 41486008014 measured 1 on 0.164.0, down from 29 on 0.158.0 (2026-11-02)
+              traefik:v3.7.17@sha256:30ff62491aacdb862ceb8c9edcf2627da638d7deafdd4b6dab32fe34f8aa3e90) echo 0 ;;  # re-pinned: run 41486008014 measured 0 on v3.7.17, down from 25 on v3.7.10 (2026-11-02)
               *)                                            echo  -1 ;;
             esac
           }
@@ -389,7 +389,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           enable-cache: true
 
@@ -432,7 +432,7 @@ jobs:
           java-version: 25
           cache: maven
 
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           enable-cache: true
 
@@ -976,7 +976,7 @@ jobs:
                 exit 1
               fi
               if git diff "origin/$GITHUB_BASE_REF...HEAD" -- pom.xml \
-                 | grep -q 'sonar-maven-plugin.version'; then
+                 | grep -qE '^[+-][^+-].*sonar-maven-plugin.version'; then  # changed lines only: a context line next to an edit is not a move
                 echo "::error::this PR changes sonar-maven-plugin — the plugin that CARRIES the quality gate — and SONAR_TOKEN is unavailable, so the gate did not run against it. Add SONAR_TOKEN to the Dependabot secret store, or merge deliberately knowing the scanner was never exercised."
                 echo "### Sonar: REFUSED — the PR moves the scanner and the scanner did not run" >> "$GITHUB_STEP_SUMMARY"
                 exit 1
@@ -1054,7 +1054,7 @@ jobs:
         run: ./mvnw -q spring-boot:build-image -DskipTests
 
       - name: "Stage 14c — Create Kind Cluster"
-        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           version: v0.27.0
           cluster_name: kind

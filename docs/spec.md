@@ -48,7 +48,7 @@ Versions live in `pom.xml` — the Spring Boot parent for everything it manages,
 | Component | Version | Note |
 |---|---|---|
 | Java | **25** (LTS, Corretto) | Records, sealed interfaces, pattern matching and virtual threads are all load-bearing below |
-| Spring Boot | **4.1.1** (Spring Framework 7.0) | `ProblemDetail`, Modulith integration and `@ServiceConnection` come free |
+| Spring Boot | **4.1.2** (Spring Framework 7.0) | `ProblemDetail`, Modulith integration and `@ServiceConnection` come free |
 | Spring Modulith | Boot-4 line | Module verification, event publication registry, programmatic event externalisation (§4.3) |
 | PostgreSQL | **16** | Event store + projections. `postgres:16-alpine` in **both** `docker/docker-compose.yml` and `AbstractIntegrationTest`, so Compose and the ITs exercise one version. (This row read **18** until 2026-08-08; nothing ever ran 18) |
 | Hibernate | **7.4** | Outbound persistence adapter only — managed by the Boot parent, not pinned here |

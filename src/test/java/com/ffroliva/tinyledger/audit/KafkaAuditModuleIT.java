@@ -310,9 +310,11 @@ class KafkaAuditModuleIT extends AbstractIntegrationTest {
 
         // …and the consumer is still consuming: the next good event reaches the trail.
         var opened = openAccount.open(new OpenAccount("dave", "ACC-DLT", Currency.getInstance("GBP")));
-        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(
-                        trail.eventStream(opened.accountId().value(), null, 50).entries())
-                .isNotEmpty());
+        await().atMost(Duration.ofSeconds(30))
+                .untilAsserted(
+                        () -> assertThat(trail.eventStream(opened.accountId().value(), null, 50)
+                                        .entries())
+                                .isNotEmpty());
     }
 
     /**

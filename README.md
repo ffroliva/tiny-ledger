@@ -1,13 +1,13 @@
 # Tiny Ledger
 
 [![CI](https://github.com/ffroliva/tiny-ledger/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ffroliva/tiny-ledger/actions/workflows/ci.yml)
-[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=alert_status&branch=main)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger&branch=main)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=coverage&branch=main)](https://sonarcloud.io/component_measures?id=ffroliva_tiny-ledger&metric=coverage&branch=main)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger-sbx-bench&metric=alert_status&branch=main)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger-sbx-bench&branch=main)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger-sbx-bench&metric=coverage&branch=main)](https://sonarcloud.io/component_measures?id=ffroliva_tiny-ledger-sbx-bench&metric=coverage&branch=main)
 
-[![Reliability](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=reliability_rating&branch=main)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger&branch=main)
-[![Security](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=security_rating&branch=main)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger&branch=main)
-[![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=sqale_rating&branch=main)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger&branch=main)
-[![Duplication](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger&metric=duplicated_lines_density&branch=main)](https://sonarcloud.io/component_measures?id=ffroliva_tiny-ledger&metric=duplicated_lines_density&branch=main)
+[![Reliability](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger-sbx-bench&metric=reliability_rating&branch=main)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger-sbx-bench&branch=main)
+[![Security](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger-sbx-bench&metric=security_rating&branch=main)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger-sbx-bench&branch=main)
+[![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger-sbx-bench&metric=sqale_rating&branch=main)](https://sonarcloud.io/summary/overall?id=ffroliva_tiny-ledger-sbx-bench&branch=main)
+[![Duplication](https://sonarcloud.io/api/project_badges/measure?project=ffroliva_tiny-ledger-sbx-bench&metric=duplicated_lines_density&branch=main)](https://sonarcloud.io/component_measures?id=ffroliva_tiny-ledger-sbx-bench&metric=duplicated_lines_density&branch=main)
 [![Licence: MIT](https://img.shields.io/github/license/ffroliva/tiny-ledger)](LICENSE)
 
 <!-- Every badge is live — fetched from CI or SonarCloud at render time, so none can drift from what

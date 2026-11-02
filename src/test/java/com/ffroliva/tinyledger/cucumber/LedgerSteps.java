@@ -295,13 +295,12 @@ public class LedgerSteps {
      */
     @Then("a {string} event is recorded at version {int}")
     public void anEventIsRecordedAtVersion(String eventType, int version) {
-        String[] shape =
-                switch (eventType) {
-                    case "MoneyDeposited" -> new String[] {"DEPOSIT", "IN"};
-                    case "MoneyWithdrawn" -> new String[] {"WITHDRAWAL", "OUT"};
-                    case "AssetTransferred" -> new String[] {"ASSET_TRANSFER", "IN"};
-                    default -> throw new IllegalArgumentException("unsupported event type: " + eventType);
-                };
+        String[] shape = switch (eventType) {
+            case "MoneyDeposited" -> new String[] {"DEPOSIT", "IN"};
+            case "MoneyWithdrawn" -> new String[] {"WITHDRAWAL", "OUT"};
+            case "AssetTransferred" -> new String[] {"ASSET_TRANSFER", "IN"};
+            default -> throw new IllegalArgumentException("unsupported event type: " + eventType);
+        };
         assertThat(text(lastResponse, "$.type")).isEqualTo(shape[0]);
         assertThat(text(lastResponse, "$.direction")).isEqualTo(shape[1]);
         assertThat(number(get(strongBalancePath(currentAccount)), "$.streamVersion"))
