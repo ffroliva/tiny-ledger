@@ -251,12 +251,12 @@ jobs:
           # than defaulting to 0, or a newly added service would escape this gate on arrival.
           ceiling() {
             case "$1" in
-              confluentinc/cp-kafka:8.4.0)                  echo  16 ;;  # re-pinned: run 41486008014 measured 16 on 8.4.0, down from 73 on 7.9.9 (2026-11-02)
-              quay.io/keycloak/keycloak:26.8.1)             echo   1 ;;  # re-pinned: run 41486008014 measured 1 on 26.8.1, down from 24 on 26.7.2 (2026-11-02)
-              postgres:16-alpine)                           echo  26 ;;  # re-pinned: run 41486008014 measured 26, up from 24 — CVEs published upstream against the floating tag (2026-11-02)
+              confluentinc/cp-kafka:8.4.0)                  echo  16 ;;  # re-pinned: sbx-bench run 41486008014 measured 16 on 8.4.0, down from 73 on 7.9.9 (2026-11-02)
+              quay.io/keycloak/keycloak:26.8.1)             echo   1 ;;  # re-pinned: sbx-bench run 41486008014 measured 1 on 26.8.1, down from 24 on 26.7.2 (2026-11-02)
+              postgres:16-alpine)                           echo  26 ;;  # re-pinned: sbx-bench run 41486008014 measured 26, up from 24 — CVEs published upstream against the floating tag (2026-11-02)
               redis:7-alpine)                               echo   0 ;;
-              otel/opentelemetry-collector-contrib:0.164.0) echo   1 ;;  # re-pinned: run 41486008014 measured 1 on 0.164.0, down from 29 on 0.158.0 (2026-11-02)
-              traefik:v3.7.17@sha256:30ff62491aacdb862ceb8c9edcf2627da638d7deafdd4b6dab32fe34f8aa3e90) echo 0 ;;  # re-pinned: run 41486008014 measured 0 on v3.7.17, down from 25 on v3.7.10 (2026-11-02)
+              otel/opentelemetry-collector-contrib:0.164.0) echo   1 ;;  # re-pinned: sbx-bench run 41486008014 measured 1 on 0.164.0, down from 29 on 0.158.0 (2026-11-02)
+              traefik:v3.7.17@sha256:30ff62491aacdb862ceb8c9edcf2627da638d7deafdd4b6dab32fe34f8aa3e90) echo 0 ;;  # re-pinned: sbx-bench run 41486008014 measured 0 on v3.7.17, down from 25 on v3.7.10 (2026-11-02)
               *)                                            echo  -1 ;;
             esac
           }

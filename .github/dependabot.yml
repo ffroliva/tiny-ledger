@@ -84,7 +84,7 @@ updates:
   # renovate.json5 and .github/workflows/renovate.yml. Dependabot's `docker` / `docker-compose`
   # ecosystems each move ONE of the four sites an image is named in (Compose, the local-kind
   # overlay, AbstractIntegrationTest's string literals, stage 11d's ceiling table), so every image
-  # PR they opened failed ContainerImageMatrixTest by construction — #1-#4 on this repository, all
+  # PR they opened failed ContainerImageMatrixTest by construction — #1-#4 on the sbx-bench mirror, all
   # red, all superseded by a hand-made PR that moved the four sites together. Renovate's
   # docker-compose + kubernetes + custom.regex managers see all four and move them in one PR.
   # Running both would also mean two bots racing to open the same bump.

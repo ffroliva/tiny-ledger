@@ -85,7 +85,7 @@
 
     <sonar.host.url>https://sonarcloud.io</sonar.host.url>
     <sonar.organization>ffroliva-github</sonar.organization>
-    <sonar.projectKey>ffroliva_tiny-ledger-sbx-bench</sonar.projectKey>
+    <sonar.projectKey>ffroliva_tiny-ledger</sonar.projectKey>
     <sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
 
     <!-- TWO paths, comma-separated, and that is the whole reason the `it` profile writes its JaCoCo
@@ -114,7 +114,7 @@
         <type>pom</type>
         <scope>import</scope>
       </dependency>
-      <!-- Transitive via kafka-clients. Trivy (stage 11, CI 41486008014, 2026-11-02) reported HIGH,
+      <!-- Transitive via kafka-clients. Trivy (stage 11, sbx-bench mirror CI 41486008014, 2026-11-02) reported HIGH,
            status `fixed`: lz4-java 1.11.2 CVE-2026-106451 (fixed 1.11.4), snappy-java 1.1.10.7
            CVE-2026-108106 / CVE-2026-93451 (fixed 1.1.10.9). Fixed rather than suppressed, at the
            current release of each patch line. Drop when kafka-clients ships these itself. -->
