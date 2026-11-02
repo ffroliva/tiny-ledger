@@ -59,7 +59,7 @@ jobs:
         # SHA-pinned because WorkflowGovernanceTest requires it of third-party actions, and for the
         # reason that test exists: a mutable ref means a different action can run tomorrow than the
         # one reviewed today. v46.2.3.
-        uses: renovatebot/github-action@a63d9a7bc606f7336fd20b47f2f32259a35e6213
+        uses: renovatebot/github-action@43b963bf5dd5e57f1f95c59765a018d782870211
         with:
           token: ${{ secrets.RENOVATE_TOKEN }}
         env:
