@@ -22,6 +22,8 @@
   // of them to agree. The gate is right — a split between what the ITs prove and what Compose runs
   // is a defect with no symptom — so the fix is a bot that can see every site and move them in one
   // PR. Renovate's custom managers do exactly that, and those PRs then go GREEN instead of red.
+  // On 2026-11-02 Dependabot's docker / docker-compose ecosystems were removed (four more red
+  // single-site PRs, #1-#4), so images are now Renovate's alone; the SEEN rows above are history.
   //
   // The `buildpacks` manager was checked and does NOT apply: it reads project.toml only, and this
   // project has no Dockerfile and no project.toml — the base images are Maven plugin XML.
