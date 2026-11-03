@@ -120,6 +120,18 @@ public final class Account {
         if (!qty.isPositive()) {
             throw new InvalidAmountException("quantity must be positive");
         }
+        // Cash moves by deposit/withdrawal; a CURRENCY lot here would be money the balance never sees (§6.5).
+        if (qty.assetClass() == AssetClass.CURRENCY) {
+            return List.of(new MovementRejected(
+                    id,
+                    version + 1,
+                    now,
+                    cmd.movementUid(),
+                    MovementType.ASSET_TRANSFER,
+                    new Money(currency, 0),
+                    "asset-mismatch",
+                    cmd.caller()));
+        }
 
         if ("IN".equalsIgnoreCase(cmd.direction())) {
             Money basis = cmd.costBasis();
