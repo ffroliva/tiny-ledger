@@ -383,6 +383,31 @@ class AccountTest {
     }
 
     @Test
+    void cashThroughTheAssetTransferEndpointIsRejectedAsAssetMismatch() {
+        // Cash moves by deposit/withdrawal; a CURRENCY "lot" would be money the balance never sees.
+        Account account = openedWith(10_000);
+        Quantity cash = Quantity.of("GBP", AssetClass.CURRENCY, "100.000000");
+
+        List<MovementEvent> events = account.transferAsset(
+                new AssetTransfer(
+                        "alice",
+                        false,
+                        account.id(),
+                        UUID.randomUUID(),
+                        "IN",
+                        cash,
+                        new Money(GBP, 10_000),
+                        null,
+                        null,
+                        "cash"),
+                T);
+
+        assertThat(events).singleElement().isInstanceOf(MovementRejected.class);
+        assertThat(((MovementRejected) events.getFirst()).reason()).isEqualTo("asset-mismatch");
+        assertThat(account.holding("GBP", AssetClass.CURRENCY).isZero()).isTrue();
+    }
+
+    @Test
     void assetTransferWithMismatchedCostBasisCurrencyEmitsCurrencyMismatch() {
         Account account = openedWith(10_000);
         Quantity qty = Quantity.of("VOO", AssetClass.EQUITY_ETF, "5.000000");

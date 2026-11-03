@@ -1,7 +1,7 @@
 # Tiny Ledger — Technical Specification
 
 **Author:** Flávio Oliva
-**Version:** 3.57
+**Version:** 3.58
 **Status:** Contract for implementation
 **Supersedes:** Event-Sourced Banking Ledger PoC V2
 
@@ -194,6 +194,8 @@ asset symbol reaches these types from the wire, so reaching a mismatch is a bug 
 exceptions are for bugs and catalogued errors. **When these types are wired to an endpoint, that
 choice has to be revisited**, and §6.5 will need rows for asset mismatch and excess precision — a
 client-supplied ticker is untrusted input and must not answer 500.
+
+*Revisited in 3.58:* the asset-transfer endpoint refuses `CURRENCY` as a recorded `MovementRejected` with reason `asset-mismatch` (422, replays as the same 422). The `requireSameAsset` guard stays an `IllegalArgumentException`: holdings are keyed by `(symbol, assetClass)`, so the wire cannot reach it.
 
 #### Tax lots and cost basis
 
@@ -1088,7 +1090,7 @@ RFC 7807 `ProblemDetail` throughout, via Spring's built-in support
 | Insufficient funds | 422 | `/errors/insufficient-funds` |
 | Malformed shape — zero, negative or non-integer `minorUnits`, bad currency code | 400 | `/errors/invalid-amount` |
 | Currency mismatch with the account | 422 | `/errors/currency-mismatch` |
-| Asset class or symbol mismatch | 422 | `/errors/asset-mismatch` |
+| Asset class or symbol mismatch — `assetClass: CURRENCY` on an asset transfer (cash moves by deposit/withdrawal) | 422 | `/errors/asset-mismatch` |
 | Insufficient asset holding | 422 | `/errors/insufficient-holding` |
 | Concurrent modification | 409 | `/errors/version-conflict` |
 | Reused movement UID, different payload | 409 | `/errors/idempotency-conflict` |
@@ -2543,3 +2545,4 @@ availability questions, and it should not be smuggled in alongside a port method
 | 3.55 | 2026-08-21 | **Wire-level multi-asset REST endpoint and tax-lot allocations delivered (§7, §6.5).** Extends `MovementType` with `ASSET_TRANSFER` and introduces `AssetTransferred` domain event. Exposes `PUT /api/v1/accounts/{accountUid}/asset-transfers/{transferUid}` supporting idempotent inbound ETF asset transfers (with acquisition cost basis and lot ID) and outbound ETF asset transfers (with HIFO/FIFO tax-lot consumption). §6.5 catalogue gains `/errors/asset-mismatch` and `/errors/insufficient-holding`. Exact fractional precision (+10.500000 VOO == -10.500000 VOO) conserved across aggregate and wire API with zero container starts. |
 | 3.56 | 2026-08-22 | **The pipeline is fenced by a test, the way `src/` already was (§12.1, "The pipeline is fenced too").** `ci.yml` was the last surface here with no gate behind it and had drifted accordingly: **no `permissions:` block at all**, so eleven jobs — two holding `SONAR_TOKEN` and `NVD_API_KEY` — ran on the repository's default `GITHUB_TOKEN` scopes, while `depcheck.yml` has had one since it was written; **one `timeout-minutes` across eleven jobs**, leaving GitHub's 360-minute default on the other ten, on *required* checks; and **five third-party actions on mutable tags** (`trivy-action`, `setup-uv` ×2, `action-baseline`, `setup-terraform`, `kind-action`), each repointable by its owner between two runs. `WorkflowGovernanceTest` now enforces all four rules at stage 3, and the timeouts are set from **measured** per-job durations on run `32582281310` rather than guessed. **Differential by construction (AGENTS.md trap 8)**: the same code path runs over synthetic workflows that must score hits and one that must score zero, because a checker only ever pointed at a passing tree scores the same whether its parser works or is inert — and this one's first bug proves the point, a timeout pattern anchored end-of-line that rejected the valid `timeout-minutes: 20   # measured 1m` and reported seven timed jobs as untimed. `continue-on-error` is allowlisted to `load` alone, with the Gatling reason recorded. **Two truth alignments carried in the same revision:** 11c named `action-baseline@v0.15.0`, a tag the file no longer uses, and **the header had been left at 3.54 while this table already reached 3.55** — the header is the version this document tells readers to trust, so it is corrected here rather than left to drift further. Practices adapted from `teng-lin/notebooklm-py`, which enforces the same invariants as three standalone `scripts/check_*.py`; here they are one test that `./mvnw verify` already runs. |
 | 3.57 | 2026-08-23 | **New §2.6: tamper evidence — the reason-trace chain and the Merkle root.** The types shipped in #57 and the use case in #60 with their reasoning in javadoc only, which left a **permanent wire contract** — the exact bytes an event is hashed as — documented nowhere the contract lives. §2.6 records it: not `toString()` (a record-component reorder silently rewrites every historical hash, with no compile error and no test failure), an exhaustive `default`-free switch (a new event type must fail to COMPILE rather than be hashed by its header alone), length-prefixed fields (`reference` and `reason` are caller-supplied, so delimiter-joining is not injective and the collision is chosen rather than found), absent encoded distinctly from empty (§15.9), and seconds-and-nanos instants (`Instant.toString()` drops trailing zeros). Also states what the proof does NOT attest to — it is computed from the log rather than a projection, recomputed rather than stored, carries no timestamp so an auditor can recompute and compare, and is **not a notarisation**: nothing is anchored outside the deployment, so an attacker who rewrites the events and recomputes the root leaves no discrepancy. Authorisation is **ownership only, auditors excluded**, recorded because the absence of a role check is easy to read as an oversight rather than as the §6.4 decision it is. The gates table names the one uncovered claim plainly: **there is no endpoint**, so no caller can obtain a root today. |
+| 3.58 | 2026-11-03 | **`/errors/asset-mismatch` is now raised (§6.5, §2.5).** The catalogue row existed since 3.55 but nothing produced it, and `assetClass: CURRENCY` on `PUT …/asset-transfers/{transferUid}` was accepted as a tax lot — cash the balance never saw. It is now a recorded rejection, so it replays as the same 422. |
