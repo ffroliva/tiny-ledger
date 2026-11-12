@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SpotBugs exclusions. Each entry says why. Keep this list short: an exclusion is a decision, not a mute button. -->
+<FindBugsFilter>
+  <!-- OpenAPI-generated DTOs (openapi-generator-maven-plugin): regenerated each build, not hand-written. -->
+  <Match>
+    <Package name="~com\.ffroliva\.tinyledger\.api\.generated(\..*)?"/>
+  </Match>
+</FindBugsFilter>

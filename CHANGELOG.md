@@ -1,6 +1,9 @@
 # Changelog — Keep a Changelog format
 ## [Unreleased]
 ### Added
+- SpotBugs 4.10.5 + FindSecBugs 1.14.0 (`effort=Max`, `threshold=Low`, generated OpenAPI models excluded),
+  run by `.github/workflows/spotbugs.yml` and reported to GitHub code scanning; new alerts fail the PR. First run:
+  66 findings incl. 11 `CRLF_INJECTION_LOGS`, 2 `SPRING_CSRF_PROTECTION_DISABLED` (to triage).
 - Docs scaffold (spec §14 step 0).
 - Maven skeleton, module markers, Modulith verification, CI (spec §14 step 1).
 - Ledger domain, in-memory event store, balance projection, notification module (spec §14 step 2).

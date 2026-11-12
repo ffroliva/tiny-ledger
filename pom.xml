@@ -388,6 +388,33 @@
           <assemblyAnalyzerEnabled>false</assemblyAnalyzerEnabled>
         </configuration>
       </plugin>
+      <!--
+        SpotBugs + FindSecBugs (Java SAST). NO <executions>, like dependency-check-maven above: CI runs
+        `./mvnw -B compile spotbugs:check` as its own job, so `verify` stays fast.
+        - 4.10.5.0 is the floor: 4.9.x cannot read Java 25 class files (major 69) and dies, which an
+          advisory job would hide.
+        - threshold Low: FindSecBugs files most security patterns at low priority; Medium hides them.
+          Measured on the OWASP Benchmark (Java), threshold Low: 97 % of real flaws found.
+        - Generated OpenAPI models are excluded (spotbugs-exclude.xml): not our code, regenerated each build.
+      -->
+      <plugin>
+        <groupId>com.github.spotbugs</groupId>
+        <artifactId>spotbugs-maven-plugin</artifactId>
+        <version>4.10.5.0</version>
+        <configuration>
+          <effort>Max</effort>
+          <threshold>Low</threshold>
+          <sarifOutput>true</sarifOutput>
+          <excludeFilterFile>spotbugs-exclude.xml</excludeFilterFile>
+          <plugins>
+            <plugin>
+              <groupId>com.h3xstream.findsecbugs</groupId>
+              <artifactId>findsecbugs-plugin</artifactId>
+              <version>1.14.0</version>
+            </plugin>
+          </plugins>
+        </configuration>
+      </plugin>
       <plugin>
         <groupId>org.jacoco</groupId><artifactId>jacoco-maven-plugin</artifactId><version>0.8.16</version>
         <executions>

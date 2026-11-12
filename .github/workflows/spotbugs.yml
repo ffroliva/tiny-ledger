@@ -1,0 +1,50 @@
+name: spotbugs
+# Java SAST: SpotBugs + FindSecBugs (configured in pom.xml, no lifecycle binding — same posture as depcheck.yml).
+# Findings go to GitHub code scanning (Security tab, visible to write access only). The gate is code scanning's
+# own PR check: a pull request that introduces a NEW alert at error level fails "Code scanning results / SpotBugs".
+# Existing findings are tracked as alerts, not as a permanently red job — a check that is always red is a check
+# nobody reads.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['src/**', 'pom.xml', 'spotbugs-exclude.xml', '.github/workflows/spotbugs.yml']
+  push:
+    branches: [main]
+    paths: ['src/**', 'pom.xml', 'spotbugs-exclude.xml']
+
+concurrency:
+  group: spotbugs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  spotbugs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write   # upload-sarif only
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with: { distribution: corretto, java-version: '25', cache: maven }
+      # spotbugs:spotbugs (not :check) writes the SARIF without failing on findings; code scanning gates.
+      - name: SpotBugs + FindSecBugs
+        run: ./mvnw -B -q compile spotbugs:spotbugs
+      - name: Prove FindSecBugs actually ran
+        # An advisory SAST job that silently loses its plugin reports "0 security findings" forever.
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          run = json.load(open("target/spotbugsSarif.json"))["runs"][0]
+          names = [e.get("name") for e in run["tool"].get("extensions", [])]
+          print("SpotBugs extensions:", names, "| results:", len(run.get("results", [])))
+          sys.exit(0 if "com.h3xstream.findsecbugs" in names else "FindSecBugs plugin not loaded")
+          PY
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        with:
+          sarif_file: target/spotbugsSarif.json
+          category: spotbugs
