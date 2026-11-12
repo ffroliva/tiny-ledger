@@ -1,8 +1,100 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- SpotBugs exclusions. Each entry says why. Keep this list short: an exclusion is a decision, not a mute button. -->
+<!-- SpotBugs exclusions. Each entry says why. Keep this list short: an exclusion is a decision, not a mute button.
+     Triage of the first run (66 findings), 2026-11-12. Anything not listed here stays a code-scanning alert. -->
 <FindBugsFilter>
   <!-- OpenAPI-generated DTOs (openapi-generator-maven-plugin): regenerated each build, not hand-written. -->
   <Match>
     <Package name="~com\.ffroliva\.tinyledger\.api\.generated(\..*)?"/>
+  </Match>
+
+  <!-- Inventory, not a flaw: FindSecBugs lists every Spring endpoint so a reviewer knows the attack surface. -->
+  <Match>
+    <Bug pattern="SPRING_ENDPOINT"/>
+  </Match>
+
+  <!-- Both chains are STATELESS bearer-token APIs (oauth2ResourceServer, no session, no cookie auth): CSRF has
+       nothing to ride on. SecurityConfig's Javadoc (the CSRF paragraph) records the condition under which this
+       must be revisited. -->
+  <Match>
+    <Class name="com.ffroliva.tinyledger.config.SecurityConfig"/>
+    <Bug pattern="SPRING_CSRF_PROTECTION_DISABLED"/>
+  </Match>
+
+  <!-- Log injection: the `full` (production) profile logs structured JSON (logging.structured.format.console=logstash),
+       which escapes CR/LF. The values are a Kafka key, an internal account/movement id, a client IP at debug level and
+       operator configuration. Plain-text logs in `standalone` are local-only. Scoped to the classes triaged. -->
+  <Match>
+    <Bug pattern="CRLF_INJECTION_LOGS"/>
+    <Or>
+      <Class name="com.ffroliva.tinyledger.audit.adapter.in.events.AuditKafkaListener"/>
+      <Class name="com.ffroliva.tinyledger.balance.adapter.out.redis.RedisBalanceCache"/>
+      <Class name="com.ffroliva.tinyledger.config.RateLimitConfig"/>
+      <Class name="com.ffroliva.tinyledger.notification.adapter.out.log.LogNotificationAdapter"/>
+      <Class name="com.ffroliva.tinyledger.platform.RateLimitFilter"/>
+      <Class name="com.ffroliva.tinyledger.platform.StartupBanner"/>
+    </Or>
+  </Match>
+
+  <!-- equalsIgnoreCase against ASCII literals on values that cannot carry other Unicode: Account's direction comes
+       only from the generated Direction enum (LedgerApiMapper: request.getDirection().name()), and the deployment
+       class is operator configuration. -->
+  <Match>
+    <Bug pattern="IMPROPER_UNICODE"/>
+    <Or>
+      <Class name="com.ffroliva.tinyledger.ledger.domain.Account"/>
+      <Class name="com.ffroliva.tinyledger.config.TenantProvenanceGuard"/>
+    </Or>
+  </Match>
+
+  <!-- `size % 2 == 1` inside `while (size > 1)`: size is never negative. -->
+  <Match>
+    <Class name="com.ffroliva.tinyledger.ledger.domain.MerkleTree"/>
+    <Bug pattern="IM_BAD_CHECK_FOR_ODD"/>
+  </Match>
+
+  <!-- queryForObject("SELECT COALESCE(MAX(...), 0) ...") always returns one non-null row. -->
+  <Match>
+    <Class name="com.ffroliva.tinyledger.ledger.adapter.out.postgres.PostgresEventStore"/>
+    <Method name="append"/>
+    <Bug pattern="NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE"/>
+  </Match>
+
+  <!-- Constructor injection of shared collaborators (JdbcTemplate, ObjectMapper, Redis, store/cache ports) IS the design:
+       Spring beans hold the one instance they were given. Records holding caller lists are NOT excluded — they copy
+       (RecordListImmutabilityTest). Scoped by class so a new data-carrying class still surfaces. -->
+  <Match>
+    <Bug pattern="EI_EXPOSE_REP2"/>
+    <Class name="~com\.ffroliva\.tinyledger\..*\.(AuditController|PostgresAuditTrail|PostgresBalanceProjection|RedisBalanceCache|BalanceProjector|BalanceQueryService|PostgresEventStore|MerkleProofService|OpenAccountService|RecordMovementService|StrongBalanceService|AuditLagGauge|IpBackstopFilter|RateLimitFilter|SecurityProblemHandler)"/>
+  </Match>
+
+  <!-- The FAPI interaction id is allow-listed (RFC 4122 regex) before it is echoed; anything else becomes a fresh UUID. -->
+  <Match>
+    <Class name="com.ffroliva.tinyledger.platform.FapiInteractionIdFilter"/>
+    <Bug pattern="SERVLET_HEADER"/>
+  </Match>
+
+  <!-- Fail-fast startup guard: refusing to start is the point. Spring instantiates it (no attacker-reachable constructor
+       for a finalizer attack) and a @Configuration cannot be final (CGLIB proxy). -->
+  <Match>
+    <Class name="com.ffroliva.tinyledger.config.TenantProvenanceGuard"/>
+    <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+  </Match>
+
+  <!-- Tracing wrappers: catch (RuntimeException e) { span.error(e); throw e; } records and rethrows unchanged. -->
+  <Match>
+    <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION"/>
+    <Class name="~com\.ffroliva\.tinyledger\..*\.(AuditKafkaListener|LedgerEventsListener|TracedUseCases)(\$.*)?"/>
+  </Match>
+
+  <!-- Micrometer's documented pattern: register the gauge in the constructor; the value is read lazily later. -->
+  <Match>
+    <Class name="com.ffroliva.tinyledger.platform.AuditLagGauge"/>
+    <Bug pattern="MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR"/>
+  </Match>
+
+  <!-- The generated getter is read twice after a null check; SpotBugs cannot prove the second read is non-null. -->
+  <Match>
+    <Class name="com.ffroliva.tinyledger.ledger.adapter.in.web.LedgerApiMapper"/>
+    <Bug pattern="NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE"/>
   </Match>
 </FindBugsFilter>

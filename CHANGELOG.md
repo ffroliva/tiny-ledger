@@ -10,6 +10,14 @@
   Kotlin build cache, not the stdlib). Nightly `depcheck` had failed on it since 2026-11-11.
 - Trivy ceiling for `postgres:16-alpine` re-pinned 26 → 45: 19 new krb5-libs CVEs with no upstream rebuild yet
   (`16-alpine`/`18-alpine` 45, `18` Debian 28 measured locally).
+
+### Fixed
+- `CallerPrincipal.isAdmin()` threw NullPointerException on an authority with no string form instead of failing
+  closed (SpotBugs NP). Records carrying lists (`AssetTransferred`, `MovementResult`, `MerkleProof`, `HistoryPage`,
+  audit `Page`, tax-lot `Selection`) keep their own copy, null-preserving (EI_EXPOSE). `PostgresEventStore` lower-cases
+  with `Locale.ROOT`.
+- SpotBugs triage: 66 → 0. Every accepted pattern is in `spotbugs-exclude.xml` with its reason; the CI job now fails
+  on any finding.
 - Docs scaffold (spec §14 step 0).
 - Maven skeleton, module markers, Modulith verification, CI (spec §14 step 1).
 - Ledger domain, in-memory event store, balance projection, notification module (spec §14 step 2).
