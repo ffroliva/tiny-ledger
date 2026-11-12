@@ -14,6 +14,11 @@
   <version>0.1.0-SNAPSHOT</version>
   <properties>
     <java.version>25</java.version>
+    <!-- Overrides Boot 4.1.2's managed 2.3.21. Only consumer: okhttp (OTLP exporter, runtime scope).
+         Dependency-Check matches CVE-2026-53914 (9.8) by CPE jetbrains:kotlin < 2.4.20; the CVE is in the Kotlin
+         build cache, not the stdlib, but upgrading clears the match without a suppression. Drop this when Boot
+         manages >= 2.4.20. -->
+    <kotlin.version>2.4.21</kotlin.version>
     <spring-modulith.version>2.1.2</spring-modulith.version>
     <testcontainers.version>1.21.4</testcontainers.version>
     <archunit.version>1.5.1</archunit.version>

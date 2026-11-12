@@ -253,7 +253,7 @@ jobs:
             case "$1" in
               confluentinc/cp-kafka:8.4.0)                  echo  18 ;;  # re-pinned: run 41616453103 measured 18 on 8.4.0, up from 16 — CVEs published upstream against the same tag (2026-11-03)
               quay.io/keycloak/keycloak:26.8.1)             echo   1 ;;  # re-pinned: sbx-bench run 41486008014 measured 1 on 26.8.1, down from 24 on 26.7.2 (2026-11-02)
-              postgres:16-alpine)                           echo  26 ;;  # re-pinned: sbx-bench run 41486008014 measured 26, up from 24 — CVEs published upstream against the floating tag (2026-11-02)
+              postgres:16-alpine)                           echo  45 ;;  # re-pinned: run 43253565490 measured 45, up from 26 — 19 krb5-libs CVEs fixed in Alpine 1.22.3-r0, not yet in any upstream rebuild; 18-alpine also 45, 18 (Debian) 28, so no bump clears it (2026-11-12)
               redis:7-alpine)                               echo   0 ;;
               otel/opentelemetry-collector-contrib:0.164.0) echo   1 ;;  # re-pinned: sbx-bench run 41486008014 measured 1 on 0.164.0, down from 29 on 0.158.0 (2026-11-02)
               traefik:v3.7.17@sha256:30ff62491aacdb862ceb8c9edcf2627da638d7deafdd4b6dab32fe34f8aa3e90) echo 0 ;;  # re-pinned: sbx-bench run 41486008014 measured 0 on v3.7.17, down from 25 on v3.7.10 (2026-11-02)

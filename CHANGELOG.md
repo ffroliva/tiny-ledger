@@ -4,6 +4,12 @@
 - SpotBugs 4.10.5 + FindSecBugs 1.14.0 (`effort=Max`, `threshold=Low`, generated OpenAPI models excluded),
   run by `.github/workflows/spotbugs.yml` and reported to GitHub code scanning; new alerts fail the PR. First run:
   66 findings incl. 11 `CRLF_INJECTION_LOGS`, 2 `SPRING_CSRF_PROTECTION_DISABLED` (to triage).
+
+### Security
+- `kotlin.version` 2.4.21 (Boot manages 2.3.21): clears Dependency-Check's CPE match for CVE-2026-53914 (9.8,
+  Kotlin build cache, not the stdlib). Nightly `depcheck` had failed on it since 2026-11-11.
+- Trivy ceiling for `postgres:16-alpine` re-pinned 26 → 45: 19 new krb5-libs CVEs with no upstream rebuild yet
+  (`16-alpine`/`18-alpine` 45, `18` Debian 28 measured locally).
 - Docs scaffold (spec §14 step 0).
 - Maven skeleton, module markers, Modulith verification, CI (spec §14 step 1).
 - Ledger domain, in-memory event store, balance projection, notification module (spec §14 step 2).
