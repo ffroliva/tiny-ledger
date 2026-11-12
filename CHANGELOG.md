@@ -9,7 +9,11 @@
 - `kotlin.version` 2.4.21 (Boot manages 2.3.21): clears Dependency-Check's CPE match for CVE-2026-53914 (9.8,
   Kotlin build cache, not the stdlib). Nightly `depcheck` had failed on it since 2026-11-11.
 - Trivy ceiling for `postgres:16-alpine` re-pinned 26 → 45: 19 new krb5-libs CVEs with no upstream rebuild yet
-  (`16-alpine`/`18-alpine` 45, `18` Debian 28 measured locally).
+  (`16-alpine`/`18-alpine` 45, `18` Debian 28 measured locally). `cp-kafka:8.4.0` re-pinned 18 → 28 (no newer 8.4.x);
+  `otel-collector-contrib` 0.164.0 → 0.165.0 (0 fixable CRITICAL/HIGH).
+- CI workflow hygiene (Sonar githubactions/yaml): `inputs.*` reach the shell through `env` (script injection),
+  CLI deps installed wheel-only with no build scripts (`uv sync --no-build --no-install-project`, tests import `src/`),
+  fixture password read from the realm fixture instead of three literals, curl HTTPS-only, a `case` default.
 
 ### Fixed
 - `CallerPrincipal.isAdmin()` threw NullPointerException on an authority with no string form instead of failing

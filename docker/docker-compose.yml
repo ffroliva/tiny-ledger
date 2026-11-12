@@ -163,7 +163,7 @@ services:
   # NOTHING IN CI RUNS THIS. Step 9's gate is OtlpExportIT, which starts its own Collector with a file
   # exporter and no credential at all.
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.164.0
+    image: otel/opentelemetry-collector-contrib:0.165.0
     profiles: [observability]
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:

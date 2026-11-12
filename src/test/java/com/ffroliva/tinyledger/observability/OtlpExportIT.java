@@ -48,7 +48,7 @@ class OtlpExportIT {
      * one you meant".
      */
     static final GenericContainer<?> COLLECTOR = new GenericContainer<>(
-                    DockerImageName.parse("otel/opentelemetry-collector-contrib:0.164.0"))
+                    DockerImageName.parse("otel/opentelemetry-collector-contrib:0.165.0"))
             .withCopyFileToContainer(
                     MountableFile.forClasspathResource("otel-collector-test.yaml"), "/etc/otelcol/config.yaml")
             .withCommand("--config=/etc/otelcol/config.yaml")
