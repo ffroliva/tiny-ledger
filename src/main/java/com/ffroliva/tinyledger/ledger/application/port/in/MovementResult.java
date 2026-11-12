@@ -22,6 +22,11 @@ public record MovementResult(
         Quantity quantity,
         List<TaxLot> taxLots) {
 
+    public MovementResult {
+        taxLots =
+                taxLots == null ? null : List.copyOf(taxLots); // own copy; null-preserving: an absent list stays absent
+    }
+
     public MovementResult(
             AccountId accountId,
             UUID movementUid,
