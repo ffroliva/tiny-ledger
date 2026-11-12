@@ -36,5 +36,10 @@ public interface QueryMerkleProofUseCase {
             int leafCount,
             List<String> latestEventProof,
             boolean verified,
-            int canonicalFormVersion) {}
+            int canonicalFormVersion) {
+        public MerkleProof {
+            eventHashes = List.copyOf(eventHashes); // own copy
+            latestEventProof = List.copyOf(latestEventProof); // own copy
+        }
+    }
 }

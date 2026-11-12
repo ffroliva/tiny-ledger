@@ -52,6 +52,6 @@ public class CallerPrincipal {
     public boolean isAdmin() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         return auth instanceof JwtAuthenticationToken jwt
-                && jwt.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ledger:admin"));
+                && jwt.getAuthorities().stream().anyMatch(a -> "ledger:admin".equals(a.getAuthority()));
     }
 }

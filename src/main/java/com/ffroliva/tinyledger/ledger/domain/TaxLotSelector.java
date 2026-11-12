@@ -66,5 +66,10 @@ public enum TaxLotSelector {
      * The two sides of a disposal. {@code consumed} is in consumption order — the first element is the lot
      * the method reached for first — and carries the cost basis of what was sold.
      */
-    public record Selection(List<TaxLot> consumed, List<TaxLot> remaining) {}
+    public record Selection(List<TaxLot> consumed, List<TaxLot> remaining) {
+        public Selection {
+            consumed = List.copyOf(consumed); // own copy
+            remaining = List.copyOf(remaining); // own copy
+        }
+    }
 }

@@ -29,5 +29,9 @@ public interface AuditTrailPort {
     record TrailQuery(UUID accountId, String cursor, int limit, Instant from, Instant to) {}
 
     /** {@code nextCursor} is null once the page is the last one (§7). */
-    record Page(List<AuditEntry> entries, String nextCursor) {}
+    record Page(List<AuditEntry> entries, String nextCursor) {
+        public Page {
+            entries = List.copyOf(entries); // own copy
+        }
+    }
 }

@@ -14,6 +14,11 @@
   <version>0.1.0-SNAPSHOT</version>
   <properties>
     <java.version>25</java.version>
+    <!-- Overrides Boot 4.1.2's managed 2.3.21. Only consumer: okhttp (OTLP exporter, runtime scope).
+         Dependency-Check matches CVE-2026-53914 (9.8) by CPE jetbrains:kotlin < 2.4.20; the CVE is in the Kotlin
+         build cache, not the stdlib, but upgrading clears the match without a suppression. Drop this when Boot
+         manages >= 2.4.20. -->
+    <kotlin.version>2.4.21</kotlin.version>
     <spring-modulith.version>2.1.2</spring-modulith.version>
     <testcontainers.version>1.21.4</testcontainers.version>
     <archunit.version>1.5.1</archunit.version>
@@ -272,7 +277,7 @@
               keycloak:26.4, otel-collector:0.158.0, gitleaks by sha256. This is now consistent.
               Bumping means changing the digests deliberately, which is the point.
             -->
-            <builder>paketobuildpacks/builder-noble-java-tiny@sha256:974b67e0cd8cc9c43e0930cfebfd52b7002f206eb9898103f25ddb6155dcfca8</builder>
+            <builder>paketobuildpacks/builder-noble-java-tiny@sha256:b25cf90a089d38c9722e5977ce4fe662fa602ed609a89755973a41da7d2eb78e</builder>
             <runImage>paketobuildpacks/ubuntu-noble-run-tiny@sha256:b5aacecc8b049f54f683ff988db2ea0ae9a523873c12b15296ebbd39c6fb115a</runImage>
             <env>
               <!--
@@ -386,6 +391,33 @@
           <!-- The retired/experimental analysers add runtime and noise for a Java-only project. -->
           <nodeAnalyzerEnabled>false</nodeAnalyzerEnabled>
           <assemblyAnalyzerEnabled>false</assemblyAnalyzerEnabled>
+        </configuration>
+      </plugin>
+      <!--
+        SpotBugs + FindSecBugs (Java SAST). NO <executions>, like dependency-check-maven above: CI runs
+        `./mvnw -B compile spotbugs:check` as its own job, so `verify` stays fast.
+        - 4.10.5.0 is the floor: 4.9.x cannot read Java 25 class files (major 69) and dies, which an
+          advisory job would hide.
+        - threshold Low: FindSecBugs files most security patterns at low priority; Medium hides them.
+          Measured on the OWASP Benchmark (Java), threshold Low: 97 % of real flaws found.
+        - Generated OpenAPI models are excluded (spotbugs-exclude.xml): not our code, regenerated each build.
+      -->
+      <plugin>
+        <groupId>com.github.spotbugs</groupId>
+        <artifactId>spotbugs-maven-plugin</artifactId>
+        <version>4.10.5.0</version>
+        <configuration>
+          <effort>Max</effort>
+          <threshold>Low</threshold>
+          <sarifOutput>true</sarifOutput>
+          <excludeFilterFile>spotbugs-exclude.xml</excludeFilterFile>
+          <plugins>
+            <plugin>
+              <groupId>com.h3xstream.findsecbugs</groupId>
+              <artifactId>findsecbugs-plugin</artifactId>
+              <version>1.14.0</version>
+            </plugin>
+          </plugins>
         </configuration>
       </plugin>
       <plugin>

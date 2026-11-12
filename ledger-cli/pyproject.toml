@@ -63,6 +63,9 @@ pythonVersion = "3.11"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Tests import from src/ directly, so they never depend on the package being installed: CI installs
+# dependencies wheel-only (uv sync --no-build --no-install-project) and runs no build scripts.
+pythonpath = ["src"]
 # basetemp is one level, not "tmp/pytest": pytest's basetemp creation does a non-recursive
 # mkdir, which fails on a fresh clone on Windows if the parent doesn't already exist (proven —
 # see NOTES.md).

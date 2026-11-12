@@ -89,6 +89,7 @@ jobs:
             *[0-9].[0-9]*)
               echo "::error::the tag carries a version again — pom.xml is the only place a version belongs"
               exit 1 ;;
+            *) ;;  # no version in the tag: the expected case
           esac
 
   unit:
@@ -189,7 +190,7 @@ jobs:
         # fails today is fixable today, and a leak that gets deleted in the next commit stops failing.
         run: |
           set -euo pipefail
-          curl -sSL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          curl --proto '=https' --tlsv1.2 -sSL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
           echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz" | sha256sum -c -
           tar -xzf gitleaks.tar.gz gitleaks
           ./gitleaks detect --source . --no-git --redact -v
@@ -251,11 +252,11 @@ jobs:
           # than defaulting to 0, or a newly added service would escape this gate on arrival.
           ceiling() {
             case "$1" in
-              confluentinc/cp-kafka:8.4.0)                  echo  18 ;;  # re-pinned: run 41616453103 measured 18 on 8.4.0, up from 16 — CVEs published upstream against the same tag (2026-11-03)
+              confluentinc/cp-kafka:8.4.0)                  echo  28 ;;  # re-pinned: run 43260672083 measured 28 on 8.4.0, up from 18 — CVEs published upstream against the same tag; no newer 8.4.x (2026-11-12)
               quay.io/keycloak/keycloak:26.8.1)             echo   1 ;;  # re-pinned: sbx-bench run 41486008014 measured 1 on 26.8.1, down from 24 on 26.7.2 (2026-11-02)
-              postgres:16-alpine)                           echo  26 ;;  # re-pinned: sbx-bench run 41486008014 measured 26, up from 24 — CVEs published upstream against the floating tag (2026-11-02)
+              postgres:16-alpine)                           echo  45 ;;  # re-pinned: run 43253565490 measured 45, up from 26 — 19 krb5-libs CVEs fixed in Alpine 1.22.3-r0, not yet in any upstream rebuild; 18-alpine also 45, 18 (Debian) 28, so no bump clears it (2026-11-12)
               redis:7-alpine)                               echo   0 ;;
-              otel/opentelemetry-collector-contrib:0.164.0) echo   1 ;;  # re-pinned: sbx-bench run 41486008014 measured 1 on 0.164.0, down from 29 on 0.158.0 (2026-11-02)
+              otel/opentelemetry-collector-contrib:0.165.0) echo   0 ;;  # bumped from 0.164.0 (2 fixable, ceiling 1): measured 0 on 0.165.0 locally (2026-11-12)
               traefik:v3.7.17@sha256:30ff62491aacdb862ceb8c9edcf2627da638d7deafdd4b6dab32fe34f8aa3e90) echo 0 ;;  # re-pinned: sbx-bench run 41486008014 measured 0 on v3.7.17, down from 25 on v3.7.10 (2026-11-02)
               *)                                            echo  -1 ;;
             esac
@@ -398,23 +399,25 @@ jobs:
 
       # --locked fails on a stale lockfile rather than quietly resolving something else —
       # the Python equivalent of the reproducibility this repo already demands of Maven.
+      # --no-build --no-install-project: dependencies come as locked wheels and NO build script runs (Sonar
+      # githubactions:S8541/S8544). Tests import from src/ (pyproject pythonpath), so the project itself is never built.
       - name: Sync the pinned environment
-        run: uv sync --locked
+        run: uv sync --locked --no-build --no-install-project
 
       - name: Stage 8a — ruff
-        run: uv run ruff check .
+        run: uv run --locked --no-build --no-sync ruff check .
 
       - name: Stage 8b — pyright (strict)
-        run: uv run pyright
+        run: uv run --locked --no-build --no-sync pyright
 
       - name: Stage 8c — unit tests
-        run: uv run pytest -v
+        run: uv run --locked --no-build --no-sync pytest -v
 
       # Same guard as the unit and integration jobs: a run that collected nothing exits 0
       # and is indistinguishable from a green one (AGENTS trap 4).
       - name: CLI test count — a green build that ran nothing is not green
         run: |
-          n=$(uv run pytest --collect-only -q 2>/dev/null | grep -cE '^tests/' || echo 0)
+          n=$(uv run --locked --no-build --no-sync pytest --collect-only -q 2>/dev/null | grep -cE '^tests/' || echo 0)
           echo "### CLI tests collected: $n" >> "$GITHUB_STEP_SUMMARY"
           if [ "$n" -eq 0 ]; then echo "::error::pytest collected zero tests"; exit 1; fi
 
@@ -460,7 +463,12 @@ jobs:
 
       - name: Sync the CLI environment
         working-directory: ledger-cli
-        run: uv sync --locked
+        run: uv sync --locked --no-build --no-install-project
+
+      # The TEST FIXTURE credential, read from the realm fixture that defines it (single source, stays non-secret —
+      # see the note above the e2e env). No literal in this file (Sonar yaml:S2068).
+      - name: Fixture credential from docker/keycloak/realm-tiny-ledger.json
+        run: echo "LEDGER_PASSWORD=$(jq -r '.users[] | select(.username == "alice") | .credentials[0].value' docker/keycloak/realm-tiny-ledger.json)" >> "$GITHUB_ENV"
 
       # LEDGER_PASSWORD is the committed TEST FIXTURE credential from
       # docker/keycloak/realm-tiny-ledger.json, which is marked "never deploy". It stays
@@ -487,7 +495,7 @@ jobs:
           LEDGER_ISSUER_URI: https://auth.localhost/realms/tiny-ledger
           LEDGER_CLIENT_ID: ledger-test
           LEDGER_USERNAME: alice
-          LEDGER_PASSWORD: dev-only
+          UV_NO_SYNC: "1"   # run-e2e.sh's `uv run` must not rebuild the project the sync above did not install
         run: ./scripts/e2e/run-e2e.sh
 
       # E2E_MODE=jar HAD BEEN RUN BY NOTHING. It was kept when the image landed to avoid silent
@@ -517,7 +525,7 @@ jobs:
           LEDGER_ISSUER_URI: https://auth.localhost/realms/tiny-ledger
           LEDGER_CLIENT_ID: ledger-test
           LEDGER_USERNAME: alice
-          LEDGER_PASSWORD: dev-only
+          UV_NO_SYNC: "1"   # run-e2e.sh's `uv run` must not rebuild the project the sync above did not install
         run: ./scripts/e2e/run-e2e.sh
 
       # `--profile app` on BOTH, and it is load-bearing rather than cosmetic. Verified on Docker
@@ -640,8 +648,10 @@ jobs:
           CURL_CA_BUNDLE: docker/tls/ca.crt
         run: |
           set -uo pipefail
+          # Fixture credential read from the realm fixture that defines it (no literal here: Sonar yaml:S2068).
+          FIXTURE_PW=$(jq -r '.users[] | select(.username == "alice") | .credentials[0].value' docker/keycloak/realm-tiny-ledger.json)
           TOKEN=$(curl -sS -X POST https://auth.localhost/realms/tiny-ledger/protocol/openid-connect/token \
-            -d client_id=ledger-test -d username=alice -d password=dev-only -d grant_type=password \
+            -d client_id=ledger-test -d username=alice --data-urlencode "password=$FIXTURE_PW" -d grant_type=password \
             | jq -r .access_token)
           # Emptiness AND "null". A failed connection writes nothing, `jq -r` over empty input
           # emits the EMPTY STRING, and `"" != "null"` is true — so a null-only guard passes and
@@ -771,12 +781,12 @@ jobs:
           # `// -1` covers a missing or unparsable report — an absent count must not read as zero.
           errs=$(jq '[.site[]?.alerts[]? | select(.pluginid == "100000") | .instances | length] | add // 0' zap-api-report.json 2>/dev/null || echo -1)
           errs=${errs:--1}
-          # To STDOUT as well as the summary, and that is not duplication. The summary file is not
+          # To the job log (stderr, which Actions captures) as well as the summary, and that is not duplication. The summary file is not
           # in the job log, so a value written only there cannot be read back from a finished run —
           # which made the first green run of this very assertion unverifiable: it passed, and
           # nothing recorded whether it had computed 8 or 0. An assertion whose value cannot be
           # observed afterwards is weaker than one that can, whatever it does to the exit code.
-          echo "Stage 11e — client-error responses: $errs (ceiling 8)"
+          echo "Stage 11e — client-error responses: $errs (ceiling 8)" >&2
           echo "### Stage 11e — client-error responses: $errs (ceiling 8)" >> "$GITHUB_STEP_SUMMARY"
           if [ "$errs" -lt 0 ]; then
             echo "::error::could not read zap-api-report.json — the scan produced no parsable report, so neither assertion here means anything"
@@ -862,10 +872,11 @@ jobs:
         id: gatling
         continue-on-error: true
         working-directory: loadtest
-        run: >
-          ../mvnw gatling:test
-          -Dledger.users=${{ inputs.users }}
-          -Dledger.rampSeconds=${{ inputs.rampSeconds }}
+        # Inputs reach the shell through env, never interpolated into the script (Sonar githubactions:S7630).
+        env:
+          LEDGER_USERS: ${{ inputs.users }}
+          LEDGER_RAMP_SECONDS: ${{ inputs.rampSeconds }}
+        run: ../mvnw gatling:test -Dledger.users="$LEDGER_USERS" -Dledger.rampSeconds="$LEDGER_RAMP_SECONDS"
 
       - name: Upload results
         if: always()

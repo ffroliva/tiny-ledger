@@ -1,6 +1,28 @@
 # Changelog — Keep a Changelog format
 ## [Unreleased]
 ### Added
+- SpotBugs 4.10.5 + FindSecBugs 1.14.0 (`effort=Max`, `threshold=Low`, generated OpenAPI models excluded),
+  run by `.github/workflows/spotbugs.yml` and reported to GitHub code scanning; new alerts fail the PR. First run:
+  66 findings incl. 11 `CRLF_INJECTION_LOGS`, 2 `SPRING_CSRF_PROTECTION_DISABLED` (to triage).
+
+### Security
+- `kotlin.version` 2.4.21 (Boot manages 2.3.21): clears Dependency-Check's CPE match for CVE-2026-53914 (9.8,
+  Kotlin build cache, not the stdlib). Nightly `depcheck` had failed on it since 2026-11-11.
+- Trivy ceiling for `postgres:16-alpine` re-pinned 26 → 45: 19 new krb5-libs CVEs with no upstream rebuild yet
+  (`16-alpine`/`18-alpine` 45, `18` Debian 28 measured locally). `cp-kafka:8.4.0` re-pinned 18 → 28 (no newer 8.4.x);
+  `otel-collector-contrib` 0.164.0 → 0.165.0 (0 fixable CRITICAL/HIGH). Paketo builder digest bumped (b25cf90a):
+  the Liberica helper binary carried golang.org/x/net 0.61.0 (CVE-2026-78661, HIGH, fixed 0.62.0).
+- CI workflow hygiene (Sonar githubactions/yaml): `inputs.*` reach the shell through `env` (script injection),
+  CLI deps installed wheel-only with no build scripts (`uv sync --no-build --no-install-project`, tests import `src/`),
+  fixture password read from the realm fixture instead of three literals, curl HTTPS-only, a `case` default.
+
+### Fixed
+- `CallerPrincipal.isAdmin()` threw NullPointerException on an authority with no string form instead of failing
+  closed (SpotBugs NP). Records carrying lists (`AssetTransferred`, `MovementResult`, `MerkleProof`, `HistoryPage`,
+  audit `Page`, tax-lot `Selection`) keep their own copy, null-preserving (EI_EXPOSE). `PostgresEventStore` lower-cases
+  with `Locale.ROOT`.
+- SpotBugs triage: 66 → 0. Every accepted pattern is in `spotbugs-exclude.xml` with its reason; the CI job now fails
+  on any finding.
 - Docs scaffold (spec §14 step 0).
 - Maven skeleton, module markers, Modulith verification, CI (spec §14 step 1).
 - Ledger domain, in-memory event store, balance projection, notification module (spec §14 step 2).

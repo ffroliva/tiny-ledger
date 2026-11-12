@@ -20,6 +20,10 @@ public record AssetTransferred(
         String actor)
         implements MovementEvent {
 
+    public AssetTransferred {
+        taxLots = taxLots == null ? null : List.copyOf(taxLots); // own copy; legacy payloads carry no taxLots
+    }
+
     /** Stored in {@code events.event_type}. Data, not a name — see {@link LedgerEvent#eventType()}. */
     public static final String TYPE = "AssetTransferred";
 
