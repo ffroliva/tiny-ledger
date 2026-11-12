@@ -7,6 +7,7 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -82,5 +83,14 @@ class CallerPrincipalTest {
     @Test // standalone has no Authentication at all — isAdmin() must fail closed to false, not throw
     void isAdminIsFalseWithNoAuthentication() {
         assertThat(under("standalone").isAdmin()).isFalse();
+    }
+
+    @Test // GrantedAuthority.getAuthority() is nullable (a non-string authority): fail closed, never NPE (SpotBugs NP)
+    void isAdminIsFalseWhenAnAuthorityHasNoStringForm() {
+        Jwt jwt = Jwt.withTokenValue("t").header("alg", "none").subject("alice").build();
+        GrantedAuthority opaque = () -> null;
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt, List.of(opaque)));
+
+        assertThat(under("full").isAdmin()).isFalse();
     }
 }

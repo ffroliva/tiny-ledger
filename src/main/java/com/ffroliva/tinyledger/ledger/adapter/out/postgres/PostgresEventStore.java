@@ -13,6 +13,7 @@ import com.ffroliva.tinyledger.ledger.domain.MovementRejected;
 import com.ffroliva.tinyledger.shared.AccountId;
 import java.sql.Timestamp;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
@@ -90,7 +91,7 @@ public class PostgresEventStore implements EventStorePort {
                         createdAt,
                         clientMovementUid);
             } catch (DuplicateKeyException e) {
-                String message = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+                String message = e.getMessage() != null ? e.getMessage().toLowerCase(Locale.ROOT) : "";
                 if (message.contains("uk_events_client_movement_uid")) {
                     throw new DuplicateMovementException(clientMovementUid);
                 }
