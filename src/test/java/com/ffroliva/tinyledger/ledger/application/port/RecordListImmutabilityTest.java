@@ -37,6 +37,13 @@ class RecordListImmutabilityTest {
         assertThat(legacy.taxLots()).isNull();
     }
 
+    @Test // the same absent list then flows into the result built from that event (RecordMovementService)
+    void aResultFromALegacyEventStillHasNoTaxLots() {
+        MovementResult result = new MovementResult(null, null, null, 1, null, null, null, null, null, null, null);
+
+        assertThat(result.taxLots()).isNull();
+    }
+
     @Test
     void aMovementResultIsNotChangedByMutatingItsTaxLots() {
         List<TaxLot> lots = new ArrayList<>();

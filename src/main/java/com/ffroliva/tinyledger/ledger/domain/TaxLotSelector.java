@@ -68,10 +68,8 @@ public enum TaxLotSelector {
      */
     public record Selection(List<TaxLot> consumed, List<TaxLot> remaining) {
         public Selection {
-            consumed = consumed == null
-                    ? null
-                    : List.copyOf(consumed); // own copy; null-preserving: an absent list stays absent
-            remaining = remaining == null ? null : List.copyOf(remaining);
+            consumed = List.copyOf(consumed); // own copy
+            remaining = List.copyOf(remaining); // own copy
         }
     }
 }

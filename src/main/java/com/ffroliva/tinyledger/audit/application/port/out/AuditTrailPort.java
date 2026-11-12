@@ -31,9 +31,7 @@ public interface AuditTrailPort {
     /** {@code nextCursor} is null once the page is the last one (§7). */
     record Page(List<AuditEntry> entries, String nextCursor) {
         public Page {
-            entries = entries == null
-                    ? null
-                    : List.copyOf(entries); // own copy; null-preserving: an absent list stays absent
+            entries = List.copyOf(entries); // own copy
         }
     }
 }

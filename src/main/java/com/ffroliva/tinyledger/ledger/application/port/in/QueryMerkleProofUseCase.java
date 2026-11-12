@@ -38,10 +38,8 @@ public interface QueryMerkleProofUseCase {
             boolean verified,
             int canonicalFormVersion) {
         public MerkleProof {
-            eventHashes = eventHashes == null
-                    ? null
-                    : List.copyOf(eventHashes); // own copy; null-preserving: an absent list stays absent
-            latestEventProof = latestEventProof == null ? null : List.copyOf(latestEventProof);
+            eventHashes = List.copyOf(eventHashes); // own copy
+            latestEventProof = List.copyOf(latestEventProof); // own copy
         }
     }
 }
