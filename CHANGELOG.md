@@ -10,7 +10,8 @@
   Kotlin build cache, not the stdlib). Nightly `depcheck` had failed on it since 2026-11-11.
 - Trivy ceiling for `postgres:16-alpine` re-pinned 26 → 45: 19 new krb5-libs CVEs with no upstream rebuild yet
   (`16-alpine`/`18-alpine` 45, `18` Debian 28 measured locally). `cp-kafka:8.4.0` re-pinned 18 → 28 (no newer 8.4.x);
-  `otel-collector-contrib` 0.164.0 → 0.165.0 (0 fixable CRITICAL/HIGH).
+  `otel-collector-contrib` 0.164.0 → 0.165.0 (0 fixable CRITICAL/HIGH). Paketo builder digest bumped (b25cf90a):
+  the Liberica helper binary carried golang.org/x/net 0.61.0 (CVE-2026-78661, HIGH, fixed 0.62.0).
 - CI workflow hygiene (Sonar githubactions/yaml): `inputs.*` reach the shell through `env` (script injection),
   CLI deps installed wheel-only with no build scripts (`uv sync --no-build --no-install-project`, tests import `src/`),
   fixture password read from the realm fixture instead of three literals, curl HTTPS-only, a `case` default.
